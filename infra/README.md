@@ -1,54 +1,48 @@
-# MSBN Transcript Verification — Infrastructure
+# infra
 
-AWS CDK (Python) project for the MSBN transcript verification pipeline.
+CDK app (Python) for the transcript verification pipeline.
+Synthesizes to a single CloudFormation stack: `MsbnTranscriptStack`.
 
 ## Prerequisites
 
-- Python 3.11+
-- Node.js 20+ (CDK CLI runs on Node)
+- Python 3.11
+- Node 20 (CDK CLI runs on Node)
 - AWS CDK CLI: `npm install -g aws-cdk`
-- AWS credentials configured for us-east-1
+- AWS credentials configured
 
-## Setup
+## Synth
 
-```bash
-cd infra/
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+Generate the CloudFormation template without deploying:
 
-## Bootstrap (one-time per account/region)
+    cd infra
+    cdk synth
 
-```bash
-cdk bootstrap aws://ACCOUNT_ID/us-east-1
-```
+Or from the project root:
 
-## Synthesize (validate templates without deploying)
+    make synth
 
-```bash
-cdk synth
-```
+Output goes to `cdk.out/`. Safe to run locally; no AWS calls are made.
 
-This generates CloudFormation templates in `cdk.out/`. Review them before
-any deployment.
+## Deploy
 
-## Project structure
+First-time setup requires a bootstrap step:
 
-```
-infra/
-  app.py                  CDK app entry point
-  cdk.json                CDK configuration
-  requirements.txt        Python dependencies
-  stacks/
-    msbn_transcript_stack.py   Main stack (composes all constructs)
-    storage.py                 S3 bucket + DynamoDB table
-    compute.py                 Lambda functions
-    api.py                     API Gateway + Cognito
-    workflow.py                Step Functions state machine
-```
+    cdk bootstrap
 
-## Deployment
+Then deploy:
 
-Do **not** deploy without team review and cost confirmation.
-See the root CLAUDE.md for budget constraints ($1,000 total).
+    cdk deploy
+
+Do not deploy without checking the cost constraints in the root CLAUDE.md.
+
+## Layout
+
+    app.py                       CDK app entry point
+    cdk.json                     CDK configuration
+    requirements.txt             Python deps (aws-cdk-lib, constructs)
+    stacks/
+      msbn_transcript_stack.py   Top-level stack; composes all constructs
+      storage.py                 S3 bucket + DynamoDB table
+      compute.py                 Lambda functions
+      api.py                     API Gateway + Cognito (stub)
+      workflow.py                Step Functions state machine (stub)

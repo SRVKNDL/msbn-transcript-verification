@@ -29,9 +29,9 @@ install:
 	    $(PYTHON) -m venv $$svc.venv; \
 	    $$svc.venv/bin/pip install --quiet -r $$svc/requirements.txt; \
 	done
-	@echo "==> tests: installing pytest"
+	@echo "==> tests: installing pytest + moto"
 	$(PYTHON) -m venv .venv-test
-	.venv-test/bin/pip install --quiet pytest
+	.venv-test/bin/pip install --quiet -r requirements-test.txt
 	@echo "==> frontend: installing Node deps"
 	cd frontend && npm install
 
@@ -45,8 +45,8 @@ synth:
 	cd infra && VIRTUAL_ENV=$(INFRA_VENV) PATH=$(INFRA_VENV)/bin:$$PATH JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION=1 cdk synth
 
 # ── test ───────────────────────────────────────────────────────────────────────
-# Run the full pytest suite.  No AWS credentials required — all handlers
-# are stubs at this stage.
+# Run the full pytest suite.  IntakeLambda tests use moto to mock DynamoDB;
+# no real AWS credentials required.
 test:
 	@echo "==> pytest"
 	.venv-test/bin/pytest

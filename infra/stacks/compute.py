@@ -85,19 +85,74 @@ class ComputeConstruct(Construct):
             s3.NotificationKeyFilter(prefix="uploads/"),
         )
 
-        # ── ExtractLambda (stub) ───────────────────────────────────────────────
+        # ── ExtractLambda ─────────────────────────────────────────────────────
+        # Stub for this slice; logic implemented in a later slice.
         # TODO: Deploy as a container image (poppler + pdf2image dependency,
         #   ~80 MB unzipped, exceeds Lambda zip limit).
-        #   Runtime: Python 3.11 container image (ECR — confirm with Hub team).
-        #   Code: services/extract/
+        #   Runtime: Python 3.11 container image (ECR — Q1 resolved, ECR enabled).
         #   memory_size: 1024 MB  timeout: Duration.minutes(5)
         #   IAM: Bedrock InvokeModel (Nova Lite + Pro ARNs), S3 GetObject on
         #        raw/, S3 PutObject on processed/, DynamoDB UpdateItem.
+        self.extract_lambda = lambda_.Function(
+            self,
+            "ExtractLambda",
+            function_name="msbn-extract",
+            runtime=lambda_.Runtime.PYTHON_3_11,
+            handler="handler.handler",
+            code=lambda_.Code.from_asset(
+                os.path.normpath(
+                    os.path.join(
+                        os.path.dirname(__file__), "../../services/extract"
+                    )
+                )
+            ),
+            memory_size=1024,
+            timeout=Duration.minutes(5),
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
 
-        # ── RuleEngineLambda (stub) ────────────────────────────────────────────
-        # TODO: Runtime: Python 3.11, Code: services/rule_engine/
-        #   IAM: S3 GetObject on processed/ and reference/,
+        # ── ValidateLambda (RuleEngine) ────────────────────────────────────────
+        # Stub; runs single-document validation rules in a later slice.
+        # TODO: IAM: S3 GetObject on processed/ and reference/,
         #        DynamoDB PutItem (FLAG items), UpdateItem (flag_count).
+        self.validate_lambda = lambda_.Function(
+            self,
+            "ValidateLambda",
+            function_name="msbn-validate",
+            runtime=lambda_.Runtime.PYTHON_3_11,
+            handler="handler.handler",
+            code=lambda_.Code.from_asset(
+                os.path.normpath(
+                    os.path.join(
+                        os.path.dirname(__file__), "../../services/rule_engine"
+                    )
+                )
+            ),
+            memory_size=512,
+            timeout=Duration.minutes(5),
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
+
+        # ── QueueForReviewLambda (Notify) ──────────────────────────────────────
+        # Stub; notifies reviewer queue via SNS in a later slice.
+        # TODO: IAM: SNS Publish on the reviewer-notification topic.
+        self.queue_for_review_lambda = lambda_.Function(
+            self,
+            "QueueForReviewLambda",
+            function_name="msbn-queue-for-review",
+            runtime=lambda_.Runtime.PYTHON_3_11,
+            handler="handler.handler",
+            code=lambda_.Code.from_asset(
+                os.path.normpath(
+                    os.path.join(
+                        os.path.dirname(__file__), "../../services/notify"
+                    )
+                )
+            ),
+            memory_size=256,
+            timeout=Duration.minutes(1),
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
 
         # ── CrossDocLambda (stub) ──────────────────────────────────────────────
         # TODO: Runtime: Python 3.11, Code: services/cross_doc/
@@ -108,10 +163,6 @@ class ComputeConstruct(Construct):
         # TODO: Runtime: Python 3.11, Code: services/population_check/
         #   IAM: DynamoDB Query on GSI2-LicenseDedup and GSI3-InstitutionCluster,
         #        PutItem (FLAG items).
-
-        # ── NotifyLambda (stub) ────────────────────────────────────────────────
-        # TODO: Runtime: Python 3.11, Code: services/notify/
-        #   IAM: SNS Publish on the reviewer-notification topic.
 
         # ── DashboardApiLambda (stub) ──────────────────────────────────────────
         # TODO: Runtime: Python 3.11, Code: services/dashboard_api/

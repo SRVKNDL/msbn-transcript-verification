@@ -4,6 +4,8 @@ Coverage:
 - DynamoDB item written with correct fields and key structure
 - S3 key parsing: normal, nested, no-prefix, URL-encoded, and malformed inputs
 - Structured log output includes applicationId
+- Step Functions execution is started with correct input and name
+- Step Functions client errors are handled: logged and re-raised
 """
 
 import json
@@ -13,6 +15,7 @@ import sys
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 # Fake credentials must be set before any boto3/botocore import so that moto
@@ -21,6 +24,13 @@ os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("TABLE_NAME", "msbn-applications")
+
+# Fake state machine ARN used throughout this test module.  Must be set before
+# importing the handler so that the module-level _STATE_MACHINE_ARN is populated.
+_FAKE_SFN_ARN = (
+    "arn:aws:states:us-east-1:123456789012:stateMachine:test-pipeline"
+)
+os.environ.setdefault("STATE_MACHINE_ARN", _FAKE_SFN_ARN)
 
 # Add the service directory to sys.path so the Lambda module can be imported
 # as-is, matching the Lambda execution environment.
@@ -37,20 +47,30 @@ _parse_s3_record = _intake._parse_s3_record
 
 _TABLE_NAME = "msbn-applications"
 
+# Minimal valid Step Functions state machine definition used by the test fixture.
+_SFN_STUB_DEFINITION = json.dumps(
+    {
+        "Comment": "test stub",
+        "StartAt": "Start",
+        "States": {"Start": {"Type": "Pass", "End": True}},
+    }
+)
+
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture()
 def dynamodb_table():
-    """Moto-backed DynamoDB table for the duration of one test.
+    """Moto-backed DynamoDB table and Step Functions state machine for one test.
 
-    The mock_aws() context manager is held open while the test runs (the
-    fixture yields inside it).  Because moto patches at the botocore HTTP
-    layer, the module-level _dynamodb resource in handler.py uses the mock
-    even though it was constructed before this fixture started.
+    The mock_aws() context manager patches at the botocore HTTP layer, so the
+    module-level _dynamodb resource and _sfn client in handler.py both use the
+    mock while the fixture is active, even though they were constructed before
+    this fixture started.
     """
     with mock_aws():
+        # DynamoDB table ───────────────────────────────────────────────────────
         dynamo = boto3.resource("dynamodb", region_name="us-east-1")
         table = dynamo.create_table(
             TableName=_TABLE_NAME,
@@ -64,6 +84,17 @@ def dynamodb_table():
             ],
             BillingMode="PAY_PER_REQUEST",
         )
+
+        # Step Functions state machine ──────────────────────────────────────────
+        # Must exist in the mock before the handler calls start_execution.
+        sfn_client = boto3.client("stepfunctions", region_name="us-east-1")
+        sfn_client.create_state_machine(
+            name="test-pipeline",
+            definition=_SFN_STUB_DEFINITION,
+            roleArn="arn:aws:iam::123456789012:role/test-role",
+            type="STANDARD",
+        )
+
         yield table
 
 
@@ -242,3 +273,78 @@ def test_log_includes_application_id(
     assert entry["applicationId"]
     assert entry["status"] == "INTAKE_COMPLETE"
     assert "s3Key" in entry
+
+
+# ── Step Functions integration ─────────────────────────────────────────────────
+
+
+def test_sfn_execution_started_with_correct_input(
+    dynamodb_table, uploads_s3_event, lambda_context
+):
+    """Handler must start a Step Functions execution with applicationId, s3Key, and bucket."""
+    handler(uploads_s3_event, lambda_context)
+
+    sfn_client = boto3.client("stepfunctions", region_name="us-east-1")
+    executions = sfn_client.list_executions(stateMachineArn=_FAKE_SFN_ARN)[
+        "executions"
+    ]
+    assert len(executions) == 1
+
+    # Fetch full execution details to inspect the input.
+    execution = sfn_client.describe_execution(
+        executionArn=executions[0]["executionArn"]
+    )
+    payload = json.loads(execution["input"])
+
+    assert payload["s3Key"] == "uploads/TRANSCRIPT_sample.pdf"
+    assert payload["bucket"] == "msbn-transcripts-dev"
+    assert "applicationId" in payload
+    assert payload["pk"] == f"APP#{payload['applicationId']}"
+
+
+def test_sfn_execution_name_matches_application_id(
+    dynamodb_table, uploads_s3_event, lambda_context
+):
+    """Execution name must be the applicationId for idempotency and traceability."""
+    response = handler(uploads_s3_event, lambda_context)
+    body = json.loads(response["body"])
+    application_id = body["applications"][0]["applicationId"]
+
+    sfn_client = boto3.client("stepfunctions", region_name="us-east-1")
+    executions = sfn_client.list_executions(stateMachineArn=_FAKE_SFN_ARN)[
+        "executions"
+    ]
+    assert len(executions) == 1
+    assert executions[0]["name"] == application_id
+
+
+def test_sfn_client_error_logs_and_raises(
+    dynamodb_table, uploads_s3_event, lambda_context, monkeypatch, caplog
+):
+    """If Step Functions raises a ClientError, handler must log it and re-raise.
+
+    S3 event sources retry failed Lambda invocations, so re-raising is correct.
+    The DynamoDB METADATA item is already written before the SFN call, so
+    re-raising does not risk duplicate DynamoDB writes (put_item is idempotent
+    on the same PK/SK, and the applicationId is generated fresh on each retry).
+    """
+    def _raise(*args, **kwargs):
+        raise ClientError(
+            {"Error": {"Code": "StateMachineDoesNotExist", "Message": "not found"}},
+            "StartExecution",
+        )
+
+    monkeypatch.setattr(_intake._sfn, "start_execution", _raise)
+
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(ClientError):
+            handler(uploads_s3_event, lambda_context)
+
+    error_logs = [
+        json.loads(m)
+        for m in caplog.messages
+        if m.startswith("{") and "failed to start" in m
+    ]
+    assert error_logs, "Expected a structured error log for the SFN failure"
+    assert "applicationId" in error_logs[0]
+    assert "errorCode" in error_logs[0]

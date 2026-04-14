@@ -64,7 +64,6 @@ class ComputeConstruct(Construct):
             log_retention=logs.RetentionDays.ONE_WEEK,
             environment={
                 "TABLE_NAME": storage.table.table_name,
-                "BUCKET_NAME": storage.bucket.bucket_name,
             },
         )
 

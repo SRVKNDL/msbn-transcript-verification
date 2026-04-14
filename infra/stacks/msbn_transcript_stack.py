@@ -36,6 +36,7 @@ class MsbnTranscriptStack(cdk.Stack):
             self,
             "Workflow",
             extract_lambda=compute.extract_lambda,
+            aggregate_lambda=compute.aggregate_lambda,
             validate_lambda=compute.validate_lambda,
             queue_for_review_lambda=compute.queue_for_review_lambda,
             table=storage.table,

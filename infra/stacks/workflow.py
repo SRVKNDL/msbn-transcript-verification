@@ -2,8 +2,9 @@
 
 Pipeline states (this slice — skeleton only):
   1. Extract      — invoke ExtractLambda
-  2. Validate     — invoke ValidateLambda (RuleEngine)
-  3. QueueForReview — invoke QueueForReviewLambda (Notify)
+  2. Aggregate    — invoke AggregationLambda (cross-document field comparison)
+  3. Validate     — invoke ValidateLambda (RuleEngine)
+  4. QueueForReview — invoke QueueForReviewLambda (Notify)
 
 Full pipeline from architecture-plan.md Section 1.2 will expand these states
 in subsequent slices (Parallel Map for extraction, CrossDoc, PopulationCheck,
@@ -50,6 +51,7 @@ class WorkflowConstruct(Construct):
         construct_id: str,
         *,
         extract_lambda: lambda_.IFunction,
+        aggregate_lambda: lambda_.IFunction,
         validate_lambda: lambda_.IFunction,
         queue_for_review_lambda: lambda_.IFunction,
         table: dynamodb.ITable,
@@ -110,6 +112,13 @@ class WorkflowConstruct(Construct):
             comment="Invoke ExtractLambda: PDF → page images → Bedrock extraction JSON",
         )
 
+        aggregate_task = self._lambda_task(
+            "Aggregate",
+            aggregate_lambda,
+            write_failed,
+            comment="Invoke AggregationLambda: compare CROSS_* fields across all extraction JSONs",
+        )
+
         validate_task = self._lambda_task(
             "Validate",
             validate_lambda,
@@ -132,7 +141,7 @@ class WorkflowConstruct(Construct):
             # Standard Workflow: persists full execution history for SP-9 audit trail.
             state_machine_type=sfn.StateMachineType.STANDARD,
             definition_body=sfn.DefinitionBody.from_chainable(
-                extract_task.next(validate_task).next(queue_task)
+                extract_task.next(aggregate_task).next(validate_task).next(queue_task)
             ),
             logs=sfn.LogOptions(
                 destination=log_group,

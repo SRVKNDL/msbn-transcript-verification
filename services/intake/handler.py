@@ -1,9 +1,12 @@
-"""IntakeLambda — S3 PUT event → DynamoDB application record.
+"""IntakeLambda — S3 PUT event → DynamoDB application record → Step Functions start.
 
 Triggered by S3 ObjectCreated events on the transcripts bucket (uploads/ prefix).
 For each uploaded PDF, generates a unique applicationId, creates a METADATA item in
-DynamoDB, and emits a structured JSON log.  Step Functions invocation is deferred to
-the next slice; see the TODO block below.
+DynamoDB, then starts the Step Functions pipeline execution with the applicationId
+as the execution name (idempotency + traceability).
+
+If the Step Functions call fails, the handler logs a structured error and re-raises
+so that the S3 event source retries delivery.
 """
 
 import json
@@ -14,15 +17,19 @@ from datetime import datetime, timezone
 from urllib.parse import unquote_plus
 
 import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Module-level resource is created once per cold start and re-used across
-# warm invocations.  boto3.resource() makes no network calls at construction
-# time, so moto can safely patch the underlying botocore session later.
+# Module-level resources are created once per cold start and re-used across
+# warm invocations.  boto3 clients make no network calls at construction time,
+# so moto can safely patch the underlying botocore session later.
 _dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+_sfn = boto3.client("stepfunctions", region_name="us-east-1")
+
 _TABLE_NAME = os.environ.get("TABLE_NAME", "msbn-applications")
+_STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "")
 
 
 def handler(event: dict, context) -> dict:
@@ -73,7 +80,8 @@ def _parse_s3_record(record: dict) -> tuple:
 
 
 def _process_record(record: dict) -> dict:
-    """Write a METADATA item to DynamoDB and return the new applicationId."""
+    """Write a METADATA item to DynamoDB, start the Step Functions pipeline, and
+    return the new applicationId."""
     bucket, s3_key, size_bytes, original_filename = _parse_s3_record(record)
 
     # UUID v4 (stdlib) chosen to avoid extra dependencies.
@@ -110,18 +118,55 @@ def _process_record(record: dict) -> dict:
         )
     )
 
-    # TODO: Start Step Functions execution with applicationId and document manifest.
-    #
-    #   sfn = boto3.client("stepfunctions", region_name="us-east-1")
-    #   sfn.start_execution(
-    #       stateMachineArn=os.environ["STATE_MACHINE_ARN"],
-    #       name=application_id,
-    #       input=json.dumps({
-    #           "applicationId": application_id,
-    #           "bucket": bucket,
-    #           "s3Key": s3_key,
-    #           "originalFilename": original_filename,
-    #       }),
-    #   )
+    _start_pipeline(application_id=application_id, bucket=bucket, s3_key=s3_key)
 
     return {"applicationId": application_id, "s3Key": s3_key}
+
+
+def _start_pipeline(*, application_id: str, bucket: str, s3_key: str) -> None:
+    """Start the Step Functions pipeline execution for this application.
+
+    Uses applicationId as the execution name for idempotency and traceability
+    (one application → one execution, easy to correlate in CloudWatch and the
+    Step Functions console).
+
+    Logs and re-raises on failure so that the S3 event source retries delivery.
+    """
+    execution_input = json.dumps(
+        {
+            "applicationId": application_id,
+            "bucket": bucket,
+            "s3Key": s3_key,
+            # Precomputed DynamoDB partition key; the pipeline's catch handler
+            # uses this to write FAILED status without an intrinsic-function
+            # string-format step.
+            "pk": f"APP#{application_id}",
+        }
+    )
+    try:
+        response = _sfn.start_execution(
+            stateMachineArn=_STATE_MACHINE_ARN,
+            name=application_id,
+            input=execution_input,
+        )
+        logger.info(
+            json.dumps(
+                {
+                    "message": "IntakeLambda started Step Functions execution",
+                    "applicationId": application_id,
+                    "executionArn": response["executionArn"],
+                }
+            )
+        )
+    except ClientError as exc:
+        logger.error(
+            json.dumps(
+                {
+                    "message": "IntakeLambda: failed to start Step Functions execution",
+                    "applicationId": application_id,
+                    "error": str(exc),
+                    "errorCode": exc.response["Error"]["Code"],
+                }
+            )
+        )
+        raise

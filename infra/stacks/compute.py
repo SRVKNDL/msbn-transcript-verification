@@ -4,9 +4,10 @@ Only IntakeLambda is implemented in this slice.  All other Lambdas remain as
 stubs with TODO comments; their IAM and packaging notes are preserved so the
 next developer can fill them in without re-reading the architecture doc.
 
-Seven Lambda functions (architecture-plan.md Section 1):
+Eight Lambda functions (architecture-plan.md Section 1):
   IntakeLambda          — implemented here
   ExtractLambda         — stub (needs container image + poppler)
+  AggregationLambda     — stub (cross-document field comparison)
   RuleEngineLambda      — stub
   CrossDocLambda        — stub
   PopulationCheckLambda — stub
@@ -107,6 +108,30 @@ class ComputeConstruct(Construct):
                 )
             ),
             memory_size=1024,
+            timeout=Duration.minutes(5),
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
+
+        # ── AggregationLambda ─────────────────────────────────────────────────
+        # Stub; cross-document field comparison implemented in a later slice.
+        # Runs once per application after all ExtractLambda invocations complete.
+        # TODO: IAM: S3 GetObject on processed/ (all extraction JSONs),
+        #        S3 PutObject on processed/ (aggregation.json),
+        #        DynamoDB UpdateItem (aggregation S3 path).
+        self.aggregate_lambda = lambda_.Function(
+            self,
+            "AggregationLambda",
+            function_name="msbn-aggregate",
+            runtime=lambda_.Runtime.PYTHON_3_11,
+            handler="handler.handler",
+            code=lambda_.Code.from_asset(
+                os.path.normpath(
+                    os.path.join(
+                        os.path.dirname(__file__), "../../services/aggregate"
+                    )
+                )
+            ),
+            memory_size=512,
             timeout=Duration.minutes(5),
             log_retention=logs.RetentionDays.ONE_WEEK,
         )

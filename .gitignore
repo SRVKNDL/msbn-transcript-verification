@@ -65,8 +65,6 @@ db.sqlite3-journal
 instance/
 .webassets-cache
 CLAUDE.md
-docs/
-design/
 
 # Scrapy stuff:
 .scrapy

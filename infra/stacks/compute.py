@@ -136,9 +136,9 @@ class ComputeConstruct(Construct):
         )
 
         # ── ValidateLambda (RuleEngine) ────────────────────────────────────────
-        # Stub; runs single-document validation rules in a later slice.
-        # TODO: IAM: S3 GetObject on processed/ and reference/,
-        #        DynamoDB PutItem (FLAG items), UpdateItem (flag_count).
+        # Deterministic rule engine: reads aggregation.json from S3, evaluates
+        # PHYS/CONT/PROG/CROSS rules, writes FLAG items to DynamoDB.
+        # No Bedrock calls — pure Python logic only.
         self.validate_lambda = lambda_.Function(
             self,
             "ValidateLambda",
@@ -153,9 +153,23 @@ class ComputeConstruct(Construct):
                 )
             ),
             memory_size=512,
-            timeout=Duration.minutes(5),
+            timeout=Duration.seconds(30),
             log_retention=logs.RetentionDays.ONE_WEEK,
+            environment={
+                "TABLE_NAME": storage.table.table_name,
+                "BUCKET_NAME": storage.bucket.bucket_name,
+            },
         )
+
+        # Least-privilege IAM for ValidateLambda ──────────────────────────────
+        # PutItem only: the rule engine writes FLAG records; it never modifies
+        # existing application or metadata items.
+        storage.table.grant(self.validate_lambda, "dynamodb:PutItem")
+
+        # GetObject on processed/ only: aggregation.json lives under this prefix.
+        # Reference tables (accreditation list, grading scales) will be under
+        # reference/ in Phase 3; add GetObject on reference/* at that point.
+        storage.bucket.grant_read(self.validate_lambda, "processed/*")
 
         # ── QueueForReviewLambda (Notify) ──────────────────────────────────────
         # Stub; notifies reviewer queue via SNS in a later slice.

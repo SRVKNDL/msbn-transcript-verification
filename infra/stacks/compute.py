@@ -171,9 +171,10 @@ class ComputeConstruct(Construct):
         # reference/ in Phase 3; add GetObject on reference/* at that point.
         storage.bucket.grant_read(self.validate_lambda, "processed/*")
 
-        # ── QueueForReviewLambda (Notify) ──────────────────────────────────────
-        # Stub; notifies reviewer queue via SNS in a later slice.
-        # TODO: IAM: SNS Publish on the reviewer-notification topic.
+        # ── QueueForReviewLambda ───────────────────────────────────────────────
+        # Final pipeline state: updates METADATA to READY_FOR_REVIEW,
+        # sets GSI1PK/GSI1SK for the review-queue GSI, and writes an
+        # AUDIT record. No SNS publish yet — that is a Phase 3 addition.
         self.queue_for_review_lambda = lambda_.Function(
             self,
             "QueueForReviewLambda",
@@ -187,9 +188,24 @@ class ComputeConstruct(Construct):
                     )
                 )
             ),
-            memory_size=256,
-            timeout=Duration.minutes(1),
+            memory_size=512,
+            timeout=Duration.seconds(30),
             log_retention=logs.RetentionDays.ONE_WEEK,
+            environment={
+                "TABLE_NAME": storage.table.table_name,
+            },
+        )
+
+        # Least-privilege IAM for QueueForReviewLambda ────────────────────────
+        # UpdateItem: mutates the existing METADATA record (status, flag_count,
+        #   GSI keys, timestamps). Does not need PutItem for METADATA.
+        # PutItem: creates the append-only AUDIT record. Does not need UpdateItem
+        #   on AUDIT items (they are never modified after creation).
+        # Both actions scoped to the single applications table.
+        storage.table.grant(
+            self.queue_for_review_lambda,
+            "dynamodb:UpdateItem",
+            "dynamodb:PutItem",
         )
 
         # ── CrossDocLambda (stub) ──────────────────────────────────────────────

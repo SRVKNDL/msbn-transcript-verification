@@ -17,11 +17,6 @@ from rules.content import (
     check_cont_005,
     check_cont_006,
 )
-from rules.cross_document import (
-    check_cross_001,
-    check_cross_002,
-    check_cross_003,
-)
 from rules.physical import (
     check_phys_001,
     check_phys_002,
@@ -53,15 +48,13 @@ ALL_RULES = [
     check_prog_001,
     check_prog_002,
     check_prog_003,
-    # SP-1 / SP-4 — Cross-document consistency
-    check_cross_001,
-    check_cross_002,
-    check_cross_003,
+    # SP-1 / SP-4 — Cross-document consistency (CROSS_001–003 deferred to Phase 4;
+    # MSBN confirmed transcript-only scope for the POC on 2026-04-15)
 ]
 
 RULE_CODES = [
     "PHYS_001", "PHYS_002", "PHYS_003", "PHYS_004", "PHYS_005",
     "CONT_001", "CONT_002", "CONT_003", "CONT_004", "CONT_005", "CONT_006",
     "PROG_001", "PROG_002", "PROG_003",
-    "CROSS_001", "CROSS_002", "CROSS_003",
+    # CROSS_001, CROSS_002, CROSS_003 deferred to Phase 4 (multi-document support)
 ]

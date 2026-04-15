@@ -137,16 +137,14 @@ def test_fraud_case_b_produces_multiple_flags(aws_resources, lambda_context):
 
     assert result["flag_count"] > 5
     rule_codes = {f["rule_code"] for f in result["flags"]}
-    # Check that representative rules across all categories fired
+    # Check that representative rules across all single-document categories fired.
+    # CROSS_001/002/003 are deferred to Phase 4 (transcript-only POC scope).
     assert "PHYS_001" in rule_codes
     assert "PHYS_002" in rule_codes
     assert "CONT_003" in rule_codes
     assert "PROG_001" in rule_codes
     assert "PROG_002" in rule_codes
     assert "PROG_003" in rule_codes
-    assert "CROSS_001" in rule_codes
-    assert "CROSS_002" in rule_codes
-    assert "CROSS_003" in rule_codes
 
 
 # ── DynamoDB persistence ───────────────────────────────────────────────────────

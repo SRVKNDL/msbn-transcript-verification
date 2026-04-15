@@ -43,22 +43,13 @@ The workflow executes the following states in order:
 [Update Status: EXTRACTING]
        |
        v
-[Parallel: Extract each document]
-  |-- ExtractLambda (document 1 — transcript)
-  |-- ExtractLambda (document 2 — diploma)
-  `-- ExtractLambda (document N — ...)
-       |
-       v
-[AggregationLambda — cross-document field comparison (CROSS_* fields)]
+[ExtractLambda — transcript only (POC scope, Phases 2–3)]
        |
        v
 [Update Status: EVALUATING]
        |
        v
-[RuleEngineLambda — single-document rules (PHYS, CONT, PROG per doc)]
-       |
-       v
-[CrossDocLambda — cross-document rules (CROSS_001-003)]
+[RuleEngineLambda — single-document rules (PHYS, CONT, PROG)]
        |
        v
 [PopulationCheckLambda — population-level rules (POP_001-003)]
@@ -69,6 +60,15 @@ The workflow executes the following states in order:
        v
 [NotifyLambda — email reviewer queue via SNS]
 ```
+
+> **Phase 4 additions (multi-document support):** MSBN confirmed on 2026-04-15 that the
+> POC accepts transcripts only. The following steps are deferred to Phase 4:
+> - Parallel `Map` state extracting diploma, CEA report, and affidavit of graduation
+> - **AggregationLambda** — cross-document field comparison (produces CROSS_* fields)
+> - **CrossDocLambda** — cross-document rules (CROSS_001, CROSS_002, CROSS_003)
+>
+> When Phase 4 begins, re-enable the `Map` state, add AggregationLambda and CrossDocLambda
+> back into the Step Functions definition, and restore CROSS_001–003 in the rule registry.
 
 **Standard Workflow** (not Express) is used because Standard persists full execution history,
 which is part of the audit trail. See Section 7, SP-9.
@@ -565,10 +565,10 @@ or both.
 
 | Safe Practice | Type | System Component(s) |
 |---|---|---|
-| **SP-1** — Verification of Applicant Identity | Automated rule | CROSS_001 runs in CrossDocLambda after all documents extracted. Fuzzy name match across all document extractions. |
+| **SP-1** — Verification of Applicant Identity | Automated rule *(Phase 4)* | CROSS_001 deferred to Phase 4 (multi-document support). Runs in CrossDocLambda after all documents extracted; fuzzy name match across all document extractions. Not active in POC (transcript-only scope). |
 | **SP-2** — No Previous Denial of Licensure | Automated rule + workflow | POP_001 runs in PopulationCheckLambda (DynamoDB GSI2 query). Dashboard surfaces a "Nursys verification required" badge; reviewer must check Nursys and log acknowledgment before approving. |
 | **SP-3** — No Disciplinary Action or BON Alert | Workflow only | No automated rule. Dashboard renders a mandatory "Nursys disciplinary check completed" checkbox per NRB Policy 6. This checkbox must be checked before the DECISION record can be submitted. Enforced in the Dashboard API Lambda (returns error if checkbox is not checked on submit). |
-| **SP-4** — Analysis of Authenticity of Documents | Automated rules | PHYS_001–005 run in RuleEngineLambda using Bedrock's visual extraction output. CROSS_002, CROSS_003, PROG_002 also run here. PHYS_002 cross-references the `institution_seal_types.json` lookup table. |
+| **SP-4** — Analysis of Authenticity of Documents | Automated rules | PHYS_001–005 and PROG_002 run in RuleEngineLambda using Bedrock's visual extraction output. PHYS_002 cross-references the `institution_seal_types.json` lookup table. CROSS_002 and CROSS_003 are deferred to Phase 4 (multi-document support). |
 | **SP-5** — Analysis of Educational Chronology | Automated rules | CONT_001–006, PROG_001, PROG_003 all run in RuleEngineLambda using structured extraction. These are the highest-density rule group — eight rules, all pure Python against reference tables. |
 | **SP-6** — Verification of Licensure | Workflow only | Dashboard renders the extracted home-country license number as a prominent field with a one-click deep-link to `nursys.org` pre-filled with the number. Reviewer must log acknowledgment. |
 | **SP-7** — Criminal Background Checks | Workflow only | Application form self-disclosure responses are captured in the METADATA item. Dashboard highlights any "yes" responses. External fingerprint process is out of scope; system records that it occurred. |

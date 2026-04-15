@@ -155,12 +155,15 @@ and Safe Practice category. Severity reflects risk to public safety if undetecte
 
 ### SP-1 — Verification of Applicant Identity
 
-**CROSS_001 — CROSS_DOC_NAME_MISMATCH**
+**CROSS_001 — CROSS_DOC_NAME_MISMATCH** *(Phase 4 — multi-document support)*
 - **Description:** Applicant name (or aliases) differs across transcript, diploma, application,
   and licensure documents beyond expected transliteration variation.
 - **Detection logic:** Extract name fields from all submitted documents. Apply fuzzy matching;
   flag pairs where similarity falls below threshold and no alias explanation is provided.
 - **Severity:** High
+- **Status:** Deferred. MSBN confirmed (2026-04-15) that the POC accepts transcripts only.
+  No diploma, CEA report, or affidavit of graduation is in scope for Phases 2–3.
+  Re-enable when multi-document upload is added in Phase 4.
 
 ---
 
@@ -233,18 +236,20 @@ and Safe Practice category. Severity reflects risk to public safety if undetecte
   artifacts are present and document provenance claims original.
 - **Severity:** Medium
 
-**CROSS_002 — CROSS_DOC_INSTITUTION_MISMATCH**
+**CROSS_002 — CROSS_DOC_INSTITUTION_MISMATCH** *(Phase 4 — multi-document support)*
 - **Description:** Institution name or ID differs across transcript, diploma, and application.
 - **Detection logic:** Extract institution identifiers from all documents. Flag if normalized
   names do not match and no transfer or dual-enrollment explanation is present.
 - **Severity:** High
+- **Status:** Deferred. Same reason as CROSS_001. Re-enable in Phase 4.
 
-**CROSS_003 — CROSS_DOC_DATE_MISMATCH**
+**CROSS_003 — CROSS_DOC_DATE_MISMATCH** *(Phase 4 — multi-document support)*
 - **Description:** Graduation or completion dates differ across transcript, diploma, and
   credentials evaluation report.
 - **Detection logic:** Extract all date fields by document type; flag any date delta > 90 days
   for the same event across documents.
 - **Severity:** High
+- **Status:** Deferred. Same reason as CROSS_001. Re-enable in Phase 4.
 
 **PROG_002 — MISSING_GRADUATION_CONFIRMATION**
 - **Description:** Transcript does not include a graduation date, degree conferral statement,

@@ -1,2 +1,4 @@
-boto3
 pdf2image
+pypdf
+pillow
+boto3

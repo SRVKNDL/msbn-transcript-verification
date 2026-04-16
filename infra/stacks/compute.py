@@ -86,15 +86,13 @@ class ComputeConstruct(Construct):
         # 250 MB zip limit, so this function uses a Docker image asset built
         # from services/extract/Dockerfile.  ECR is enabled (Q1 resolved).
         #
-        # Session 1: skeleton only — PDF → images → stub JSON.
-        # Session 2: add Bedrock Nova invocation per page + Bedrock IAM.
+        # Session 2: Bedrock Nova invocation per page.
         #
-        # IAM (Session 1):
-        #   s3:GetObject  on uploads/*  — download source PDF
-        #   s3:PutObject  on processed/* — write page images + extraction JSON
-        # IAM (TODO Session 2):
-        #   bedrock:InvokeModel for Nova Lite and Pro ARNs
-        #   dynamodb:UpdateItem to write DOCUMENT item after extraction
+        # IAM:
+        #   s3:GetObject     on uploads/*   — download source PDF
+        #   s3:PutObject     on processed/* — write page images + extraction JSON
+        #   bedrock:InvokeModel scoped to Nova Lite and Pro ARNs in us-east-1
+        #   dynamodb:PutItem on applications table — write DOCUMENT#TRANSCRIPT record
         self.extract_lambda = lambda_.DockerImageFunction(
             self,
             "ExtractLambda",
@@ -113,6 +111,8 @@ class ComputeConstruct(Construct):
             log_retention=logs.RetentionDays.ONE_WEEK,
             environment={
                 "BUCKET_NAME": storage.bucket.bucket_name,
+                # Default to Nova Lite; override with Nova Pro for complex docs.
+                "BEDROCK_MODEL_ID": "amazon.nova-lite-v1:0",
             },
         )
 
@@ -122,6 +122,21 @@ class ComputeConstruct(Construct):
         # PutObject on processed/*: write page images and extraction JSON.
         # grant_put also adds s3:AbortMultipartUpload for large-object uploads.
         storage.bucket.grant_put(self.extract_lambda, "processed/*")
+
+        # bedrock:InvokeModel scoped to the Nova model family in us-east-1.
+        # Covers both Nova Lite (default) and Nova Pro (high-complexity fallback).
+        self.extract_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeModel"],
+                resources=[
+                    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-*"
+                ],
+            )
+        )
+
+        # PutItem to write the DOCUMENT#TRANSCRIPT record after extraction.
+        # ExtractLambda never reads or updates existing items.
+        storage.table.grant(self.extract_lambda, "dynamodb:PutItem")
 
         # ── AggregationLambda ─────────────────────────────────────────────────
         # Stub; cross-document field comparison implemented in a later slice.

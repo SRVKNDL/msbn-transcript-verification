@@ -1,17 +1,12 @@
 """Compute construct: Lambda functions for the MSBN processing pipeline.
 
-Only IntakeLambda is implemented in this slice.  All other Lambdas remain as
-stubs with TODO comments; their IAM and packaging notes are preserved so the
-next developer can fill them in without re-reading the architecture doc.
-
-Eight Lambda functions (architecture-plan.md Section 1):
-  IntakeLambda          — implemented here
-  ExtractLambda         — stub (needs container image + poppler)
+Lambda functions (architecture-plan.md Section 1):
+  IntakeLambda          — zip deploy; S3-triggered
+  ExtractLambda         — container image (poppler + pdf2image); Session 1 skeleton
   AggregationLambda     — stub (cross-document field comparison)
-  RuleEngineLambda      — stub
-  CrossDocLambda        — stub
+  RuleEngineLambda      — implemented (17 rules → 14 active)
+  CrossDocLambda        — stub (Phase 4)
   PopulationCheckLambda — stub
-  NotifyLambda          — stub
   DashboardApiLambda    — stub
 """
 
@@ -19,6 +14,7 @@ import os
 
 from aws_cdk import (
     Duration,
+    aws_iam as iam,
     aws_lambda as lambda_,
     aws_logs as logs,
     aws_s3 as s3,
@@ -86,30 +82,46 @@ class ComputeConstruct(Construct):
         )
 
         # ── ExtractLambda ─────────────────────────────────────────────────────
-        # Stub for this slice; logic implemented in a later slice.
-        # TODO: Deploy as a container image (poppler + pdf2image dependency,
-        #   ~80 MB unzipped, exceeds Lambda zip limit).
-        #   Runtime: Python 3.11 container image (ECR — Q1 resolved, ECR enabled).
-        #   memory_size: 1024 MB  timeout: Duration.minutes(5)
-        #   IAM: Bedrock InvokeModel (Nova Lite + Pro ARNs), S3 GetObject on
-        #        raw/, S3 PutObject on processed/, DynamoDB UpdateItem.
-        self.extract_lambda = lambda_.Function(
+        # Container image Lambda: poppler-utils + pdf2image + pillow exceed the
+        # 250 MB zip limit, so this function uses a Docker image asset built
+        # from services/extract/Dockerfile.  ECR is enabled (Q1 resolved).
+        #
+        # Session 1: skeleton only — PDF → images → stub JSON.
+        # Session 2: add Bedrock Nova invocation per page + Bedrock IAM.
+        #
+        # IAM (Session 1):
+        #   s3:GetObject  on uploads/*  — download source PDF
+        #   s3:PutObject  on processed/* — write page images + extraction JSON
+        # IAM (TODO Session 2):
+        #   bedrock:InvokeModel for Nova Lite and Pro ARNs
+        #   dynamodb:UpdateItem to write DOCUMENT item after extraction
+        self.extract_lambda = lambda_.DockerImageFunction(
             self,
             "ExtractLambda",
             function_name="msbn-extract",
-            runtime=lambda_.Runtime.PYTHON_3_11,
-            handler="handler.handler",
-            code=lambda_.Code.from_asset(
+            code=lambda_.DockerImageCode.from_image_asset(
                 os.path.normpath(
                     os.path.join(
                         os.path.dirname(__file__), "../../services/extract"
                     )
                 )
             ),
-            memory_size=1024,
+            # 2 GB: PDF rendering (pdf2image) and in-memory page images can be
+            # large; 512 MB default causes OOM on multi-page transcripts.
+            memory_size=2048,
             timeout=Duration.minutes(5),
             log_retention=logs.RetentionDays.ONE_WEEK,
+            environment={
+                "BUCKET_NAME": storage.bucket.bucket_name,
+            },
         )
+
+        # Least-privilege IAM for ExtractLambda ───────────────────────────────
+        # GetObject on uploads/*: download the source PDF.
+        storage.bucket.grant_read(self.extract_lambda, "uploads/*")
+        # PutObject on processed/*: write page images and extraction JSON.
+        # grant_put also adds s3:AbortMultipartUpload for large-object uploads.
+        storage.bucket.grant_put(self.extract_lambda, "processed/*")
 
         # ── AggregationLambda ─────────────────────────────────────────────────
         # Stub; cross-document field comparison implemented in a later slice.

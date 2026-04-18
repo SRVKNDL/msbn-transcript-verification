@@ -18,6 +18,7 @@ DynamoDB single-table design (architecture-plan.md Section 4.2, Q11 provisional)
 """
 
 from aws_cdk import (
+    Duration,
     RemovalPolicy,
     aws_dynamodb as dynamodb,
     aws_s3 as s3,
@@ -47,6 +48,12 @@ class StorageConstruct(Construct):
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             enforce_ssl=True,
             removal_policy=RemovalPolicy.RETAIN,
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    noncurrent_version_expiration=Duration.days(30),
+                    abort_incomplete_multipart_upload_after=Duration.days(7),
+                ),
+            ],
         )
 
         # ── DynamoDB table ─────────────────────────────────────────────────────

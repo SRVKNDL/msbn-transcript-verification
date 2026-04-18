@@ -49,9 +49,11 @@ class ApiConstruct(Construct):
             ),
             mfa=cognito.Mfa.OPTIONAL,
             password_policy=cognito.PasswordPolicy(
-                min_length=8,
+                min_length=12,
                 require_uppercase=True,
+                require_lowercase=True,
                 require_digits=True,
+                require_symbols=True,
             ),
         )
 
@@ -81,6 +83,14 @@ class ApiConstruct(Construct):
                 allow_headers=["Content-Type", "Authorization"],
             ),
         )
+
+        # ── Throttling ────────────────────────────────────────────────────────
+        # POC-scale limits. Raise for production traffic.
+        cfn_stage = self.http_api.default_stage.node.default_child
+        cfn_stage.add_property_override("DefaultRouteSettings", {
+            "ThrottlingBurstLimit": 50,
+            "ThrottlingRateLimit": 25,
+        })
 
         # ── JWT Authorizer ────────────────────────────────────────────────────
         authorizer = apigwv2_auth.HttpJwtAuthorizer(

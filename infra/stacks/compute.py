@@ -93,6 +93,10 @@ class ComputeConstruct(Construct):
         #   s3:PutObject     on processed/* — write page images + extraction JSON
         #   bedrock:InvokeModel scoped to Nova Lite and Pro ARNs in us-east-1
         #   dynamodb:PutItem on applications table — write DOCUMENT#TRANSCRIPT record
+        # Runaway-Bedrock protection:
+        # - Timeout caps per-invocation cost (180s vs the 15-min Lambda max).
+        # - Reserved concurrency caps total parallel Bedrock spend in the
+        #   event of an S3 event storm.
         self.extract_lambda = lambda_.DockerImageFunction(
             self,
             "ExtractLambda",
@@ -107,7 +111,8 @@ class ComputeConstruct(Construct):
             # 2 GB: PDF rendering (pdf2image) and in-memory page images can be
             # large; 512 MB default causes OOM on multi-page transcripts.
             memory_size=2048,
-            timeout=Duration.minutes(5),
+            timeout=Duration.seconds(180),
+            reserved_concurrent_executions=5,
             log_retention=logs.RetentionDays.ONE_WEEK,
             environment={
                 "BUCKET_NAME": storage.bucket.bucket_name,
@@ -123,13 +128,14 @@ class ComputeConstruct(Construct):
         # grant_put also adds s3:AbortMultipartUpload for large-object uploads.
         storage.bucket.grant_put(self.extract_lambda, "processed/*")
 
-        # bedrock:InvokeModel scoped to the Nova model family in us-east-1.
-        # Covers both Nova Lite (default) and Nova Pro (high-complexity fallback).
+        # bedrock:InvokeModel scoped to the two specific Nova models we use.
+        # Nova Lite is the default; Nova Pro is the high-complexity fallback.
         self.extract_lambda.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=[
-                    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-*"
+                    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0",
+                    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
                 ],
             )
         )
@@ -157,7 +163,7 @@ class ComputeConstruct(Construct):
                 )
             ),
             memory_size=512,
-            timeout=Duration.minutes(5),
+            timeout=Duration.seconds(60),
             log_retention=logs.RetentionDays.ONE_WEEK,
             environment={
                 "BUCKET_NAME": storage.bucket.bucket_name,

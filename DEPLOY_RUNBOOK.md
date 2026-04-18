@@ -48,10 +48,37 @@
    - The ECR image for the Extract Lambda has been manually built
      and pushed to the account's ECR repository.
 
-## Deploy command
+## Phased deploy order
+
+The system is split into four CDK stacks with explicit dependencies.
+Deploy in this order:
+
+```
+1. MsbnStorageStack   — S3 bucket + DynamoDB table (no dependencies)
+2. MsbnAuthStack      — Cognito User Pool + Client (no dependencies)
+3. MsbnComputeStack   — Lambdas + Step Functions (depends on Storage)
+4. MsbnApiStack       — API Gateway + JWT authorizer (depends on Compute + Auth)
+```
+
+Stacks 1 and 2 have no dependencies and can be deployed in parallel.
+Stack 3 requires Stack 1. Stack 4 requires Stacks 2 and 3.
+
+### Deploy commands
+
+Deploy one stack at a time (recommended for first deploy):
 
 ```bash
-cdk deploy
+cd infra
+cdk deploy MsbnStorageStack --require-approval broadening
+cdk deploy MsbnAuthStack --require-approval broadening
+cdk deploy MsbnComputeStack --require-approval broadening
+cdk deploy MsbnApiStack --require-approval broadening
+```
+
+Or deploy all stacks at once (CDK resolves the dependency order):
+
+```bash
+cdk deploy --all --require-approval broadening
 ```
 
 No context variables are required. The budget is managed manually
@@ -110,8 +137,10 @@ outside of CDK.
 
 ## Teardown
 
+Destroy in reverse dependency order, or let CDK resolve it:
+
 ```bash
-cdk destroy
+cdk destroy --all
 ```
 
 After `cdk destroy` completes:

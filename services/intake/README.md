@@ -24,7 +24,7 @@ Written to `msbn-applications` with `PK = APP#{applicationId}`, `SK = METADATA`.
   "applicationId": "a7f3b2c1-...",
   "status": "INTAKE_COMPLETE",
   "uploadedAt": "2026-04-14T18:32:01.123456+00:00",
-  "s3Key": "uploads/transcript_smith_jane.pdf",
+  "s3_key": "uploads/transcript_smith_jane.pdf",
   "originalFilename": "transcript_smith_jane.pdf",
   "size_bytes": 204800
 }
@@ -44,7 +44,7 @@ without a string-format intrinsic step.
 {
   "applicationId": "a7f3b2c1-...",
   "bucket": "msbn-transcripts-dev",
-  "s3Key": "uploads/transcript_smith_jane.pdf",
+  "s3_key": "uploads/transcript_smith_jane.pdf",
   "pk": "APP#a7f3b2c1-..."
 }
 ```

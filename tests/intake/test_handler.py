@@ -131,7 +131,7 @@ def test_dynamodb_item_written(dynamodb_table, uploads_s3_event, lambda_context)
     assert item["entity_type"] == "METADATA"
     assert item["status"] == "INTAKE_COMPLETE"
     assert item["originalFilename"] == "TRANSCRIPT_sample.pdf"
-    assert item["s3Key"] == "uploads/TRANSCRIPT_sample.pdf"
+    assert item["s3_key"] == "uploads/TRANSCRIPT_sample.pdf"
     assert int(item["size_bytes"]) == 204800
     assert item["applicationId"]                            # non-empty
     assert item["PK"] == f"APP#{item['applicationId']}"    # key structure
@@ -146,7 +146,7 @@ def test_response_includes_application_id(dynamodb_table, uploads_s3_event, lamb
     assert body["processed"] == 1
     app = body["applications"][0]
     assert app["applicationId"]
-    assert app["s3Key"] == "uploads/TRANSCRIPT_sample.pdf"
+    assert app["s3_key"] == "uploads/TRANSCRIPT_sample.pdf"
 
 
 def test_multiple_records_create_independent_items(dynamodb_table, lambda_context):
@@ -272,7 +272,7 @@ def test_log_includes_application_id(
     entry = entries[0]
     assert entry["applicationId"]
     assert entry["status"] == "INTAKE_COMPLETE"
-    assert "s3Key" in entry
+    assert "s3_key" in entry
 
 
 # ── Step Functions integration ─────────────────────────────────────────────────
@@ -281,7 +281,7 @@ def test_log_includes_application_id(
 def test_sfn_execution_started_with_correct_input(
     dynamodb_table, uploads_s3_event, lambda_context
 ):
-    """Handler must start a Step Functions execution with applicationId, s3Key, and bucket."""
+    """Handler must start a Step Functions execution with applicationId, s3_key, and bucket."""
     handler(uploads_s3_event, lambda_context)
 
     sfn_client = boto3.client("stepfunctions", region_name="us-east-1")
@@ -296,7 +296,7 @@ def test_sfn_execution_started_with_correct_input(
     )
     payload = json.loads(execution["input"])
 
-    assert payload["s3Key"] == "uploads/TRANSCRIPT_sample.pdf"
+    assert payload["s3_key"] == "uploads/TRANSCRIPT_sample.pdf"
     assert payload["bucket"] == "msbn-transcripts-dev"
     assert "applicationId" in payload
     assert payload["pk"] == f"APP#{payload['applicationId']}"

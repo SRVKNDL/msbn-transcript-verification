@@ -139,11 +139,10 @@ class ComputeConstruct(Construct):
         storage.table.grant(self.extract_lambda, "dynamodb:PutItem")
 
         # ── AggregationLambda ─────────────────────────────────────────────────
-        # Stub; cross-document field comparison implemented in a later slice.
-        # Runs once per application after all ExtractLambda invocations complete.
-        # TODO: IAM: S3 GetObject on processed/ (all extraction JSONs),
-        #        S3 PutObject on processed/ (aggregation.json),
-        #        DynamoDB UpdateItem (aggregation S3 path).
+        # Flattens per-page extraction JSON into a document-level aggregation.json
+        # that ValidateLambda consumes. Winner-take-all (highest confidence) for
+        # scalar fields; union-merge for array fields.
+        # Cross-document comparison (Phase 4) will extend this same Lambda.
         self.aggregate_lambda = lambda_.Function(
             self,
             "AggregationLambda",
@@ -160,7 +159,16 @@ class ComputeConstruct(Construct):
             memory_size=512,
             timeout=Duration.minutes(5),
             log_retention=logs.RetentionDays.ONE_WEEK,
+            environment={
+                "BUCKET_NAME": storage.bucket.bucket_name,
+            },
         )
+
+        # Least-privilege IAM for AggregationLambda ───────────────────────────
+        # GetObject on processed/*: read extraction_transcript.json.
+        # PutObject on processed/*: write aggregation.json.
+        storage.bucket.grant_read(self.aggregate_lambda, "processed/*")
+        storage.bucket.grant_put(self.aggregate_lambda, "processed/*")
 
         # ── ValidateLambda (RuleEngine) ────────────────────────────────────────
         # Deterministic rule engine: reads aggregation.json from S3, evaluates
@@ -245,8 +253,44 @@ class ComputeConstruct(Construct):
         #   IAM: DynamoDB Query on GSI2-LicenseDedup and GSI3-InstitutionCluster,
         #        PutItem (FLAG items).
 
-        # ── DashboardApiLambda (stub) ──────────────────────────────────────────
-        # TODO: Runtime: Python 3.11, Code: services/dashboard_api/
-        #   IAM: DynamoDB Query/GetItem (read-only), S3 GetObject (presigned URLs),
-        #        DynamoDB UpdateItem (reviewer decisions and flag status).
-        #   Integrated with API Gateway HTTP API + Cognito JWT authorizer.
+        # ── DashboardApiLambda ────────────────────────────────────────────────
+        # REST backend for the reviewer dashboard.  Routes dispatched by
+        # API Gateway HTTP API route key (GET /applications, etc.).
+        # Cognito JWT authorizer is configured in ApiConstruct.
+        self.dashboard_api_lambda = lambda_.Function(
+            self,
+            "DashboardApiLambda",
+            function_name="msbn-dashboard-api",
+            runtime=lambda_.Runtime.PYTHON_3_11,
+            handler="handler.handler",
+            code=lambda_.Code.from_asset(
+                os.path.normpath(
+                    os.path.join(
+                        os.path.dirname(__file__), "../../services/dashboard_api"
+                    )
+                )
+            ),
+            memory_size=512,
+            timeout=Duration.seconds(30),
+            log_retention=logs.RetentionDays.ONE_WEEK,
+            environment={
+                "TABLE_NAME": storage.table.table_name,
+                "BUCKET_NAME": storage.bucket.bucket_name,
+            },
+        )
+
+        # Least-privilege IAM for DashboardApiLambda ─────────────────────────
+        # Query + GetItem: list view (GSI1), detail view (METADATA, FLAGS,
+        #   DOCUMENT), audit trail (AUDIT prefix).
+        # UpdateItem: reviewer flag decisions, METADATA status transitions.
+        # PutItem: append-only AUDIT records.
+        storage.table.grant(
+            self.dashboard_api_lambda,
+            "dynamodb:Query",
+            "dynamodb:GetItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:PutItem",
+        )
+
+        # GetObject on processed/*: presigned URLs for page images.
+        storage.bucket.grant_read(self.dashboard_api_lambda, "processed/*")

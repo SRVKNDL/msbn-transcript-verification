@@ -494,7 +494,7 @@ def test_extraction_metadata_fields_present(
     assert extraction["bedrock_model_id"] == _mod.BEDROCK_MODEL_ID
     assert extraction["prompt_version"] == "1.0"
     assert "extraction_ts" in extraction
-    assert extraction["extraction_ts"].endswith("Z")
+    assert extraction["extraction_ts"].endswith("+00:00")
 
 
 # ── (g) source_location.page_number stamped correctly per page ────────────────

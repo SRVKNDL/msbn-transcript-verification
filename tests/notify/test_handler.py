@@ -72,7 +72,7 @@ def _seed_metadata(table, application_id: str) -> None:
             "applicationId": application_id,
             "status": "EVALUATING",
             "uploadedAt": "2026-04-14T18:32:01.000000+00:00",
-            "s3Key": "uploads/transcript_sample.pdf",
+            "s3_key": "uploads/transcript_sample.pdf",
             "originalFilename": "transcript_sample.pdf",
             "size_bytes": 204800,
         }
@@ -145,33 +145,32 @@ def test_metadata_last_updated_ts_set(dynamo_table, lambda_context):
     assert item["last_updated_ts"]
 
 
-def test_metadata_gsi1pk_set_for_review_queue(dynamo_table, lambda_context):
-    """GSI1PK must be set to 'READY_FOR_REVIEW' to populate the review-queue GSI."""
+def test_metadata_submission_ts_set(dynamo_table, lambda_context):
+    """submission_ts must be written — it is the GSI1-ReviewQueue sort key."""
     _seed_metadata(dynamo_table, "APP-005")
     handler(_make_event("APP-005", 2), lambda_context)
 
     item = _get_metadata(dynamo_table, "APP-005")
-    assert item["GSI1PK"] == "READY_FOR_REVIEW"
+    assert item["submission_ts"]
 
 
-def test_metadata_gsi1sk_set(dynamo_table, lambda_context):
-    """GSI1SK must be a timestamp (used to sort the review queue by arrival time)."""
+def test_metadata_submission_ts_is_iso8601(dynamo_table, lambda_context):
+    """submission_ts must be an ISO-8601 timestamp with a 'T' separator."""
     _seed_metadata(dynamo_table, "APP-006")
     handler(_make_event("APP-006", 2), lambda_context)
 
     item = _get_metadata(dynamo_table, "APP-006")
-    assert item["GSI1SK"]
-    assert "T" in item["GSI1SK"]
+    assert "T" in item["submission_ts"]
 
 
 def test_metadata_other_fields_preserved(dynamo_table, lambda_context):
-    """Handler must not overwrite fields it does not own (originalFilename, s3Key, etc.)."""
+    """Handler must not overwrite fields it does not own (originalFilename, s3_key, etc.)."""
     _seed_metadata(dynamo_table, "APP-007")
     handler(_make_event("APP-007", 0), lambda_context)
 
     item = _get_metadata(dynamo_table, "APP-007")
     assert item["originalFilename"] == "transcript_sample.pdf"
-    assert item["s3Key"] == "uploads/transcript_sample.pdf"
+    assert item["s3_key"] == "uploads/transcript_sample.pdf"
     assert item["uploadedAt"]
 
 

@@ -1,21 +1,37 @@
 """Workflow construct: Step Functions Standard Workflow for the transcript pipeline.
 
 Pipeline states (this slice — skeleton only):
-  1. Extract      — invoke ExtractLambda
-  2. Aggregate    — invoke AggregationLambda (cross-document field comparison)
-  3. Validate     — invoke ValidateLambda (RuleEngine)
+  1. Extract        — invoke ExtractLambda
+  2. Aggregate      — invoke AggregationLambda (cross-document field comparison)
+  3. Validate       — invoke ValidateLambda (RuleEngine)
   4. QueueForReview — invoke QueueForReviewLambda (Notify)
 
 Full pipeline from architecture-plan.md Section 1.2 will expand these states
 in subsequent slices (Parallel Map for extraction, CrossDoc, PopulationCheck,
 NotifyLambda, WaitForNursysReport).
 
-Error handling:
-  - Each Lambda Invoke state retries on transient Lambda service errors
-    (Lambda.ServiceException, Lambda.AWSLambdaException, Lambda.SdkClientException):
-    2 retries, exponential backoff (backoff_rate=2, interval=1s).
-  - Any unhandled failure (after retries) is caught by the global catch:
-    writes FAILED status to DynamoDB, then transitions to a Fail end state.
+Inter-state data flow
+---------------------
+Each Lambda's result is merged into the state under a dedicated key so
+downstream states can read the values they need without clobbering the
+original Intake input (``applicationId``, ``bucket``, ``s3_key``, ``pk``):
+
+    Extract        → result_path="$.extract_result"
+    Aggregate      → result_path="$.aggregate_result"
+    Validate       → result_path="$.validate_result"
+    QueueForReview → End (no downstream consumer)
+
+Each downstream Lambda is invoked with an input shaped via ``TaskInput`` so
+the event the handler receives is a small, explicit dict — not the entire
+accumulated state. This keeps handler contracts stable as the pipeline grows.
+
+Error handling
+--------------
+- Each Lambda Invoke state retries on transient Lambda service errors
+  (Lambda.ServiceException, Lambda.AWSLambdaException, Lambda.SdkClientException):
+  2 retries, exponential backoff (backoff_rate=2, interval=1s).
+- Any unhandled failure (after retries) is caught by the global catch:
+  writes FAILED status to DynamoDB, then transitions to a Fail end state.
 
 Workflow type: Standard (not Express) — full execution history retained for
 SP-9 audit trail (architecture-plan.md Section 2.1).
@@ -105,32 +121,66 @@ class WorkflowConstruct(Construct):
 
         # ── Pipeline states ────────────────────────────────────────────────────
 
+        # Extract consumes the full Intake input (applicationId, bucket, s3_key).
+        # Its result (applicationId, page_count, extraction_s3_key) is merged
+        # into the state at $.extract_result so Aggregate can read the key.
         extract_task = self._lambda_task(
             "Extract",
             extract_lambda,
             write_failed,
+            result_path="$.extract_result",
             comment="Invoke ExtractLambda: PDF → page images → Bedrock extraction JSON",
         )
 
+        # Aggregate reads the extraction JSON key from the merged state
+        # (placed there by the Extract state). Its own result (applicationId,
+        # aggregation_s3_key) is merged at $.aggregate_result.
         aggregate_task = self._lambda_task(
             "Aggregate",
             aggregate_lambda,
             write_failed,
-            comment="Invoke AggregationLambda: compare CROSS_* fields across all extraction JSONs",
+            payload=sfn.TaskInput.from_object({
+                "applicationId": sfn.JsonPath.string_at("$.applicationId"),
+                "extraction_s3_key": sfn.JsonPath.string_at(
+                    "$.extract_result.extraction_s3_key"
+                ),
+            }),
+            result_path="$.aggregate_result",
+            comment="Invoke AggregationLambda: flatten per-page extraction to aggregation.json",
         )
 
+        # Validate reads the aggregation.json key Aggregate produced, runs the
+        # rule engine, and merges its summary (flag_count, flags) at
+        # $.validate_result so QueueForReview can read flag_count.
         validate_task = self._lambda_task(
             "Validate",
             validate_lambda,
             write_failed,
-            comment="Invoke ValidateLambda: apply PHYS/CONT/PROG rules against extraction JSON",
+            payload=sfn.TaskInput.from_object({
+                "applicationId": sfn.JsonPath.string_at("$.applicationId"),
+                "aggregation_s3_key": sfn.JsonPath.string_at(
+                    "$.aggregate_result.aggregation_s3_key"
+                ),
+            }),
+            result_path="$.validate_result",
+            comment="Invoke ValidateLambda: apply PHYS/CONT/PROG rules against aggregation.json",
         )
 
+        # QueueForReview is the terminal state: no downstream reader, so its
+        # output is discarded. It still needs flag_count, which Validate placed
+        # at $.validate_result.flag_count.
         queue_task = self._lambda_task(
             "QueueForReview",
             queue_for_review_lambda,
             write_failed,
-            comment="Invoke QueueForReviewLambda: notify reviewer queue via SNS",
+            payload=sfn.TaskInput.from_object({
+                "applicationId": sfn.JsonPath.string_at("$.applicationId"),
+                "flag_count": sfn.JsonPath.number_at(
+                    "$.validate_result.flag_count"
+                ),
+            }),
+            result_path=sfn.JsonPath.DISCARD,
+            comment="Invoke QueueForReviewLambda: mark READY_FOR_REVIEW, write audit",
         )
 
         # ── State machine ──────────────────────────────────────────────────────
@@ -158,26 +208,34 @@ class WorkflowConstruct(Construct):
         fn: lambda_.IFunction,
         failure_handler: sfn.IChainable,
         *,
+        payload: sfn.TaskInput | None = None,
+        result_path: str | None = None,
         comment: str = "",
     ) -> sfn_tasks.LambdaInvoke:
         """Return a LambdaInvoke task with standard retry and catch configuration.
 
-        - Passes the entire state input to the Lambda as its event payload.
-        - Discards the Lambda response (ResultPath: null) so the original input
-          fields (applicationId, pk, etc.) flow unchanged to the next state.
-        - Retries twice on transient Lambda infrastructure errors with
-          exponential backoff before routing to the failure handler.
-        - Any other error (including Lambda handler exceptions) is caught
-          immediately and routed to the failure handler.
+        ``payload`` defaults to the entire state input (``$``). Pass a
+        ``TaskInput.from_object({...})`` to shape a specific event dict for the
+        Lambda — preferred over ``$`` when the handler only needs a subset of
+        fields.
+
+        ``result_path`` defaults to DISCARD. Pass ``"$.<key>"`` to merge the
+        Lambda's result into the state under that key so later states can read
+        it.
+
+        Retries on transient Lambda infrastructure errors only; business errors
+        propagate immediately to the failure handler.
         """
         task = sfn_tasks.LambdaInvoke(
             self,
             state_name,
             lambda_function=fn,
-            # Pass the full state input as the Lambda event payload.
-            payload=sfn.TaskInput.from_json_path_at("$"),
-            # Discard task output; propagate original input to the next state.
-            result_path=sfn.JsonPath.DISCARD,
+            payload=payload if payload is not None else sfn.TaskInput.from_json_path_at("$"),
+            # payload_response_only: merge only the Lambda's return dict into
+            # state, not the {StatusCode, Payload} envelope. This is what makes
+            # $.extract_result.extraction_s3_key resolve at the next state.
+            payload_response_only=True,
+            result_path=result_path if result_path is not None else sfn.JsonPath.DISCARD,
             comment=comment,
         )
 

@@ -18,7 +18,6 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_logs as logs,
     aws_s3 as s3,
-    aws_s3_notifications as s3n,
 )
 from constructs import Construct
 
@@ -71,15 +70,9 @@ class ComputeConstruct(Construct):
         # uploaded file in future slices without widening to the whole bucket.
         storage.bucket.grant_read(self.intake_lambda, "uploads/*")
 
-        # S3 event notification ────────────────────────────────────────────────
-        # CDK automatically adds the Lambda resource-based policy so S3 can
-        # invoke the function, and creates the BucketNotification custom
-        # resource in CloudFormation.
-        storage.bucket.add_event_notification(
-            s3.EventType.OBJECT_CREATED,
-            s3n.LambdaDestination(self.intake_lambda),
-            s3.NotificationKeyFilter(prefix="uploads/"),
-        )
+        # S3 event notification is configured at the stack level to avoid
+        # cross-stack cyclic dependencies when the bucket lives in a
+        # separate stack.  See MsbnComputeStack for the wiring.
 
         # ── ExtractLambda ─────────────────────────────────────────────────────
         # Container image Lambda: poppler-utils + pdf2image + pillow exceed the

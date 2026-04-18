@@ -1,7 +1,7 @@
-"""CDK assertion tests for MsbnTranscriptStack.
+"""CDK assertion tests for the MSBN multi-stack deployment.
 
-Validates cost-safety, security, and operational guardrails added
-during the pre-deploy audit.
+Validates cost-safety, security, and operational guardrails across
+all four stacks: Storage, Auth, Compute, Api.
 """
 
 import json
@@ -21,25 +21,70 @@ os.environ.setdefault("JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION", "1")
 import aws_cdk as cdk
 from aws_cdk.assertions import Capture, Match, Template
 
-from stacks.msbn_transcript_stack import MsbnTranscriptStack
+from stacks.msbn_storage_stack import MsbnStorageStack
+from stacks.msbn_auth_stack import MsbnAuthStack
+from stacks.msbn_compute_stack import MsbnComputeStack
+from stacks.msbn_api_stack import MsbnApiStack
 
 
 @pytest.fixture(scope="module")
-def template():
-    """Synthesize the stack once and return the assertion Template."""
+def stacks():
+    """Synthesize all four stacks and return their Templates."""
     app = cdk.App()
-    stack = MsbnTranscriptStack(
-        app, "TestStack", env=cdk.Environment(region="us-east-1")
+    env = cdk.Environment(region="us-east-1")
+
+    storage = MsbnStorageStack(app, "TestStorageStack", env=env)
+    auth = MsbnAuthStack(app, "TestAuthStack", env=env)
+    compute = MsbnComputeStack(
+        app,
+        "TestComputeStack",
+        env=env,
+        bucket=storage.bucket,
+        table=storage.table,
     )
-    return Template.from_stack(stack)
+    api = MsbnApiStack(
+        app,
+        "TestApiStack",
+        env=env,
+        dashboard_api_lambda=compute.dashboard_api_lambda,
+        user_pool=auth.user_pool,
+        user_pool_client=auth.user_pool_client,
+    )
+
+    return {
+        "storage": Template.from_stack(storage),
+        "auth": Template.from_stack(auth),
+        "compute": Template.from_stack(compute),
+        "api": Template.from_stack(api),
+    }
+
+
+@pytest.fixture(scope="module")
+def storage_template(stacks):
+    return stacks["storage"]
+
+
+@pytest.fixture(scope="module")
+def auth_template(stacks):
+    return stacks["auth"]
+
+
+@pytest.fixture(scope="module")
+def compute_template(stacks):
+    return stacks["compute"]
+
+
+@pytest.fixture(scope="module")
+def api_template(stacks):
+    return stacks["api"]
 
 
 # ── 1. Extract Lambda: timeout and reserved concurrency ───────────────────────
 
 
 class TestExtractLambdaHardening:
-    def test_timeout_is_180(self, template):
-        template.has_resource_properties(
+    def test_timeout_is_180(self, compute_template):
+        compute_template.has_resource_properties(
             "AWS::Lambda::Function",
             Match.object_like({
                 "FunctionName": "msbn-extract",
@@ -47,8 +92,8 @@ class TestExtractLambdaHardening:
             }),
         )
 
-    def test_reserved_concurrency_is_5(self, template):
-        template.has_resource_properties(
+    def test_reserved_concurrency_is_5(self, compute_template):
+        compute_template.has_resource_properties(
             "AWS::Lambda::Function",
             Match.object_like({
                 "FunctionName": "msbn-extract",
@@ -61,8 +106,8 @@ class TestExtractLambdaHardening:
 
 
 class TestAggregateLambdaTimeout:
-    def test_timeout_is_60(self, template):
-        template.has_resource_properties(
+    def test_timeout_is_60(self, compute_template):
+        compute_template.has_resource_properties(
             "AWS::Lambda::Function",
             Match.object_like({
                 "FunctionName": "msbn-aggregate",
@@ -75,8 +120,8 @@ class TestAggregateLambdaTimeout:
 
 
 class TestS3LifecycleRules:
-    def test_bucket_has_lifecycle_configuration(self, template):
-        template.has_resource_properties(
+    def test_bucket_has_lifecycle_configuration(self, storage_template):
+        storage_template.has_resource_properties(
             "AWS::S3::Bucket",
             Match.object_like({
                 "LifecycleConfiguration": {
@@ -100,9 +145,9 @@ class TestS3LifecycleRules:
 
 
 class TestBedrockIamScope:
-    def test_bedrock_policy_has_exact_model_arns(self, template):
+    def test_bedrock_policy_has_exact_model_arns(self, compute_template):
         # Find the ExtractLambda's role default policy.
-        policies = template.find_resources("AWS::IAM::Policy")
+        policies = compute_template.find_resources("AWS::IAM::Policy")
         bedrock_statements = []
         for _logical_id, resource in policies.items():
             statements = (
@@ -138,8 +183,8 @@ class TestBedrockIamScope:
 
 
 class TestCognitoPasswordPolicy:
-    def test_password_policy(self, template):
-        template.has_resource_properties(
+    def test_password_policy(self, auth_template):
+        auth_template.has_resource_properties(
             "AWS::Cognito::UserPool",
             Match.object_like({
                 "Policies": {
@@ -159,8 +204,8 @@ class TestCognitoPasswordPolicy:
 
 
 class TestApiGatewayThrottling:
-    def test_default_stage_has_throttling(self, template):
-        template.has_resource_properties(
+    def test_default_stage_has_throttling(self, api_template):
+        api_template.has_resource_properties(
             "AWS::ApiGatewayV2::Stage",
             Match.object_like({
                 "DefaultRouteSettings": {

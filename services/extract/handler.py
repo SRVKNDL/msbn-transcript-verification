@@ -302,7 +302,7 @@ def handler(event, context):
         "page_count": len(images),
         "bedrock_model_id": BEDROCK_MODEL_ID,
         "prompt_version": PROMPT_VERSION,
-        "extraction_ts": datetime.datetime.utcnow().isoformat() + "Z",
+        "extraction_ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "pages": page_extractions,
     }
 

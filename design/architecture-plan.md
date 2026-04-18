@@ -360,7 +360,7 @@ Public access: blocked. Dashboard accesses page images via Lambda-generated pres
 ```
 PK:                  APP#a7f3b...
 SK:                  METADATA
-status:              INTAKE_COMPLETE | EXTRACTING | EVALUATING | READY_FOR_REVIEW | DECIDED
+status:              INTAKE_COMPLETE | EXTRACTING | EVALUATING | READY_FOR_REVIEW | DECIDED | FAILED
 applicant_name:      extracted after first document; null until extracted
 submission_ts:       ISO8601 timestamp
 last_updated_ts:     ISO8601 timestamp

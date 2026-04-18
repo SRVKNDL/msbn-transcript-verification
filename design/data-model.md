@@ -28,7 +28,7 @@ Fields set at intake:
   "applicationId": "a7f3b2c1-4d5e-6f7a-8b9c-0d1e2f3a4b5c",
   "status": "INTAKE_COMPLETE",
   "uploadedAt": "2026-04-14T18:32:01.123456+00:00",
-  "s3Key": "uploads/transcript_smith_jane.pdf",
+  "s3_key": "uploads/transcript_smith_jane.pdf",
   "originalFilename": "transcript_smith_jane.pdf",
   "size_bytes": 204800
 }
@@ -105,16 +105,8 @@ reviewer actions update `reviewer_status`, `reviewer_id`, `reviewer_ts`, and
   "severity": "High",
   "rationale": "Reported GPA 3.4 differs from computed mean 2.74 by 23.9%.",
   "source_location": {
-    "document_type": "TRANSCRIPT",
     "page_number": 2,
-    "text_span": {
-      "matched_text": "Overall GPA: 3.4",
-      "context_before": "...Psych Nursing 2.9 | Med/Surg II 2.6 | ",
-      "context_after": " | Enrollment: 01/07/2008"
-    },
-    "bounding_box": null,
-    "extraction_field_path": "reported_gpa",
-    "extraction_s3_key": "processed/a7f3b2c1-.../extraction_TRANSCRIPT.json"
+    "text_spans": ["Overall GPA: 3.4"]
   },
   "reviewer_status": "OPEN",
   "reviewer_id": null,
@@ -124,9 +116,13 @@ reviewer actions update `reviewer_status`, `reviewer_id`, `reviewer_ts`, and
 }
 ```
 
-`bounding_box` is populated when Textract is in the pipeline (Phase 3+); otherwise null.
-For PHYS rules, `text_span` is replaced by a `visual_region` descriptor — see
-`architecture-plan.md` Section 5.2.
+`source_location` uses the shape defined in `extraction-vocabulary.md`
+Section 5: `{page_number: int, text_spans: [str]}`. `text_spans` is always
+an array (length 1 for single-location citations, longer for fields
+derived from multiple supporting phrases). This is the shape the rule
+engine emits and the dashboard consumes. Pixel-level bounding boxes
+are a Phase 3+ addition (requires Textract) and would be attached as a
+separate optional key, not nested inside `source_location`.
 
 **Who writes it:** RuleEngineLambda, CrossDocLambda, PopulationCheckLambda.  
 **Who reads it:** DashboardLambda. DashboardLambda also writes the reviewer fields.

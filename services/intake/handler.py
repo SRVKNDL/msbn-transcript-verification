@@ -99,7 +99,7 @@ def _process_record(record: dict) -> dict:
         "applicationId": application_id,
         "status": "INTAKE_COMPLETE",
         "uploadedAt": uploaded_at,
-        "s3Key": s3_key,
+        "s3_key": s3_key,
         "originalFilename": original_filename,
         "size_bytes": size_bytes,
     }
@@ -110,7 +110,7 @@ def _process_record(record: dict) -> dict:
             {
                 "message": "IntakeLambda processed upload",
                 "applicationId": application_id,
-                "s3Key": s3_key,
+                "s3_key": s3_key,
                 "originalFilename": original_filename,
                 "size_bytes": size_bytes,
                 "status": "INTAKE_COMPLETE",
@@ -120,7 +120,7 @@ def _process_record(record: dict) -> dict:
 
     _start_pipeline(application_id=application_id, bucket=bucket, s3_key=s3_key)
 
-    return {"applicationId": application_id, "s3Key": s3_key}
+    return {"applicationId": application_id, "s3_key": s3_key}
 
 
 def _start_pipeline(*, application_id: str, bucket: str, s3_key: str) -> None:
@@ -136,7 +136,7 @@ def _start_pipeline(*, application_id: str, bucket: str, s3_key: str) -> None:
         {
             "applicationId": application_id,
             "bucket": bucket,
-            "s3Key": s3_key,
+            "s3_key": s3_key,
             # Precomputed DynamoDB partition key; the pipeline's catch handler
             # uses this to write FAILED status without an intrinsic-function
             # string-format step.

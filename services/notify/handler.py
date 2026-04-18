@@ -24,8 +24,7 @@ DynamoDB writes
    - flag_count      → int
    - ready_for_review_at → ISO-8601 UTC
    - last_updated_ts → ISO-8601 UTC
-   - GSI1PK          → "READY_FOR_REVIEW"  (feeds GSI1-ReviewQueue)
-   - GSI1SK          → ready_for_review_at  (sort: oldest first in queue)
+   - submission_ts   → ISO-8601 UTC  (GSI1-ReviewQueue sort key: oldest first)
 
 2. PutItem for an AUDIT record (PK=APP#<id>, SK=AUDIT#<timestamp>):
    - entity_type  → "AUDIT"
@@ -78,15 +77,13 @@ def handler(event, context):
             " flag_count = :fc,"
             " ready_for_review_at = :ts,"
             " last_updated_ts = :ts,"
-            " GSI1PK = :gsi1pk,"
-            " GSI1SK = :ts"
+            " submission_ts = :ts"
         ),
         ExpressionAttributeNames={"#st": "status"},
         ExpressionAttributeValues={
             ":status": "READY_FOR_REVIEW",
             ":fc": flag_count,
             ":ts": now,
-            ":gsi1pk": "READY_FOR_REVIEW",
         },
     )
 

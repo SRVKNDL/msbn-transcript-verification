@@ -54,6 +54,9 @@ class MsbnTranscriptStack(cdk.Stack):
         #   states:StartExecution on arn:aws:states:...:stateMachine:msbn-transcript-pipeline
         workflow.state_machine.grant_start_execution(compute.intake_lambda)
 
-        # Api remains as a stub; instantiate so it appears in the CloudFormation
-        # template and can be incrementally filled in.
-        ApiConstruct(self, "Api")
+        # API Gateway HTTP API, Cognito user pool, and JWT authorizer.
+        ApiConstruct(
+            self,
+            "Api",
+            dashboard_api_lambda=compute.dashboard_api_lambda,
+        )

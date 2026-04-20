@@ -3,7 +3,7 @@
 Cognito (architecture-plan.md Section 2.2):
   - User pool for reviewer authentication
   - Self-sign-up disabled (admin creates test accounts)
-  - MFA optional for POC
+  - MFA off for POC (Phase 4 item to enable for production)
   - Free at POC user counts (< 50,000 MAU)
 """
 
@@ -34,7 +34,10 @@ class AuthConstruct(Construct):
             standard_attributes=cognito.StandardAttributes(
                 email=cognito.StandardAttribute(required=True, mutable=False),
             ),
-            mfa=cognito.Mfa.OPTIONAL,
+            custom_attributes={
+                "role": cognito.StringAttribute(mutable=True),
+            },
+            mfa=cognito.Mfa.OFF,
             password_policy=cognito.PasswordPolicy(
                 min_length=12,
                 require_uppercase=True,
@@ -45,12 +48,19 @@ class AuthConstruct(Construct):
         )
 
         # App client for the React dashboard (no secret — SPA cannot keep one).
+        # Auth flows:
+        #   - SRP: primary client-side flow (challenge-response, never sends password)
+        #   - Admin user password: server-side only, for admin-initiate-auth smoke tests
+        #   - Refresh: token renewal
+        # USER_PASSWORD_AUTH is intentionally excluded — it sends the password
+        # in plaintext to Cognito. SRP is the correct client-side flow.
         self.user_pool_client = self.user_pool.add_client(
             "DashboardClient",
             user_pool_client_name="msbn-dashboard",
             auth_flows=cognito.AuthFlow(
                 user_srp=True,
-                user_password=True,
+                admin_user_password=True,
             ),
             generate_secret=False,
+            disable_o_auth=True,
         )

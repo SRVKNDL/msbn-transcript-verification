@@ -56,6 +56,7 @@ Deploy in this order:
 ```
 1. MsbnStorageStack   — S3 bucket + DynamoDB table (no dependencies)
 2. MsbnAuthStack      — Cognito User Pool + Client (no dependencies)
+                         MFA is OFF for POC. Phase 4 item to enable MFA for production.
 3. MsbnComputeStack   — Lambdas + Step Functions (depends on Storage)
 4. MsbnApiStack       — API Gateway + JWT authorizer (depends on Compute + Auth)
 ```

@@ -179,7 +179,7 @@ class TestBedrockIamScope:
         )
 
 
-# ── 5. Cognito password policy ───────────────────────────────────────────────
+# ── 5. Cognito password policy and auth hardening ───────────────────────────
 
 
 class TestCognitoPasswordPolicy:
@@ -198,6 +198,78 @@ class TestCognitoPasswordPolicy:
                 },
             }),
         )
+
+    def test_custom_role_attribute_in_schema(self, auth_template):
+        auth_template.has_resource_properties(
+            "AWS::Cognito::UserPool",
+            Match.object_like({
+                "Schema": Match.array_with([
+                    Match.object_like({
+                        "Name": "role",
+                        "AttributeDataType": "String",
+                        "Mutable": True,
+                    }),
+                ]),
+            }),
+        )
+
+    def test_mfa_is_off(self, auth_template):
+        auth_template.has_resource_properties(
+            "AWS::Cognito::UserPool",
+            Match.object_like({
+                "MfaConfiguration": "OFF",
+            }),
+        )
+
+    def test_no_sms_iam_role(self, auth_template):
+        """MFA OFF means no SMS role should exist in the auth stack."""
+        roles = auth_template.find_resources("AWS::IAM::Role")
+        assert len(roles) == 0, (
+            f"Expected no IAM roles in auth stack (SMS role should be gone), "
+            f"found {len(roles)}: {list(roles.keys())}"
+        )
+
+    def test_client_auth_flows_srp_admin_and_refresh_only(self, auth_template):
+        auth_template.has_resource_properties(
+            "AWS::Cognito::UserPoolClient",
+            Match.object_like({
+                "ExplicitAuthFlows": Match.array_equals([
+                    "ALLOW_ADMIN_USER_PASSWORD_AUTH",
+                    "ALLOW_USER_SRP_AUTH",
+                    "ALLOW_REFRESH_TOKEN_AUTH",
+                ]),
+            }),
+        )
+
+    def test_no_user_password_auth(self, auth_template):
+        """ALLOW_USER_PASSWORD_AUTH must not be present on the client."""
+        clients = auth_template.find_resources("AWS::Cognito::UserPoolClient")
+        for _id, resource in clients.items():
+            flows = resource.get("Properties", {}).get("ExplicitAuthFlows", [])
+            assert "ALLOW_USER_PASSWORD_AUTH" not in flows, (
+                "Client should not allow USER_PASSWORD_AUTH — use admin-initiate-auth for testing"
+            )
+
+    def test_no_oauth_flows(self, auth_template):
+        """No OAuth flows should be configured — SPA uses SDK-based SRP auth."""
+        auth_template.has_resource_properties(
+            "AWS::Cognito::UserPoolClient",
+            Match.object_like({
+                "AllowedOAuthFlowsUserPoolClient": False,
+            }),
+        )
+        clients = auth_template.find_resources("AWS::Cognito::UserPoolClient")
+        for _id, resource in clients.items():
+            props = resource.get("Properties", {})
+            assert "AllowedOAuthFlows" not in props, (
+                "Client should not have OAuth flows configured"
+            )
+            assert "AllowedOAuthScopes" not in props, (
+                "Client should not have OAuth scopes configured"
+            )
+            assert "CallbackURLs" not in props, (
+                "Client should not have callback URLs configured"
+            )
 
 
 # ── 6. API Gateway throttling ────────────────────────────────────────────────

@@ -39,6 +39,9 @@ def handler(event: dict, context) -> dict:
     return value, but a well-formed response keeps CloudWatch logs clean and
     simplifies local integration testing.
     """
+
+    if isinstance(event, context):
+        event = json.loads(str)
     records = event.get("Records", [])
     if not records:
         logger.warning(json.dumps({"message": "IntakeLambda: no Records in event"}))

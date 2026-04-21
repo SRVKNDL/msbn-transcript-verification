@@ -61,7 +61,7 @@ class MsbnComputeStack(cdk.Stack):
         # notification resources in this stack.
 
         # 1. Allow S3 to invoke IntakeLambda.
-        lambda_.CfnPermission(
+        intake_invoke_permission = lambda_.CfnPermission(
             self,
             "S3InvokeIntakePermission",
             action="lambda:InvokeFunction",
@@ -72,7 +72,7 @@ class MsbnComputeStack(cdk.Stack):
         )
 
         # 2. Configure S3 bucket notification via AWS SDK call.
-        cr.AwsCustomResource(
+        s3_bucket_notification = cr.AwsCustomResource(
             self,
             "S3BucketNotification",
             on_create=cr.AwsSdkCall(
@@ -151,7 +151,9 @@ class MsbnComputeStack(cdk.Stack):
                 ]
             ),
         )
-
+        #S3 validates the target Lambda permission when the notification is
+        #configured. Make the dependency explicit so deploys cannot race.
+        s3_bucket_notification.node.add_dependency(intake_invoke_permission)
         # Expose for the API stack.
         self.dashboard_api_lambda = compute.dashboard_api_lambda
 

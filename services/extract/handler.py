@@ -222,6 +222,8 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
 
 
 def handler(event, context):
+    if isinstance(event, context):
+        event = json.loads(str)
     """Extract structured data from a transcript PDF via Bedrock Nova.
 
     Raises on S3 download failure, PDF conversion failure, or Bedrock error

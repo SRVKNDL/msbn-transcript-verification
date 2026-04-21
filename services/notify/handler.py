@@ -52,6 +52,9 @@ _table = _dynamo.Table(TABLE_NAME)
 
 def handler(event, context):
     """Transition application to READY_FOR_REVIEW and record the audit event."""
+
+    if isinstance(event, context):
+        event = json.loads(str)
     application_id = event["applicationId"]
     flag_count = int(event.get("flag_count", 0))
 

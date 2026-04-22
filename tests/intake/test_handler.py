@@ -230,10 +230,11 @@ def test_s3_key_url_encoded_spaces():
     assert filename == "my transcript file.pdf"
 
 
-def test_s3_key_trailing_slash_raises():
-    """A key ending in '/' yields an empty filename, which must raise ValueError."""
-    with pytest.raises(ValueError, match="filename"):
-        _parse_s3_record(_record("uploads/subdir/"))
+def test_s3_key_trailing_slash_returns_empty_filename():
+    """Placeholder folder objects are detected by an empty derived filename."""
+    _, key, _, filename = _parse_s3_record(_record("uploads/subdir/"))
+    assert key == "uploads/subdir/"
+    assert filename == ""
 
 
 def test_s3_key_missing_key_field_raises():
@@ -348,3 +349,22 @@ def test_sfn_client_error_logs_and_raises(
     assert error_logs, "Expected a structured error log for the SFN failure"
     assert "applicationId" in error_logs[0]
     assert "errorCode" in error_logs[0]
+
+
+def test_placeholder_folder_object_is_skipped(dynamodb_table, lambda_context):
+    """S3 folder placeholder objects under uploads/ must not start the pipeline."""
+    event = {"Records": [_record("uploads/test-001/")]}
+
+    response = handler(event, lambda_context)
+    body = json.loads(response["body"])
+
+    assert response["statusCode"] == 200
+    assert body["processed"] == 1
+    assert body["applications"] == [{"skipped": True, "s3_key": "uploads/test-001/"}]
+    assert dynamodb_table.scan()["Count"] == 0
+
+    sfn_client = boto3.client("stepfunctions", region_name="us-east-1")
+    executions = sfn_client.list_executions(stateMachineArn=_FAKE_SFN_ARN)[
+        "executions"
+    ]
+    assert executions == []

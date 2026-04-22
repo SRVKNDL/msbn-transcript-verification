@@ -101,6 +101,19 @@ class TestExtractLambdaHardening:
             }),
         )
 
+    def test_default_model_is_nova_pro(self, compute_template):
+        compute_template.has_resource_properties(
+            "AWS::Lambda::Function",
+            Match.object_like({
+                "FunctionName": "msbn-extract",
+                "Environment": {
+                    "Variables": Match.object_like({
+                        "BEDROCK_MODEL_ID": "amazon.nova-pro-v1:0",
+                    })
+                },
+            }),
+        )
+
 
 # ── 2. Aggregate Lambda: timeout ─────────────────────────────────────────────
 
@@ -114,6 +127,18 @@ class TestAggregateLambdaTimeout:
                 "Timeout": 60,
             }),
         )
+
+
+class TestWorkflowPayloads:
+    def test_extract_task_forwards_full_state_not_literal_dollar(self, compute_template):
+        resources = compute_template.find_resources("AWS::StepFunctions::StateMachine")
+        assert len(resources) == 1, f"Expected 1 state machine, found {len(resources)}"
+
+        definition = next(iter(resources.values()))["Properties"]["DefinitionString"]
+        definition_json = json.dumps(definition)
+
+        assert '"Payload":"$"' not in definition_json
+        assert '"Payload.$":"$"' not in definition_json
 
 
 # ── 3. S3 lifecycle rules ────────────────────────────────────────────────────

@@ -40,8 +40,6 @@ def handler(event: dict, context) -> dict:
     simplifies local integration testing.
     """
 
-    if isinstance(event, context):
-        event = json.loads(str)
     records = event.get("Records", [])
     if not records:
         logger.warning(json.dumps({"message": "IntakeLambda: no Records in event"}))
@@ -74,6 +72,9 @@ def _parse_s3_record(record: dict) -> tuple:
     # S3 notification keys are URL-encoded (spaces → '+', specials → '%XX').
     s3_key = unquote_plus(raw_key)
 
+    if s3_key.endswith("/"):
+        return bucket, s3_key, size_bytes, ""
+
     # Extract the last path component as the display filename.
     original_filename = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
     if not original_filename:
@@ -86,6 +87,17 @@ def _process_record(record: dict) -> dict:
     """Write a METADATA item to DynamoDB, start the Step Functions pipeline, and
     return the new applicationId."""
     bucket, s3_key, size_bytes, original_filename = _parse_s3_record(record)
+
+    if s3_key.endswith("/"):
+        logger.info(
+            json.dumps(
+                {
+                    "message": "IntakeLambda skipping S3 placeholder object",
+                    "s3_key": s3_key,
+                }
+            )
+        )
+        return {"skipped": True, "s3_key": s3_key}
 
     # UUID v4 (stdlib) chosen to avoid extra dependencies.
     # ULID (python-ulid) would be preferable in production: its time-sortable

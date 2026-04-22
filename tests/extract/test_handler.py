@@ -307,6 +307,36 @@ def test_invoke_model_body_contains_user_prompt_enums(
         )
 
 
+def test_invoke_model_body_treats_grad_date_as_completion_indicator(
+    s3_with_transcript, bedrock_mock, extract_event, lambda_context
+):
+    """Prompt should explicitly count Grad Date / Degrees Earned as graduation evidence."""
+    handler(extract_event, lambda_context)
+
+    call_kwargs = bedrock_mock.invoke_model.call_args
+    body = json.loads(call_kwargs.kwargs["body"])
+    user_text = body["messages"][0]["content"][1]["text"]
+
+    assert "Grad Date" in user_text
+    assert "Degrees Earned" in user_text
+    assert 'If any such indicator appears, return "yes".' in user_text
+
+
+def test_invoke_model_body_guides_conservative_watermark_detection(
+    s3_with_transcript, bedrock_mock, extract_event, lambda_context
+):
+    """Prompt should tell the model to avoid guessing on faint security features."""
+    handler(extract_event, lambda_context)
+
+    call_kwargs = bedrock_mock.invoke_model.call_args
+    body = json.loads(call_kwargs.kwargs["body"])
+    user_text = body["messages"][0]["content"][1]["text"]
+
+    assert 'prefer security_features_assessable = "no"' in user_text
+    assert "Use [] only when you" in user_text
+    assert "can confidently conclude no listed feature is visible." in user_text
+
+
 # ── (c) response parsed into the correct field structure ──────────────────────
 
 

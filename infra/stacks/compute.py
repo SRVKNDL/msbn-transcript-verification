@@ -109,8 +109,9 @@ class ComputeConstruct(Construct):
             log_retention=logs.RetentionDays.ONE_WEEK,
             environment={
                 "BUCKET_NAME": storage.bucket.bucket_name,
-                # Default to Nova Lite; override with Nova Pro for complex docs.
-                "BEDROCK_MODEL_ID": "amazon.nova-lite-v1:0",
+                # Default to Nova Pro for better visual extraction fidelity on
+                # faint transcript features such as watermarks and seal details.
+                "BEDROCK_MODEL_ID": "amazon.nova-pro-v1:0",
             },
         )
 

@@ -82,8 +82,6 @@ def handler(event, context):
         {"applicationId": "<id>", "aggregation_s3_key": "processed/<id>/aggregation.json"}
     """
 
-    if isinstance(event, context):
-        event = json.loads(str)
     application_id = event["applicationId"]
     extraction_key = event["extraction_s3_key"]
     bucket = event.get("bucket") or _BUCKET_NAME

@@ -230,7 +230,9 @@ class WorkflowConstruct(Construct):
             self,
             state_name,
             lambda_function=fn,
-            payload=payload if payload is not None else sfn.TaskInput.from_json_path_at("$"),
+            # Omit payload entirely to forward the full state input. Passing
+            # from_json_path_at("$") here serializes the literal string "$".
+            payload=payload,
             # payload_response_only: merge only the Lambda's return dict into
             # state, not the {StatusCode, Payload} envelope. This is what makes
             # $.extract_result.extraction_s3_key resolve at the next state.

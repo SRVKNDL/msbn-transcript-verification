@@ -114,24 +114,40 @@ def check_prog_002(agg: dict) -> list:
     (see MSBN Case C: student attended but did not pass exit exam).
     """
     present = agg.get("graduation_confirmation_present")
-    if present == "no":
-        return [
-            Flag(
-                rule_code="PROG_002",
-                rule_description="No graduation or degree conferral confirmation",
-                severity="high",
-                category="SP-4",
-                rationale=(
-                    "The transcript does not include a graduation date, degree conferral "
-                    "statement, or other explicit completion indicator. "
-                    "Absence may indicate a fabricated affidavit of graduation "
-                    "(see MSBN Case C: student submitted an affidavit the school never issued). "
-                    "Staff must independently verify completion status with the institution."
-                ),
-                source_location=_src(agg, "graduation_confirmation_present"),
-            )
-        ]
-    return []
+    if present != "no":
+        return []
+
+    present_domains = frozenset(agg.get("required_nursing_domains_present") or [])
+    has_all_required_domains = _REQUIRED_DOMAINS.issubset(present_domains)
+    chronology_ok = agg.get("dates_chronology_ok") == "yes"
+    duration_consistent = (
+        agg.get("program_duration_consistency") == "consistent_with_degree"
+    )
+
+    # Many legitimate transcripts do not print an explicit conferral statement
+    # on the coursework pages. If the transcript otherwise looks like a complete,
+    # coherent nursing program, do not escalate this as a standalone fraud flag.
+    if has_all_required_domains and chronology_ok and duration_consistent:
+        return []
+
+    return [
+        Flag(
+            rule_code="PROG_002",
+            rule_description="No graduation or degree conferral confirmation",
+            severity="high",
+            category="SP-4",
+            rationale=(
+                "The transcript does not include a graduation date, degree conferral "
+                "statement, or other explicit completion indicator, and the remaining "
+                "program evidence is not strong enough to infer completion from the "
+                "coursework record alone. Absence may indicate a fabricated affidavit "
+                "of graduation (see MSBN Case C: student submitted an affidavit the "
+                "school never issued). Staff must independently verify completion "
+                "status with the institution."
+            ),
+            source_location=_src(agg, "graduation_confirmation_present"),
+        )
+    ]
 
 
 def check_prog_003(agg: dict) -> list:

@@ -164,11 +164,15 @@ document_provenance_appearance
 
 security_features_present
   Value: JSON array containing zero or more of: watermark, micro_printing, hologram, serial_number
-  Description: Physical security items visible on the document. Use [] if none detected.
+  Description: Physical security items visible on the document. Watermarks and micro-printing
+               can be faint. If page quality, contrast, or scan artifacts make them uncertain,
+               do not guess; prefer security_features_assessable = "no". Use [] only when you
+               can confidently conclude no listed feature is visible.
 
 security_features_assessable
   Allowed: yes | no
   Description: Whether the page quality permits a reliable assessment of security features.
+               If watermark or micro-printing visibility is uncertain, return "no".
                If "no", security_features_present should be treated as unreliable.
 
 === SECTION 2: Content Fields ===
@@ -246,7 +250,10 @@ institution_website_present
 
 graduation_confirmation_present
   Allowed: yes | no | unclear
-  Description: Explicit statements of degree conferral or graduation on this page.
+  Description: Whether this page contains a completion indicator such as a graduation date,
+               "Grad Date", "Graduation Date", "Degrees Earned", degree/certificate awarded,
+               diploma/certificate title, graduation term, or an explicit degree conferral
+               statement. If any such indicator appears, return "yes".
 
 required_nursing_domains_present
   Value: JSON array containing zero or more of:

@@ -46,7 +46,7 @@ _s3 = boto3.client("s3")
 _bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
 
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
 
 # Fields whose vocabulary values are array elements, not the array itself.
 _ARRAY_FIELDS = {
@@ -222,8 +222,6 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
 
 
 def handler(event, context):
-    if isinstance(event, context):
-        event = json.loads(str)
     """Extract structured data from a transcript PDF via Bedrock Nova.
 
     Raises on S3 download failure, PDF conversion failure, or Bedrock error

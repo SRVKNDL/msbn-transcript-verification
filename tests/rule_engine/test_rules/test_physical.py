@@ -61,7 +61,9 @@ def test_phys_001_rationale_mentions_quality():
 def test_phys_002_fires_on_no_features_assessable():
     agg = {
         "security_features_assessable": "yes",
+        "security_features_assessable_confidence": "high",
         "security_features_present": [],
+        "security_features_present_confidence": "high",
     }
     flags = check_phys_002(agg)
     assert any(f.rule_code == "PHYS_002" for f in flags)
@@ -70,7 +72,9 @@ def test_phys_002_fires_on_no_features_assessable():
 def test_phys_002_no_fire_with_features():
     agg = {
         "security_features_assessable": "yes",
+        "security_features_assessable_confidence": "high",
         "security_features_present": ["watermark"],
+        "security_features_present_confidence": "high",
     }
     assert check_phys_002(agg) == []
 
@@ -78,7 +82,19 @@ def test_phys_002_no_fire_with_features():
 def test_phys_002_no_fire_not_assessable():
     agg = {
         "security_features_assessable": "no",
+        "security_features_assessable_confidence": "high",
         "security_features_present": [],
+        "security_features_present_confidence": "high",
+    }
+    assert check_phys_002(agg) == []
+
+
+def test_phys_002_no_fire_when_missing_features_are_not_high_confidence():
+    agg = {
+        "security_features_assessable": "yes",
+        "security_features_assessable_confidence": "high",
+        "security_features_present": [],
+        "security_features_present_confidence": "medium",
     }
     assert check_phys_002(agg) == []
 

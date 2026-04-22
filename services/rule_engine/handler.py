@@ -56,9 +56,6 @@ def handler(event, context):
     4. Return a summary dict to Step Functions.
     """
 
-    if isinstance(event, context):
-        event = json.loads(str)
-
     application_id = event["applicationId"]
     s3_key = event["aggregation_s3_key"]
 

@@ -65,10 +65,21 @@ def check_phys_002(agg: dict) -> list:
     """
     flags = []
 
-    # Check 1: assessable page with no security features
+    # Check 1: assessable page with no security features.
+    # Be conservative: faint watermarks and micro-printing are easy for the
+    # extractor to miss on ordinary scans, so only escalate when both the
+    # assessability judgment and the "no features present" extraction are high
+    # confidence.
     assessable = agg.get("security_features_assessable")
+    assessable_confidence = agg.get("security_features_assessable_confidence")
     features = agg.get("security_features_present") or []
-    if assessable == "yes" and len(features) == 0:
+    features_confidence = agg.get("security_features_present_confidence")
+    if (
+        assessable == "yes"
+        and len(features) == 0
+        and assessable_confidence == "high"
+        and features_confidence == "high"
+    ):
         flags.append(
             Flag(
                 rule_code="PHYS_002",
@@ -76,10 +87,11 @@ def check_phys_002(agg: dict) -> list:
                 severity="high",
                 category="SP-4",
                 rationale=(
-                    "Document page quality permits reliable assessment of security features, "
-                    "but no security features (watermark, micro-printing, hologram, serial "
-                    "number) were detected. Legitimate transcripts from most institutions "
-                    "include at least one security feature."
+                    "Document page quality permits reliable assessment of security "
+                    "features, and the extractor had high confidence that no security "
+                    "features (watermark, micro-printing, hologram, serial number) were "
+                    "present. Legitimate transcripts from most institutions include at "
+                    "least one security feature."
                 ),
                 source_location=_src(agg, "security_features_present"),
             )

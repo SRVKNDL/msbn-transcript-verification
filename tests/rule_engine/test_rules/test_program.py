@@ -131,6 +131,36 @@ def test_prog_002_rationale_mentions_case_c():
     assert "Case C" in flag.rationale
 
 
+def test_prog_002_no_fire_when_other_completion_evidence_is_strong():
+    agg = {
+        "graduation_confirmation_present": "no",
+        "required_nursing_domains_present": [
+            "adult_med_surg",
+            "obstetrics",
+            "pediatrics",
+            "psychiatric",
+        ],
+        "dates_chronology_ok": "yes",
+        "program_duration_consistency": "consistent_with_degree",
+    }
+    assert check_prog_002(agg) == []
+
+
+def test_prog_002_fires_when_completion_evidence_is_incomplete():
+    agg = {
+        "graduation_confirmation_present": "no",
+        "required_nursing_domains_present": [
+            "adult_med_surg",
+            "obstetrics",
+            "pediatrics",
+        ],
+        "dates_chronology_ok": "yes",
+        "program_duration_consistency": "consistent_with_degree",
+    }
+    flags = check_prog_002(agg)
+    assert len(flags) == 1
+
+
 # ── PROG_003 — Required domain absent ────────────────────────────────────────
 
 

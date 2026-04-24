@@ -1,0 +1,58 @@
+{
+    "CallerReference": "msbn-dashboard-frontend-v1",
+    "Comment": "MSBN dashboard frontend",
+    "Enabled": true,
+    "DefaultRootObject": "index.html",
+    "Origins": {
+      "Quantity": 1,
+      "Items": [
+        {
+          "Id": "s3-msbn-dashboard-frontend",
+          "DomainName": "msbn-dashboard-frontend-357621881714.s3.us-east-1.amazonaws.com",
+          "OriginAccessControlId": "E11XHVY91JWC6H",
+          "S3OriginConfig": {
+            "OriginAccessIdentity": ""
+          }
+        }
+      ]
+    },
+    "DefaultCacheBehavior": {
+      "TargetOriginId": "s3-msbn-dashboard-frontend",
+      "ViewerProtocolPolicy": "redirect-to-https",
+      "AllowedMethods": {
+        "Quantity": 2,
+        "Items": ["GET", "HEAD"],
+        "CachedMethods": {
+          "Quantity": 2,
+          "Items": ["GET", "HEAD"]
+        }
+      },
+      "Compress": true,
+      "ForwardedValues": {
+        "QueryString": false,
+        "Cookies": {
+          "Forward": "none"
+        }
+      },
+      "MinTTL": 0,
+      "DefaultTTL": 300,
+      "MaxTTL": 86400
+    },
+    "CustomErrorResponses": {
+      "Quantity": 2,
+      "Items": [
+        {
+          "ErrorCode": 403,
+          "ResponsePagePath": "/index.html",
+          "ResponseCode": "200",
+          "ErrorCachingMinTTL": 0
+        },
+        {
+          "ErrorCode": 404,
+          "ResponsePagePath": "/index.html",
+          "ResponseCode": "200",
+          "ErrorCachingMinTTL": 0
+        }
+      ]
+    }
+  }

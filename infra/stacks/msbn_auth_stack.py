@@ -16,7 +16,20 @@ class MsbnAuthStack(cdk.Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        auth = AuthConstruct(self, "Auth")
+        frontend_url = self.node.try_get_context("frontend_url")
+        callback_urls = ["http://localhost:3000/"]
+        logout_urls = ["http://localhost:3000/"]
+        if frontend_url:
+            normalized_frontend_url = str(frontend_url).rstrip("/") + "/"
+            callback_urls.append(normalized_frontend_url)
+            logout_urls.append(normalized_frontend_url)
+
+        auth = AuthConstruct(
+            self,
+            "Auth",
+            callback_urls=callback_urls,
+            logout_urls=logout_urls,
+        )
 
         # Expose for cross-stack references.
         self.user_pool = auth.user_pool
@@ -28,4 +41,9 @@ class MsbnAuthStack(cdk.Stack):
             self,
             "UserPoolClientId",
             value=self.user_pool_client.user_pool_client_id,
+        )
+        CfnOutput(
+            self,
+            "CognitoHostedUiDomain",
+            value=auth.user_pool_domain.base_url(),
         )

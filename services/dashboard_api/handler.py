@@ -62,6 +62,89 @@ def _get_reviewer_email(event: dict) -> str | None:
         return None
 
 
+def _hours_since(ts: str | None) -> int:
+    if not ts:
+        return 0
+    try:
+        parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    return max(0, int((datetime.now(timezone.utc) - parsed).total_seconds() // 3600))
+
+
+def _source_location_view(source_location: dict | None) -> dict:
+    source_location = source_location or {}
+    return {
+        "page": source_location.get("page")
+        or source_location.get("page_number")
+        or 1,
+        "spans": source_location.get("spans")
+        or source_location.get("text_spans")
+        or [],
+    }
+
+
+def _safe_practice_for(rule_code: str) -> str:
+    if rule_code.startswith("CONT"):
+        return "SP-5"
+    if rule_code.startswith(("PHYS", "PROG")):
+        return "SP-4"
+    return "SP"
+
+
+def _application_view(metadata: dict, document: dict | None = None) -> dict:
+    submitted_at = metadata.get("submission_ts") or metadata.get("uploadedAt") or ""
+    return {
+        "applicationId": metadata.get("applicationId"),
+        "applicantName": metadata.get("applicant_name") or "Unknown applicant",
+        "institution": metadata.get("institution") or "Unknown institution",
+        "country": metadata.get("country") or "—",
+        "submittedAt": submitted_at,
+        "ageHours": _hours_since(submitted_at),
+        "flagCount": int(metadata.get("flag_count", 0)),
+        "highestSeverity": _highest_severity(metadata),
+        "status": metadata.get("status"),
+        "caseRef": metadata.get("case_ref"),
+        "licenseNumber": metadata.get("license_number") or "—",
+        "programYear": (
+            metadata.get("program_year")
+            or metadata.get("grad_year")
+            or metadata.get("graduation_year")
+            or "—"
+        ),
+        "pageCount": int(
+            (document or {}).get("page_count")
+            or metadata.get("page_count")
+            or metadata.get("document_count")
+            or 0
+        ),
+    }
+
+
+def _highest_severity(metadata: dict) -> str | None:
+    high_count = int(metadata.get("high_severity_count", 0))
+    flag_count = int(metadata.get("flag_count", 0))
+    if high_count > 0:
+        return "High"
+    if flag_count > 0:
+        return "Medium"
+    return None
+
+
+def _flag_view(flag: dict) -> dict:
+    rule_code = flag.get("rule_code") or flag.get("ruleCode") or "UNKNOWN"
+    reviewer_status = flag.get("reviewer_status", "OPEN")
+    return {
+        "ruleCode": rule_code,
+        "ruleName": flag.get("rule_name") or rule_code,
+        "severity": flag.get("severity") or "Low",
+        "rationale": flag.get("rationale") or "No rationale provided.",
+        "sourceLocation": _source_location_view(flag.get("source_location")),
+        "status": "PENDING" if reviewer_status == "OPEN" else reviewer_status,
+        "safePractice": flag.get("safe_practice") or _safe_practice_for(rule_code),
+    }
+
+
 # Router.
 
 
@@ -137,26 +220,7 @@ def _list_applications(event: dict, table) -> dict:
 
     items = []
     for item in result.get("Items", []):
-        high_count = int(item.get("high_severity_count", 0))
-        flag_count = int(item.get("flag_count", 0))
-        if high_count > 0:
-            highest_severity = "High"
-        elif flag_count > 0:
-            highest_severity = "Medium"
-        else:
-            highest_severity = None
-
-        items.append(
-            {
-                "applicationId": item.get("applicationId"),
-                "applicantName": item.get("applicant_name"),
-                "institution": item.get("institution"),
-                "submittedAt": item.get("submission_ts") or item.get("uploadedAt"),
-                "flagCount": flag_count,
-                "highestSeverity": highest_severity,
-                "status": item.get("status"),
-            }
-        )
+        items.append(_application_view(item))
 
     next_cursor = None
     last_key = result.get("LastEvaluatedKey")
@@ -191,23 +255,13 @@ def _get_application(app_id: str | None, table) -> dict:
         KeyConditionExpression=Key("PK").eq(pk) & Key("SK").begins_with("FLAG#"),
     )
 
-    flags = []
-    for f in flag_resp.get("Items", []):
-        reviewer_status = f.get("reviewer_status", "OPEN")
-        flags.append(
-            {
-                "ruleCode": f.get("rule_code"),
-                "severity": f.get("severity"),
-                "rationale": f.get("rationale"),
-                "sourceLocation": f.get("source_location"),
-                "status": "PENDING" if reviewer_status == "OPEN" else reviewer_status,
-            }
-        )
+    flags = [_flag_view(f) for f in flag_resp.get("Items", [])]
 
     return _response(
         200,
         {
             "applicationId": app_id,
+            "application": _application_view(metadata, extraction),
             "metadata": metadata,
             "extraction": extraction,
             "flags": flags,

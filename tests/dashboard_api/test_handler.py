@@ -258,6 +258,27 @@ def test_list_applications_response_shape(dynamo_table, lambda_context):
     assert item["applicantName"] == "Jane Smith"
     assert item["institution"] == "University of Southern Mississippi"
     assert item["submittedAt"] is not None
+
+
+def test_list_applications_missing_metadata_stays_blank(
+    dynamo_table, lambda_context
+):
+    """Missing extracted values must not be replaced with fake display text."""
+    _seed_application(
+        dynamo_table,
+        "APP-BLANK",
+        applicant_name="",
+        institution="",
+        country="",
+    )
+
+    event = _make_event("GET /applications")
+    body = _parse_response(handler(event, lambda_context))
+    item = body["items"][0]
+
+    assert item["applicantName"] == ""
+    assert item["institution"] == ""
+    assert item["country"] == ""
     assert item["flagCount"] == 2
     assert item["highestSeverity"] == "High"
     assert item["status"] == "READY_FOR_REVIEW"

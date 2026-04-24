@@ -1,11 +1,12 @@
 import { useT, useThemeMode } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
-import { signOut } from "../auth";
+import { getCurrentUser, signOut } from "../auth";
 
 export function SettingsPage() {
   const t = useT();
   const { mode, setMode } = useThemeMode();
   const darkMode = mode === "dark";
+  const user = getCurrentUser();
 
   const handleLogout = () => {
     signOut();
@@ -19,7 +20,10 @@ export function SettingsPage() {
         subtitle="Manage your account and application preferences."
       />
       <div style={{ padding: "24px 34px 40px", maxWidth: 600 }}>
-        <Card title="Session" subtitle="You are currently signed in as S. Pant">
+        <Card
+          title="Session"
+          subtitle={`You are currently signed in as ${user?.displayName ?? "this user"}`}
+        >
           <div
             style={{
               display: "flex",
@@ -29,10 +33,10 @@ export function SettingsPage() {
           >
             <div>
               <div style={{ fontSize: 13, fontWeight: 500, color: t.ink }}>
-                s.pant@msbn.ms.gov
+                {user?.email || user?.displayName || "Signed in user"}
               </div>
               <div style={{ fontSize: 11, color: t.ink4, marginTop: 2 }}>
-                Role: Reviewer &middot; SoD enforced
+                Role: {user?.role ?? "Reviewer"} &middot; SoD enforced
               </div>
             </div>
             <Btn variant="outline" onClick={handleLogout}>

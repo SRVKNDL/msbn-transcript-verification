@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useT } from "../theme";
 import { listApplications } from "../api";
+import { getCurrentUser } from "../auth";
 
 interface ShellProps {
   page: string;
@@ -11,11 +12,18 @@ interface ShellProps {
 export function Shell({ page, onNavigate, children }: ShellProps) {
   const t = useT();
   const [pendingCount, setPendingCount] = useState(0);
+  const user = getCurrentUser();
 
   useEffect(() => {
     listApplications()
       .then((apps) =>
-        setPendingCount(apps.filter((a) => a.status === "READY_FOR_REVIEW").length)
+        setPendingCount(
+          apps.filter(
+            (a) =>
+              a.status === "READY_FOR_REVIEW" &&
+              Boolean(a.applicantName.trim() || a.institution.trim())
+          ).length
+        )
       )
       .catch(() => setPendingCount(0));
   }, []);
@@ -92,7 +100,9 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
           </div>
         </div>
         <div style={{ flex: 1 }} />
-        <div style={{ fontSize: 12, opacity: 0.85 }}>S. Pant</div>
+        <div style={{ fontSize: 12, opacity: 0.85 }}>
+          {user?.displayName ?? "Signed in"}
+        </div>
         <div
           style={{
             width: 30,
@@ -106,7 +116,7 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
             fontWeight: 600,
           }}
         >
-          SP
+          {user?.initials ?? "U"}
         </div>
       </div>
 

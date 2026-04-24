@@ -28,7 +28,7 @@ class StorageConstruct(Construct):
                 s3.CorsRule(
                     allowed_methods=[s3.HttpMethods.PUT],
                     allowed_origins=["*"],
-                    allowed_headers=["Content-Type"],
+                    allowed_headers=["Content-Type", "x-amz-meta-*"],
                     max_age=300,
                 )
             ],

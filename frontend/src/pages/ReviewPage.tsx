@@ -6,6 +6,7 @@ import { ConfidenceDot } from "../components/ConfidenceDot";
 import { ProgressBar } from "../components/ProgressBar";
 import { ActionButton } from "../components/ActionButton";
 import { getApplication, listApplications, submitDecision } from "../api";
+import { getCurrentUser } from "../auth";
 import type { Application, Flag, Decisions, OverallDecision, ExtractionData } from "../types";
 
 // --- Toast notification ---
@@ -458,6 +459,7 @@ function ExtractedDataDrawer({ flag, extraction, onClose }: {
 export function ReviewPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const user = getCurrentUser();
 
   const [app, setApp] = useState<Application | null>(null);
   const [queueApps, setQueueApps] = useState<Application[]>([]);
@@ -651,7 +653,7 @@ export function ReviewPage() {
           display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
         }} title="Keyboard shortcuts (?)">&quest;</button>
         <div style={{ fontSize: 11, color: TOKENS.ink3, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
-          s.pant@msbn.ms.gov · SoD enforced
+          {(user?.email || user?.displayName || "Signed in user")} · SoD enforced
         </div>
       </div>
 

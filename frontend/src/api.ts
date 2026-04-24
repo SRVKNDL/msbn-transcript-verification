@@ -78,18 +78,18 @@ function normalizeApplication(raw: RawApplication): Application {
   const submittedAt = raw.submittedAt ?? raw.submission_ts ?? raw.uploadedAt ?? "";
   return {
     applicationId: raw.applicationId ?? "",
-    applicantName: raw.applicantName ?? raw.applicant_name ?? "Unknown applicant",
-    institution: raw.institution ?? "Unknown institution",
-    country: raw.country ?? "USA",
+    applicantName: raw.applicantName ?? raw.applicant_name ?? "",
+    institution: raw.institution ?? "",
+    country: raw.country ?? "",
     submittedAt,
     ageHours: raw.ageHours ?? ageHours(submittedAt),
     flagCount: raw.flagCount ?? raw.flag_count ?? 0,
     highestSeverity: raw.highestSeverity ?? null,
     status: raw.status ?? "UNKNOWN",
     caseRef: raw.caseRef ?? raw.case_ref ?? null,
-    licenseNumber: raw.licenseNumber ?? raw.license_number ?? "—",
+    licenseNumber: raw.licenseNumber ?? raw.license_number ?? "",
     programYear:
-      raw.programYear ?? raw.program_year ?? raw.grad_year ?? raw.graduation_year ?? "—",
+      raw.programYear ?? raw.program_year ?? raw.grad_year ?? raw.graduation_year ?? "",
     pageCount: raw.pageCount ?? raw.page_count ?? raw.document_count ?? 0,
   };
 }
@@ -196,6 +196,18 @@ export async function submitDecision(
 }
 
 export async function uploadTranscript(file: File): Promise<{ s3Key: string }> {
+  return uploadTranscriptWithDetails(file, {});
+}
+
+export async function uploadTranscriptWithDetails(
+  file: File,
+  details: {
+    applicantName?: string;
+    institution?: string;
+    country?: string;
+    program?: string;
+  }
+): Promise<{ s3Key: string }> {
   requireApiBase();
   const headers = await authHeaders();
   const res = await fetch(`${API_BASE}/uploads`, {
@@ -205,14 +217,22 @@ export async function uploadTranscript(file: File): Promise<{ s3Key: string }> {
       filename: file.name,
       contentType: "application/pdf",
       size: file.size,
+      applicationDetails: details,
     }),
   });
   if (!res.ok) throw new Error(`API ${res.status}: upload URL request failed`);
 
-  const data = (await res.json()) as { uploadUrl: string; s3Key: string };
+  const data = (await res.json()) as {
+    uploadUrl: string;
+    s3Key: string;
+    metadataHeaders?: Record<string, string>;
+  };
   const uploadRes = await fetch(data.uploadUrl, {
     method: "PUT",
-    headers: { "Content-Type": "application/pdf" },
+    headers: {
+      "Content-Type": "application/pdf",
+      ...(data.metadataHeaders ?? {}),
+    },
     body: file,
   });
   if (!uploadRes.ok) {

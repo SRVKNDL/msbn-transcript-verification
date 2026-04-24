@@ -94,25 +94,48 @@ def _safe_practice_for(rule_code: str) -> str:
     return "SP"
 
 
+def _clean_text(value) -> str:
+    return str(value or "").strip()[:120]
+
+
+def _upload_metadata_from_body(body: dict) -> tuple[dict, dict]:
+    details = body.get("applicationDetails") or {}
+    if not isinstance(details, dict):
+        details = {}
+
+    fields = {
+        "applicant_name": _clean_text(details.get("applicantName")),
+        "institution": _clean_text(details.get("institution")),
+        "country": _clean_text(details.get("country")),
+        "program": _clean_text(details.get("program")),
+    }
+    metadata = {key: value for key, value in fields.items() if value}
+    headers = {
+        f"x-amz-meta-{key.replace('_', '-')}": value
+        for key, value in metadata.items()
+    }
+    return metadata, headers
+
+
 def _application_view(metadata: dict, document: dict | None = None) -> dict:
     submitted_at = metadata.get("submission_ts") or metadata.get("uploadedAt") or ""
     return {
         "applicationId": metadata.get("applicationId"),
-        "applicantName": metadata.get("applicant_name") or "Unknown applicant",
-        "institution": metadata.get("institution") or "Unknown institution",
-        "country": metadata.get("country") or "USA",
+        "applicantName": metadata.get("applicant_name") or "",
+        "institution": metadata.get("institution") or "",
+        "country": metadata.get("country") or "",
         "submittedAt": submitted_at,
         "ageHours": _hours_since(submitted_at),
         "flagCount": int(metadata.get("flag_count", 0)),
         "highestSeverity": _highest_severity(metadata),
         "status": metadata.get("status"),
         "caseRef": metadata.get("case_ref"),
-        "licenseNumber": metadata.get("license_number") or "—",
+        "licenseNumber": metadata.get("license_number") or "",
         "programYear": (
             metadata.get("program_year")
             or metadata.get("grad_year")
             or metadata.get("graduation_year")
-            or "—"
+            or ""
         ),
         "pageCount": int(
             (document or {}).get("page_count")
@@ -259,6 +282,7 @@ def _create_upload_url(event: dict) -> dict:
     upload_id = uuid.uuid4().hex
     safe_name = filename.rsplit("/", 1)[-1].replace("\\", "_")
     s3_key = f"uploads/{upload_id}/{safe_name}"
+    metadata, metadata_headers = _upload_metadata_from_body(body)
 
     upload_url = _s3.generate_presigned_url(
         ClientMethod="put_object",
@@ -266,6 +290,7 @@ def _create_upload_url(event: dict) -> dict:
             "Bucket": _BUCKET_NAME,
             "Key": s3_key,
             "ContentType": "application/pdf",
+            "Metadata": metadata,
         },
         ExpiresIn=900,
         HttpMethod="PUT",
@@ -277,6 +302,7 @@ def _create_upload_url(event: dict) -> dict:
             "uploadUrl": upload_url,
             "s3Key": s3_key,
             "expiresIn": 900,
+            "metadataHeaders": metadata_headers,
         },
     )
 

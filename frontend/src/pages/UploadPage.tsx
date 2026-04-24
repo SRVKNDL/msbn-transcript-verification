@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useT } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
-import { uploadTranscript } from "../api";
+import { uploadTranscriptWithDetails } from "../api";
 
 interface FileEntry {
   id: string;
@@ -12,10 +12,65 @@ interface FileEntry {
   error?: string;
 }
 
+interface ApplicationDraft {
+  applicantName: string;
+  institution: string;
+  country: string;
+  program: string;
+}
+
+const emptyDraft: ApplicationDraft = {
+  applicantName: "",
+  institution: "",
+  country: "",
+  program: "",
+};
+
+function cleanExtractedValue(value: string | undefined) {
+  return (value ?? "")
+    .replace(/[\u0000-\u001f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
+function extractAfterLabel(text: string, labels: string[]) {
+  for (const label of labels) {
+    const match = text.match(
+      new RegExp(`${label}\\s*[:\\-]?\\s*([^\\n\\r]{2,120})`, "i")
+    );
+    const value = cleanExtractedValue(match?.[1]);
+    if (value) return value;
+  }
+  return "";
+}
+
+async function extractDraftFromPdf(file: File): Promise<Partial<ApplicationDraft>> {
+  const buffer = await file.arrayBuffer();
+  const text = new TextDecoder("latin1").decode(buffer);
+  const filenameBase = file.name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ");
+
+  return {
+    applicantName:
+      extractAfterLabel(text, ["student name", "applicant name", "name"]) ||
+      cleanExtractedValue(filenameBase.match(/^([a-z ,.'-]{4,80})/i)?.[1]),
+    institution: extractAfterLabel(text, [
+      "institution",
+      "school",
+      "college",
+      "university",
+    ]),
+    country: extractAfterLabel(text, ["country"]),
+    program: extractAfterLabel(text, ["program", "degree", "major"]),
+  };
+}
+
 export function UploadPage() {
   const t = useT();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const selectedFilesRef = useRef<Record<string, File>>({});
   const [files, setFiles] = useState<FileEntry[]>([]);
+  const [draft, setDraft] = useState<ApplicationDraft>(emptyDraft);
   const [dragOver, setDragOver] = useState(false);
 
   const formatSize = (bytes: number) => {
@@ -36,15 +91,21 @@ export function UploadPage() {
       status: "queued" as const,
     }));
     setFiles((prev) => [...prev, ...newEntries]);
-    void Promise.all(
-      pdfFiles.map((file, index) => {
-        const entry = newEntries[index];
-        return entry ? uploadOne(file, entry.id) : Promise.resolve();
-      })
-    );
+    void extractDraftFromPdf(pdfFiles[0]).then((extracted) => {
+      setDraft((current) => ({
+        applicantName: current.applicantName || extracted.applicantName || "",
+        institution: current.institution || extracted.institution || "",
+        country: current.country || extracted.country || "",
+        program: current.program || extracted.program || "",
+      }));
+    });
+    newEntries.forEach((entry, index) => {
+      const file = pdfFiles[index];
+      if (file) selectedFilesRef.current[entry.id] = file;
+    });
   };
 
-  const uploadOne = async (file: File, id: string) => {
+  const uploadOne = async (file: File, id: string, details: ApplicationDraft) => {
     setFiles((prev) =>
       prev.map((entry) =>
         entry.id === id
@@ -53,7 +114,7 @@ export function UploadPage() {
       )
     );
     try {
-      const result = await uploadTranscript(file);
+      const result = await uploadTranscriptWithDetails(file, details);
       setFiles((prev) =>
         prev.map((entry) =>
           entry.id === id
@@ -76,6 +137,18 @@ export function UploadPage() {
     }
   };
 
+  const startUploads = () => {
+    const details = { ...draft };
+    void Promise.all(
+      files
+        .filter((entry) => entry.status === "queued" || entry.status === "failed")
+        .map((entry) => {
+          const file = selectedFilesRef.current[entry.id];
+          return file ? uploadOne(file, entry.id, details) : Promise.resolve();
+        })
+    );
+  };
+
   return (
     <>
       <PageHeader
@@ -86,13 +159,64 @@ export function UploadPage() {
       <div style={{ padding: "24px 34px 40px", maxWidth: 880 }}>
         <Card
           title="Application details"
-          subtitle="Applicant, institution, country, and program details are extracted from the transcript after upload. Application ID is assigned by intake."
+          subtitle="Review or enter the applicant information before upload."
         >
-          <div style={{ fontSize: 13, color: t.ink2, lineHeight: 1.6 }}>
-            Once the PDF is uploaded, S3 starts the extraction pipeline. The case
-            appears in the review queue when Nova extraction and rule validation
-            finish. If no country is printed on the transcript, the system stores
-            USA by default.
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 12,
+            }}
+          >
+            {(
+              [
+                ["applicantName", "Applicant name"],
+                ["institution", "Institution"],
+                ["country", "Country"],
+                ["program", "Program"],
+              ] as const
+            ).map(([key, label]) => (
+              <label
+                key={key}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 5,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: t.ink3,
+                    letterSpacing: 0.5,
+                    textTransform: "uppercase",
+                    fontFamily: t.mono,
+                  }}
+                >
+                  {label}
+                </span>
+                <input
+                  value={draft[key]}
+                  placeholder="not extracted"
+                  onChange={(e) =>
+                    setDraft((current) => ({
+                      ...current,
+                      [key]: e.target.value,
+                    }))
+                  }
+                  style={{
+                    border: `1px solid ${t.line}`,
+                    background: t.surfaceAlt,
+                    color: t.ink,
+                    padding: "9px 10px",
+                    borderRadius: 3,
+                    fontSize: 13,
+                    fontFamily: "inherit",
+                    outlineColor: t.accent,
+                  }}
+                />
+              </label>
+            ))}
           </div>
         </Card>
 
@@ -258,6 +382,7 @@ export function UploadPage() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      delete selectedFilesRef.current[f.id];
                       setFiles((x) => x.filter((entry) => entry.id !== f.id));
                     }}
                     style={{
@@ -286,8 +411,16 @@ export function UploadPage() {
           }}
         >
           <Btn variant="ghost">Cancel</Btn>
-          <Btn variant="primary" disabled={files.length === 0 || files.some((f) => f.status === "uploading" || f.status === "queued")}>
-            Processing starts automatically
+          <Btn
+            variant="primary"
+            disabled={
+              files.length === 0 ||
+              files.some((f) => f.status === "uploading") ||
+              files.every((f) => f.status === "uploaded")
+            }
+            onClick={startUploads}
+          >
+            Start processing
           </Btn>
         </div>
       </div>

@@ -11,6 +11,13 @@ interface AuthSession {
   expiresAt: number;
 }
 
+export interface CurrentUser {
+  displayName: string;
+  email: string;
+  initials: string;
+  role: string;
+}
+
 interface TokenResponse {
   IdToken: string;
   AccessToken: string;
@@ -31,6 +38,38 @@ function getSession(): AuthSession | null {
     sessionStorage.removeItem(SESSION_KEY);
     return null;
   }
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const payload = token.split(".")[1];
+  if (!payload) return null;
+  try {
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(
+      atob(normalized)
+        .split("")
+        .map((char) => `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`)
+        .join("")
+    );
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function getStringClaim(claims: Record<string, unknown>, key: string) {
+  const value = claims[key];
+  return typeof value === "string" ? value : "";
+}
+
+function initialsFor(displayName: string, email: string) {
+  const source = displayName || email.split("@")[0] || "User";
+  const parts = source
+    .replace(/[._-]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  const initials = parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+  return initials || "U";
 }
 
 function storeSession(tokens: TokenResponse, existingRefreshToken?: string) {
@@ -101,6 +140,29 @@ export async function getIdToken() {
   if (session.expiresAt > Date.now() + 60_000) return session.idToken;
   const refreshed = await refreshSession(session);
   return refreshed?.idToken ?? null;
+}
+
+export function getCurrentUser(): CurrentUser | null {
+  const session = getSession();
+  if (!session) return null;
+  const claims = decodeJwtPayload(session.idToken);
+  if (!claims) return null;
+
+  const email = getStringClaim(claims, "email");
+  const givenName = getStringClaim(claims, "given_name");
+  const familyName = getStringClaim(claims, "family_name");
+  const fullName = getStringClaim(claims, "name");
+  const username = getStringClaim(claims, "cognito:username");
+  const role = getStringClaim(claims, "custom:role") || "Reviewer";
+  const displayName =
+    fullName || [givenName, familyName].filter(Boolean).join(" ") || email || username || "User";
+
+  return {
+    displayName,
+    email,
+    initials: initialsFor(displayName, email),
+    role,
+  };
 }
 
 export async function signIn(email: string, password: string) {

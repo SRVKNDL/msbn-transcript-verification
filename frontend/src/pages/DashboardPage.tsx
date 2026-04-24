@@ -34,6 +34,10 @@ function FlagDot({ n, color }: { n: number; color: string }) {
   );
 }
 
+function hasExtractedSummary(app: Application) {
+  return Boolean(app.applicantName.trim() || app.institution.trim());
+}
+
 function ShortcutBtn({
   label,
   hint,
@@ -87,7 +91,9 @@ export function DashboardPage({
       .catch((err: Error) => setError(err.message));
   }, []);
 
-  const awaiting = apps.filter((a) => a.status === "READY_FOR_REVIEW");
+  const awaiting = apps
+    .filter((a) => a.status === "READY_FOR_REVIEW")
+    .filter(hasExtractedSummary);
   const highSeverity = awaiting.filter((a) => a.highestSeverity === "High").length;
   const flagged = awaiting.reduce((sum, app) => sum + app.flagCount, 0);
   const queue = awaiting.slice(0, 5);
@@ -244,6 +250,21 @@ export function DashboardPage({
                 </tr>
               </thead>
               <tbody>
+                {queue.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      style={{
+                        padding: "34px 18px",
+                        textAlign: "center",
+                        color: t.ink4,
+                        fontSize: 13,
+                      }}
+                    >
+                      No applications awaiting review.
+                    </td>
+                  </tr>
+                )}
                 {queue.map((r, i) => (
                   <tr
                     key={r.applicationId}
@@ -345,6 +366,18 @@ export function DashboardPage({
           >
             <Card title="Recent activity" subtitle="Last 48 hours" pad={0}>
               <div>
+                {queue.length === 0 && (
+                  <div
+                    style={{
+                      padding: "34px 18px",
+                      textAlign: "center",
+                      color: t.ink4,
+                      fontSize: 13,
+                    }}
+                  >
+                    No recent activity.
+                  </div>
+                )}
                 {queue.map((a, i) => (
                   <div
                     key={a.applicationId}

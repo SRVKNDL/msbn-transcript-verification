@@ -62,21 +62,21 @@ def dynamo_table():
         yield table
 
 
-def _seed_metadata(table, application_id: str) -> None:
+def _seed_metadata(table, application_id: str, **overrides) -> None:
     """Write a minimal METADATA record, as IntakeLambda would."""
-    table.put_item(
-        Item={
-            "PK": f"APP#{application_id}",
-            "SK": "METADATA",
-            "entity_type": "METADATA",
-            "applicationId": application_id,
-            "status": "EVALUATING",
-            "uploadedAt": "2026-04-14T18:32:01.000000+00:00",
-            "s3_key": "uploads/transcript_sample.pdf",
-            "originalFilename": "transcript_sample.pdf",
-            "size_bytes": 204800,
-        }
-    )
+    item = {
+        "PK": f"APP#{application_id}",
+        "SK": "METADATA",
+        "entity_type": "METADATA",
+        "applicationId": application_id,
+        "status": "EVALUATING",
+        "uploadedAt": "2026-04-14T18:32:01.000000+00:00",
+        "s3_key": "uploads/transcript_sample.pdf",
+        "originalFilename": "transcript_sample.pdf",
+        "size_bytes": 204800,
+    }
+    item.update(overrides)
+    table.put_item(Item=item)
 
 
 def _make_event(application_id: str, flag_count: int, flags: list | None = None) -> dict:
@@ -172,6 +172,25 @@ def test_metadata_other_fields_preserved(dynamo_table, lambda_context):
     assert item["originalFilename"] == "transcript_sample.pdf"
     assert item["s3_key"] == "uploads/transcript_sample.pdf"
     assert item["uploadedAt"]
+
+
+def test_metadata_manual_applicant_preserved_when_not_extracted(
+    dynamo_table, lambda_context
+):
+    """Blank extraction values must not replace manually entered intake metadata."""
+    _seed_metadata(
+        dynamo_table,
+        "APP-008",
+        applicant_name="Maria Lopez",
+        institution="Delta College",
+        country="Mexico",
+    )
+    handler(_make_event("APP-008", 0), lambda_context)
+
+    item = _get_metadata(dynamo_table, "APP-008")
+    assert item["applicant_name"] == "Maria Lopez"
+    assert item["institution"] == "Delta College"
+    assert item["country"] == "Mexico"
 
 
 # ── AUDIT record ───────────────────────────────────────────────────────────────

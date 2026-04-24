@@ -44,21 +44,28 @@ def handler(event, context):
         " flag_count = :fc,"
         " ready_for_review_at = :ts,"
         " last_updated_ts = :ts,"
-        " submission_ts = :ts,"
-        " applicant_name = :applicant,"
-        " institution = :institution,"
-        " country = :country"
+        " submission_ts = :ts"
     )
     expression_values = {
         ":status": "READY_FOR_REVIEW",
         ":fc": flag_count,
         ":ts": now,
-        ":applicant": _clean_value(aggregation.get("applicant_name"))
-        or "Unknown applicant",
-        ":institution": _clean_value(aggregation.get("institution"))
-        or "Unknown institution",
-        ":country": _clean_value(aggregation.get("country")) or "USA",
     }
+
+    applicant_name = _clean_value(aggregation.get("applicant_name"))
+    if applicant_name:
+        update_expression += ", applicant_name = :applicant"
+        expression_values[":applicant"] = applicant_name
+
+    institution = _clean_value(aggregation.get("institution"))
+    if institution:
+        update_expression += ", institution = :institution"
+        expression_values[":institution"] = institution
+
+    country = _clean_value(aggregation.get("country"))
+    if country:
+        update_expression += ", country = :country"
+        expression_values[":country"] = country
 
     license_number = _clean_value(aggregation.get("license_number"))
     if license_number:

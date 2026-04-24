@@ -16,6 +16,7 @@ logger.setLevel(logging.INFO)
 # Reuse clients across warm invocations.
 _dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 _sfn = boto3.client("stepfunctions", region_name="us-east-1")
+_s3 = boto3.client("s3", region_name="us-east-1")
 
 _TABLE_NAME = os.environ.get("TABLE_NAME", "msbn-applications")
 _STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "")
@@ -81,6 +82,7 @@ def _process_record(record: dict) -> dict:
     uploaded_at = datetime.now(timezone.utc).isoformat()
 
     table = _dynamodb.Table(_TABLE_NAME)
+    upload_metadata = _get_upload_metadata(bucket=bucket, s3_key=s3_key)
     item = {
         "PK": f"APP#{application_id}",
         "SK": "METADATA",
@@ -91,6 +93,7 @@ def _process_record(record: dict) -> dict:
         "s3_key": s3_key,
         "originalFilename": original_filename,
         "size_bytes": size_bytes,
+        **upload_metadata,
     }
     table.put_item(Item=item)
 
@@ -110,6 +113,38 @@ def _process_record(record: dict) -> dict:
     _start_pipeline(application_id=application_id, bucket=bucket, s3_key=s3_key)
 
     return {"applicationId": application_id, "s3_key": s3_key}
+
+
+def _get_upload_metadata(*, bucket: str, s3_key: str) -> dict:
+    try:
+        response = _s3.head_object(Bucket=bucket, Key=s3_key)
+    except ClientError as exc:
+        logger.warning(
+            json.dumps(
+                {
+                    "message": "IntakeLambda could not read upload metadata",
+                    "s3_key": s3_key,
+                    "errorCode": exc.response["Error"]["Code"],
+                }
+            )
+        )
+        return {}
+
+    metadata = response.get("Metadata") or {}
+    return {
+        "applicant_name": (
+            metadata.get("applicant-name") or metadata.get("applicant_name") or ""
+        ),
+        "institution": metadata.get("institution") or "",
+        "country": metadata.get("country") or "",
+        "program": metadata.get("program") or "",
+        "program_year": (
+            metadata.get("program-year") or metadata.get("program_year") or ""
+        ),
+        "license_number": (
+            metadata.get("license-number") or metadata.get("license_number") or ""
+        ),
+    }
 
 
 def _start_pipeline(*, application_id: str, bucket: str, s3_key: str) -> None:

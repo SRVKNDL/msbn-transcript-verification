@@ -1,17 +1,10 @@
-// Uses mock data until VITE_API_BASE points at the deployed API.
-
 import type { Application, Flag, ExtractionData, AuditEvent } from "./types";
-import {
-  MOCK_APPLICATIONS,
-  MOCK_FLAGS_BY_APP,
-  CASE_A_EXTRACTION,
-  MOCK_AUDIT_BY_APP,
-} from "./mock-data";
 import { getIdToken } from "./auth";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 async function fetchJson<T>(path: string): Promise<T> {
+  requireApiBase();
   const headers = await authHeaders();
   const res = await fetch(`${API_BASE}${path}`, { headers });
   if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
@@ -21,6 +14,12 @@ async function fetchJson<T>(path: string): Promise<T> {
 async function authHeaders() {
   const token = await getIdToken();
   return token ? { Authorization: `Bearer ${token}` } : undefined;
+}
+
+function requireApiBase() {
+  if (!API_BASE) {
+    throw new Error("VITE_API_BASE is required. Production data cannot load from mock fixtures.");
+  }
 }
 
 function ageHours(submittedAt?: string) {
@@ -81,7 +80,7 @@ function normalizeApplication(raw: RawApplication): Application {
     applicationId: raw.applicationId ?? "",
     applicantName: raw.applicantName ?? raw.applicant_name ?? "Unknown applicant",
     institution: raw.institution ?? "Unknown institution",
-    country: raw.country ?? "—",
+    country: raw.country ?? "USA",
     submittedAt,
     ageHours: raw.ageHours ?? ageHours(submittedAt),
     flagCount: raw.flagCount ?? raw.flag_count ?? 0,
@@ -150,10 +149,7 @@ function normalizeAuditEvent(raw: RawAuditEvent): AuditEvent {
   };
 }
 
-// Mock-backed API surface for local demos.
-
 export async function listApplications(): Promise<Application[]> {
-  if (!API_BASE) return MOCK_APPLICATIONS;
   const data = await fetchJson<{ items: RawApplication[] }>("/applications");
   return data.items.map(normalizeApplication);
 }
@@ -163,11 +159,6 @@ export async function getApplication(id: string): Promise<{
   flags: Flag[];
   extraction: ExtractionData;
 }> {
-  if (!API_BASE) {
-    const app = MOCK_APPLICATIONS.find((a) => a.applicationId === id);
-    if (!app) throw new Error(`Application ${id} not found`);
-    return { application: app, flags: MOCK_FLAGS_BY_APP[id] ?? [], extraction: CASE_A_EXTRACTION };
-  }
   const data = await fetchJson<RawDetail>(`/applications/${id}`);
   const metadata = data.application ?? data.metadata ?? { applicationId: data.applicationId };
   return {
@@ -181,7 +172,6 @@ export async function getApplication(id: string): Promise<{
 }
 
 export async function getAuditTrail(id: string): Promise<AuditEvent[]> {
-  if (!API_BASE) return MOCK_AUDIT_BY_APP[id] ?? [];
   const data = await fetchJson<{ items: RawAuditEvent[] }>(
     `/applications/${id}/audit`
   );
@@ -195,11 +185,7 @@ export async function submitDecision(
     overallDecision: string;
   }
 ): Promise<void> {
-  if (!API_BASE) {
-    // Local mock only; the real API call is below.
-    console.log("Decision submitted (mock):", id, payload);
-    return;
-  }
+  requireApiBase();
   const headers = await authHeaders();
   const res = await fetch(`${API_BASE}/applications/${id}/decision`, {
     method: "POST",
@@ -207,4 +193,30 @@ export async function submitDecision(
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`API ${res.status}: decision submit failed`);
+}
+
+export async function uploadTranscript(file: File): Promise<{ s3Key: string }> {
+  requireApiBase();
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/uploads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({
+      filename: file.name,
+      contentType: "application/pdf",
+      size: file.size,
+    }),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: upload URL request failed`);
+
+  const data = (await res.json()) as { uploadUrl: string; s3Key: string };
+  const uploadRes = await fetch(data.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "application/pdf" },
+    body: file,
+  });
+  if (!uploadRes.ok) {
+    throw new Error(`S3 ${uploadRes.status}: transcript upload failed`);
+  }
+  return { s3Key: data.s3Key };
 }

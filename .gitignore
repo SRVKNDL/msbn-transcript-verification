@@ -200,6 +200,7 @@ cdk.out/
 # Node / frontend
 node_modules/
 frontend/dist/
+*.tsbuildinfo
 
 # macOS
 .DS_Store

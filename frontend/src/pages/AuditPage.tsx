@@ -1,20 +1,19 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { TOKENS, LAYOUT } from "../tokens";
-import { getAuditTrail } from "../api";
-import { MOCK_APPLICATIONS } from "../mock-data";
-import type { AuditEvent } from "../types";
+import { getApplication, getAuditTrail } from "../api";
+import type { Application, AuditEvent } from "../types";
 
 export function AuditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [events, setEvents] = useState<AuditEvent[]>([]);
-
-  const app = MOCK_APPLICATIONS.find((a) => a.applicationId === id);
+  const [app, setApp] = useState<Application | null>(null);
 
   useEffect(() => {
     if (!id) return;
     getAuditTrail(id).then(setEvents);
+    getApplication(id).then((data) => setApp(data.application));
   }, [id]);
 
   return (

@@ -5,9 +5,7 @@ import { SeverityChip } from "../components/SeverityChip";
 import { ConfidenceDot } from "../components/ConfidenceDot";
 import { ProgressBar } from "../components/ProgressBar";
 import { ActionButton } from "../components/ActionButton";
-import { MockPdfPage } from "../components/MockPdfPage";
-import { getApplication, submitDecision } from "../api";
-import { MOCK_APPLICATIONS, MARK_PRESETS, CASE_A_EXTRACTION } from "../mock-data";
+import { getApplication, listApplications, submitDecision } from "../api";
 import type { Application, Flag, Decisions, OverallDecision, ExtractionData } from "../types";
 
 // --- Toast notification ---
@@ -214,7 +212,6 @@ function FocusMode({ flags, activeIdx, setActiveIdx, decisions, setDecisions, on
     setDecisions((x) => ({ ...x, [flag.ruleCode]: { ...x[flag.ruleCode], decision: v, notes: x[flag.ruleCode]?.notes ?? "" } }));
   const setNotes = (n: string) =>
     setDecisions((x) => ({ ...x, [flag.ruleCode]: { ...x[flag.ruleCode], decision: x[flag.ruleCode]?.decision, notes: n } }));
-  const pageMarks = MARK_PRESETS[`A-${currentPage}-${flag.ruleCode}`] ?? [];
   const resolvedCount = flags.filter((f) => decisions[f.ruleCode]?.decision).length;
 
   useEffect(() => { setCurrentPage(flag.sourceLocation.page); }, [activeIdx]);
@@ -271,7 +268,9 @@ function FocusMode({ flags, activeIdx, setActiveIdx, decisions, setDecisions, on
               ))}
             </div>
           </div>
-          <MockPdfPage page={currentPage} total={4} marks={pageMarks} caseRef="A" />
+          <div style={{ padding: 28, color: TOKENS.ink3 }}>
+            Transcript page preview is available from processed S3 page images after deployment wiring.
+          </div>
         </div>
 
         {/* Flag detail */}
@@ -461,8 +460,9 @@ export function ReviewPage() {
   const navigate = useNavigate();
 
   const [app, setApp] = useState<Application | null>(null);
+  const [queueApps, setQueueApps] = useState<Application[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
-  const [extraction, setExtraction] = useState<ExtractionData>(CASE_A_EXTRACTION);
+  const [extraction, setExtraction] = useState<ExtractionData>({ physical: [], content: [], program: [] });
   const [activeFlagIdx, setActiveFlagIdx] = useState(0);
   const [decisions, setDecisions] = useState<Decisions>({});
   const [currentPage, setCurrentPage] = useState(2);
@@ -533,6 +533,7 @@ export function ReviewPage() {
       setFlags(data.flags);
       setExtraction(data.extraction);
     });
+    listApplications().then(setQueueApps).catch(() => setQueueApps([]));
   }, [id]);
 
   if (!app) return (
@@ -585,8 +586,6 @@ export function ReviewPage() {
     return (d.notes ?? "").trim().length > 0;
   });
   const canSubmit = allDecided && allOverridesNoted && !!overallDecision;
-  const pageMarks = activeFlag ? (MARK_PRESETS[`A-${currentPage}-${activeFlag.ruleCode}`] ?? []) : [];
-
   const jumpTo = (flag: Flag) => setCurrentPage(flag.sourceLocation.page);
   const openDrawer = (flag: Flag | null) => { setDrawerFlag(flag); setDrawerOpen(true); };
 
@@ -661,11 +660,11 @@ export function ReviewPage() {
         <div style={{ padding: "12px 14px 10px", borderBottom: `1px solid ${TOKENS.line2}` }}>
           <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 }}>Review queue</div>
           <div style={{ fontSize: 13, color: TOKENS.ink2 }}>
-            <span style={{ fontWeight: 600 }}>{MOCK_APPLICATIONS.length}</span> pending · sorted by age
+            <span style={{ fontWeight: 600 }}>{queueApps.length}</span> pending · sorted by age
           </div>
         </div>
         <div style={{ flex: 1, overflow: "auto" }}>
-          {MOCK_APPLICATIONS.map((a) => (
+          {queueApps.map((a) => (
             <QueueRow key={a.applicationId} app={a} active={a.applicationId === id}
               onClick={() => navigate(`/review/${a.applicationId}`)} />
           ))}
@@ -693,12 +692,29 @@ export function ReviewPage() {
             ))}
           </div>
         </div>
-        <MockPdfPage page={currentPage} total={4} marks={pageMarks} caseRef="A" scale={pdfScale} />
+        <div style={{
+          width: Math.round(560 * pdfScale),
+          minHeight: Math.round(720 * pdfScale),
+          background: TOKENS.paper,
+          border: `1px solid ${TOKENS.line}`,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 28,
+          boxSizing: "border-box",
+          color: TOKENS.ink3,
+          fontSize: 13,
+          textAlign: "center",
+          lineHeight: 1.5,
+        }}>
+          Transcript page preview is available from processed S3 page images after deployment wiring.
+        </div>
         <div style={{
           display: "flex", alignItems: "center", gap: 8,
           fontSize: 10, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace",
         }}>
-          <span>source: uploads/transcript_okonkwo.pdf · nova-pro-v1:0</span>
+          <span>source: uploaded transcript · nova-pro-v1:0</span>
           <div style={{ height: 12, width: 1, background: TOKENS.line }} />
           <button onClick={() => setPdfScale((s) => Math.max(0.6, s - 0.1))} style={{
             border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,

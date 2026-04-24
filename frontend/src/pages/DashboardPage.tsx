@@ -1,5 +1,8 @@
+import { useEffect, useState } from "react";
 import { useT } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
+import { listApplications } from "../api";
+import type { Application } from "../types";
 
 function timeAgo(hrs: number) {
   if (hrs < 24) return `${hrs}h ago`;
@@ -75,101 +78,53 @@ export function DashboardPage({
   onNavigate: (id: string) => void;
 }) {
   const t = useT();
+  const [apps, setApps] = useState<Application[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listApplications()
+      .then(setApps)
+      .catch((err: Error) => setError(err.message));
+  }, []);
+
+  const awaiting = apps.filter((a) => a.status === "READY_FOR_REVIEW");
+  const highSeverity = awaiting.filter((a) => a.highestSeverity === "High").length;
+  const flagged = awaiting.reduce((sum, app) => sum + app.flagCount, 0);
+  const queue = awaiting.slice(0, 5);
 
   const stats = [
     {
       label: "Awaiting review",
-      value: "6",
-      delta: "+2 today",
+      value: String(awaiting.length),
+      delta: error ?? "from live API",
       accent: t.accent,
     },
     {
       label: "High-severity flags",
-      value: "11",
-      delta: "across 4 apps",
+      value: String(highSeverity),
+      delta: `across ${awaiting.length} apps`,
       accent: t.high,
     },
     {
-      label: "Cleared this week",
-      value: "23",
-      delta: "+18% vs last",
+      label: "Total open flags",
+      value: String(flagged),
+      delta: "ready for reviewer action",
       accent: t.ok,
     },
     {
-      label: "Avg review time",
-      value: "12m",
-      delta: "target 15m",
+      label: "Newest upload",
+      value: awaiting[0] ? timeAgo(awaiting[0].ageHours) : "—",
+      delta: "queue age",
       accent: t.ink2,
     },
-  ];
-
-  const queue = [
-    {
-      id: "MSBN-2026-0142",
-      name: "Okonkwo, Patricia A.",
-      inst: "Western State College of Nursing",
-      age: 4,
-      flags: [2, 1, 0],
-      status: "pending",
-    },
-    {
-      id: "MSBN-2026-0141",
-      name: "Delacroix, Marie-Claude",
-      inst: "Institut Sup\u00e9rieur des Sciences Infirmi\u00e8res",
-      age: 6,
-      flags: [1, 2, 1],
-      status: "pending",
-    },
-    {
-      id: "MSBN-2026-0140",
-      name: "Ramirez, Jose L.",
-      inst: "Colegio de Enfermer\u00eda San Rafael",
-      age: 9,
-      flags: [0, 1, 2],
-      status: "pending",
-    },
-    {
-      id: "MSBN-2026-0138",
-      name: "Johnson, Kelly R.",
-      inst: "Ole Miss School of Nursing",
-      age: 26,
-      flags: [0, 0, 1],
-      status: "pending",
-    },
-    {
-      id: "MSBN-2026-0135",
-      name: "Patel, Anaya V.",
-      inst: "All India Institute of Medical Sciences",
-      age: 48,
-      flags: [0, 0, 0],
-      status: "clean",
-    },
-  ];
-
-  const activity = [
-    { who: "S. Pant", act: "approved", id: "MSBN-2026-0139", when: 2 },
-    {
-      who: "S. Pant",
-      act: "overrode PHYS_02 on",
-      id: "MSBN-2026-0141",
-      when: 5,
-    },
-    {
-      who: "System",
-      act: "extracted 4 pages for",
-      id: "MSBN-2026-0142",
-      when: 6,
-    },
-    { who: "J. Harris", act: "denied", id: "MSBN-2026-0136", when: 23 },
-    { who: "System", act: "ingested", id: "MSBN-2026-0142", when: 28 },
   ];
 
   return (
     <>
       <PageHeader
         eyebrow={`Tuesday \u00b7 21 April 2026 \u00b7 ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} CT`}
-        title="Good afternoon, Saurav"
-        subtitle="6 applications awaiting review \u00b7 2 flagged as high severity"
+        title="Reviewer dashboard"
+        subtitle={`${awaiting.length} applications awaiting review \u00b7 ${highSeverity} high severity`}
       />
 
       <div
@@ -291,7 +246,7 @@ export function DashboardPage({
               <tbody>
                 {queue.map((r, i) => (
                   <tr
-                    key={r.id}
+                    key={r.applicationId}
                     style={{
                       borderBottom:
                         i < queue.length - 1
@@ -307,7 +262,7 @@ export function DashboardPage({
                         color: t.ink2,
                       }}
                     >
-                      {r.id}
+                      {r.applicationId}
                     </td>
                     <td
                       style={{
@@ -316,7 +271,7 @@ export function DashboardPage({
                         color: t.ink,
                       }}
                     >
-                      {r.name}
+                      {r.applicantName}
                     </td>
                     <td
                       style={{
@@ -325,7 +280,7 @@ export function DashboardPage({
                         fontSize: 12,
                       }}
                     >
-                      {r.inst}
+                      {r.institution}
                     </td>
                     <td
                       style={{
@@ -335,20 +290,17 @@ export function DashboardPage({
                         fontSize: 11,
                       }}
                     >
-                      {timeAgo(r.age)}
+                      {timeAgo(r.ageHours)}
                     </td>
                     <td style={{ padding: "11px 14px" }}>
                       <div style={{ display: "flex", gap: 4 }}>
-                        {r.flags[0] > 0 && (
-                          <FlagDot n={r.flags[0]} color={t.high} />
+                        {r.flagCount > 0 && (
+                          <FlagDot
+                            n={r.flagCount}
+                            color={r.highestSeverity === "High" ? t.high : t.med}
+                          />
                         )}
-                        {r.flags[1] > 0 && (
-                          <FlagDot n={r.flags[1]} color={t.med} />
-                        )}
-                        {r.flags[2] > 0 && (
-                          <FlagDot n={r.flags[2]} color={t.low} />
-                        )}
-                        {r.flags.every((f) => f === 0) && (
+                        {r.flagCount === 0 && (
                           <span
                             style={{
                               fontSize: 10,
@@ -393,13 +345,13 @@ export function DashboardPage({
           >
             <Card title="Recent activity" subtitle="Last 48 hours" pad={0}>
               <div>
-                {activity.map((a, i) => (
+                {queue.map((a, i) => (
                   <div
-                    key={i}
+                    key={a.applicationId}
                     style={{
                       padding: "11px 18px",
                       borderBottom:
-                        i < activity.length - 1
+                        i < queue.length - 1
                           ? `1px solid ${t.line2}`
                           : "none",
                       display: "flex",
@@ -414,7 +366,7 @@ export function DashboardPage({
                         borderRadius: 3,
                         marginTop: 6,
                         background:
-                          a.who === "System" ? t.ink4 : t.accent,
+                          t.accent,
                       }}
                     />
                     <div
@@ -426,9 +378,9 @@ export function DashboardPage({
                       }}
                     >
                       <span style={{ fontWeight: 600, color: t.ink }}>
-                        {a.who}
+                        System
                       </span>{" "}
-                      <span style={{ color: t.ink3 }}>{a.act}</span>{" "}
+                      <span style={{ color: t.ink3 }}>queued</span>{" "}
                       <span
                         style={{
                           fontFamily: t.mono,
@@ -436,7 +388,7 @@ export function DashboardPage({
                           color: t.ink2,
                         }}
                       >
-                        {a.id}
+                        {a.applicationId}
                       </span>
                       <div
                         style={{
@@ -447,7 +399,7 @@ export function DashboardPage({
                           letterSpacing: 0.2,
                         }}
                       >
-                        {timeAgo(a.when)}
+                        {timeAgo(a.ageHours)}
                       </div>
                     </div>
                   </div>

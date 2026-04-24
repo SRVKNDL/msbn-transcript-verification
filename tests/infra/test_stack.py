@@ -254,11 +254,12 @@ class TestCognitoPasswordPolicy:
             f"found {len(roles)}: {list(roles.keys())}"
         )
 
-    def test_client_auth_flows_srp_admin_and_refresh_only(self, auth_template):
+    def test_client_auth_flows_password_srp_admin_and_refresh(self, auth_template):
         auth_template.has_resource_properties(
             "AWS::Cognito::UserPoolClient",
             Match.object_like({
                 "ExplicitAuthFlows": Match.array_equals([
+                    "ALLOW_USER_PASSWORD_AUTH",
                     "ALLOW_ADMIN_USER_PASSWORD_AUTH",
                     "ALLOW_USER_SRP_AUTH",
                     "ALLOW_REFRESH_TOKEN_AUTH",
@@ -266,14 +267,12 @@ class TestCognitoPasswordPolicy:
             }),
         )
 
-    def test_no_user_password_auth(self, auth_template):
-        """ALLOW_USER_PASSWORD_AUTH must not be present on the client."""
+    def test_user_password_auth_enabled_for_in_page_login(self, auth_template):
+        """The MSBN login page authenticates directly against Cognito."""
         clients = auth_template.find_resources("AWS::Cognito::UserPoolClient")
         for _id, resource in clients.items():
             flows = resource.get("Properties", {}).get("ExplicitAuthFlows", [])
-            assert "ALLOW_USER_PASSWORD_AUTH" not in flows, (
-                "Client should not allow USER_PASSWORD_AUTH — use admin-initiate-auth for testing"
-            )
+            assert "ALLOW_USER_PASSWORD_AUTH" in flows
 
     def test_hosted_ui_oauth_code_flow(self, auth_template):
         """SPA uses Cognito Hosted UI with authorization-code OAuth flow."""

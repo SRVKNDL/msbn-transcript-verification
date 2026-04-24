@@ -47,6 +47,7 @@ class ComputeConstruct(Construct):
             log_retention=logs.RetentionDays.ONE_WEEK,
             environment={
                 "TABLE_NAME": storage.table.table_name,
+                "BUCKET_NAME": storage.bucket.bucket_name,
             },
         )
 
@@ -185,6 +186,7 @@ class ComputeConstruct(Construct):
             "dynamodb:UpdateItem",
             "dynamodb:PutItem",
         )
+        storage.bucket.grant_read(self.queue_for_review_lambda, "processed/*")
 
         # CrossDocLambda is deferred until multi-document uploads are in scope.
 
@@ -222,5 +224,7 @@ class ComputeConstruct(Construct):
             "dynamodb:PutItem",
         )
 
-        # Page images for review live under processed/.
+        # Uploads enter through pre-signed PUT URLs; page images for review live
+        # under processed/.
+        storage.bucket.grant_put(self.dashboard_api_lambda, "uploads/*")
         storage.bucket.grant_read(self.dashboard_api_lambda, "processed/*")

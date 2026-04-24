@@ -121,6 +121,10 @@ class WorkflowConstruct(Construct):
             write_failed,
             payload=sfn.TaskInput.from_object({
                 "applicationId": sfn.JsonPath.string_at("$.applicationId"),
+                "bucket": sfn.JsonPath.string_at("$.bucket"),
+                "aggregation_s3_key": sfn.JsonPath.string_at(
+                    "$.aggregate_result.aggregation_s3_key"
+                ),
                 "flag_count": sfn.JsonPath.number_at(
                     "$.validate_result.flag_count"
                 ),

@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 _dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+_s3 = boto3.client("s3", region_name="us-east-1")
 _TABLE_NAME = os.environ.get("TABLE_NAME", "msbn-applications")
+_BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
 
 _CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "*")
 _CORS_HEADERS = {
@@ -98,7 +100,7 @@ def _application_view(metadata: dict, document: dict | None = None) -> dict:
         "applicationId": metadata.get("applicationId"),
         "applicantName": metadata.get("applicant_name") or "Unknown applicant",
         "institution": metadata.get("institution") or "Unknown institution",
-        "country": metadata.get("country") or "—",
+        "country": metadata.get("country") or "USA",
         "submittedAt": submitted_at,
         "ageHours": _hours_since(submitted_at),
         "flagCount": int(metadata.get("flag_count", 0)),
@@ -168,6 +170,9 @@ def handler(event: dict, context) -> dict:
         if route_key == "GET /applications":
             return _list_applications(event, table)
 
+        if route_key == "POST /uploads":
+            return _create_upload_url(event)
+
         if route_key == "GET /applications/{id}":
             return _get_application(path_params.get("id"), table)
 
@@ -230,6 +235,50 @@ def _list_applications(event: dict, table) -> dict:
         ).decode()
 
     return _response(200, {"items": items, "nextCursor": next_cursor})
+
+
+# POST /uploads.
+
+
+def _create_upload_url(event: dict) -> dict:
+    """Return a pre-signed S3 PUT URL for one transcript PDF."""
+    if not _BUCKET_NAME:
+        return _response(500, {"error": "Upload bucket is not configured"})
+
+    body_str = event.get("body", "") or "{}"
+    try:
+        body = json.loads(body_str)
+    except json.JSONDecodeError:
+        return _response(400, {"error": "Invalid JSON body"})
+
+    filename = str(body.get("filename") or "transcript.pdf").strip()
+    content_type = str(body.get("contentType") or "application/pdf").strip()
+    if not filename.lower().endswith(".pdf") or content_type != "application/pdf":
+        return _response(400, {"error": "Only PDF transcripts are accepted"})
+
+    upload_id = uuid.uuid4().hex
+    safe_name = filename.rsplit("/", 1)[-1].replace("\\", "_")
+    s3_key = f"uploads/{upload_id}/{safe_name}"
+
+    upload_url = _s3.generate_presigned_url(
+        ClientMethod="put_object",
+        Params={
+            "Bucket": _BUCKET_NAME,
+            "Key": s3_key,
+            "ContentType": "application/pdf",
+        },
+        ExpiresIn=900,
+        HttpMethod="PUT",
+    )
+
+    return _response(
+        200,
+        {
+            "uploadUrl": upload_url,
+            "s3Key": s3_key,
+            "expiresIn": 900,
+        },
+    )
 
 
 # GET /applications/{id}.

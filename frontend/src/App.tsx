@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
-import { ThemeCtx, THEME } from "./theme";
+import { useMemo, useState } from "react";
+import { ThemeCtx, ThemeModeCtx, THEME, DARK_THEME } from "./theme";
 import { Shell } from "./components/Shell";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -46,21 +47,38 @@ function ShellRoute({ page }: { page: string }) {
 }
 
 function App() {
+  const [themeMode, setThemeMode] = useState<"light" | "dark">(() => {
+    return localStorage.getItem("msbn.theme") === "dark" ? "dark" : "light";
+  });
+  const theme = themeMode === "dark" ? DARK_THEME : THEME;
+  const themeModeValue = useMemo(
+    () => ({
+      mode: themeMode,
+      setMode: (mode: "light" | "dark") => {
+        localStorage.setItem("msbn.theme", mode);
+        setThemeMode(mode);
+      },
+    }),
+    [themeMode]
+  );
+
   return (
-    <ThemeCtx.Provider value={THEME}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<LoginPage />} />
-          <Route path="/dashboard" element={<RequireAuth><ShellRoute page="dashboard" /></RequireAuth>} />
-          <Route path="/queue" element={<RequireAuth><ShellRoute page="queue" /></RequireAuth>} />
-          <Route path="/upload" element={<RequireAuth><ShellRoute page="upload" /></RequireAuth>} />
-          <Route path="/settings" element={<RequireAuth><ShellRoute page="settings" /></RequireAuth>} />
-          <Route path="/audit" element={<RequireAuth><ShellRoute page="audit" /></RequireAuth>} />
-          <Route path="/review/:id" element={<RequireAuth><ReviewPage /></RequireAuth>} />
-          <Route path="/audit/:id" element={<RequireAuth><AuditPage /></RequireAuth>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+    <ThemeCtx.Provider value={theme}>
+      <ThemeModeCtx.Provider value={themeModeValue}>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<LoginPage />} />
+            <Route path="/dashboard" element={<RequireAuth><ShellRoute page="dashboard" /></RequireAuth>} />
+            <Route path="/queue" element={<RequireAuth><ShellRoute page="queue" /></RequireAuth>} />
+            <Route path="/upload" element={<RequireAuth><ShellRoute page="upload" /></RequireAuth>} />
+            <Route path="/settings" element={<RequireAuth><ShellRoute page="settings" /></RequireAuth>} />
+            <Route path="/audit" element={<RequireAuth><ShellRoute page="audit" /></RequireAuth>} />
+            <Route path="/review/:id" element={<RequireAuth><ReviewPage /></RequireAuth>} />
+            <Route path="/audit/:id" element={<RequireAuth><AuditPage /></RequireAuth>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </ThemeModeCtx.Provider>
     </ThemeCtx.Provider>
   );
 }

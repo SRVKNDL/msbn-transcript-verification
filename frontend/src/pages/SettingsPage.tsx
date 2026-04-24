@@ -1,16 +1,14 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useT } from "../theme";
+import { useT, useThemeMode } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
+import { signOut } from "../auth";
 
 export function SettingsPage() {
   const t = useT();
-  const navigate = useNavigate();
-  const [darkMode, setDarkMode] = useState(false);
+  const { mode, setMode } = useThemeMode();
+  const darkMode = mode === "dark";
 
   const handleLogout = () => {
-    // In production this would clear Cognito session
-    navigate("/");
+    signOut();
   };
 
   return (
@@ -50,11 +48,11 @@ export function SettingsPage() {
             <div>
               <div style={{ fontSize: 13, fontWeight: 500, color: t.ink }}>Dark mode</div>
               <div style={{ fontSize: 11, color: t.ink4, marginTop: 2 }}>
-                Toggle dark theme (coming in Phase 3)
+                Use a softer low-glare theme across the dashboard
               </div>
             </div>
             <button
-              onClick={() => setDarkMode(!darkMode)}
+              onClick={() => setMode(darkMode ? "light" : "dark")}
               style={{
                 width: 44, height: 24, borderRadius: 12, border: "none",
                 background: darkMode ? t.accent : t.line,

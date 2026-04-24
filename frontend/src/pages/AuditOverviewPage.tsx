@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader, Card } from "../components/Shell";
-import { MOCK_APPLICATIONS, MOCK_AUDIT_BY_APP } from "../mock-data";
-import type { AuditEvent } from "../types";
+import { getAuditTrail, listApplications } from "../api";
+import type { Application, AuditEvent } from "../types";
 
 function SeverityDot({ severity }: { severity: string }) {
   const t = useT();
@@ -81,13 +81,25 @@ export function AuditOverviewPage() {
   const navigate = useNavigate();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "flags_only">("all");
+  const [apps, setApps] = useState<Application[]>([]);
+  const [audits, setAudits] = useState<Record<string, AuditEvent[]>>({});
 
-  const apps = [...MOCK_APPLICATIONS].sort(
-    (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
-  );
+  useEffect(() => {
+    listApplications().then((items) => {
+      const sorted = [...items].sort(
+        (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+      );
+      setApps(sorted);
+      void Promise.all(
+        sorted.map((app) =>
+          getAuditTrail(app.applicationId).then((events) => [app.applicationId, events] as const)
+        )
+      ).then((entries) => setAudits(Object.fromEntries(entries)));
+    });
+  }, []);
 
   const totalEvents = apps.reduce(
-    (sum, app) => sum + (MOCK_AUDIT_BY_APP[app.applicationId]?.length ?? 0),
+    (sum, app) => sum + (audits[app.applicationId]?.length ?? 0),
     0
   );
 
@@ -122,7 +134,7 @@ export function AuditOverviewPage() {
 
       <div style={{ padding: "20px 34px 40px", maxWidth: 960 }}>
         {apps.map((app) => {
-          const allEvents = MOCK_AUDIT_BY_APP[app.applicationId] ?? [];
+          const allEvents = audits[app.applicationId] ?? [];
           const events =
             filter === "flags_only"
               ? allEvents.filter((e) => e.event === "FLAG_RAISED")

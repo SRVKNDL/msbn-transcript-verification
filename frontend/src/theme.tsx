@@ -60,5 +60,40 @@ export const THEME: Theme = {
   mono: "'IBM Plex Mono', ui-monospace, monospace",
 };
 
+export const DARK_THEME: Theme = {
+  ...THEME,
+  name: "Soft Dark",
+  bg: "#d6d1c5",
+  surface: "#eee8da",
+  surfaceAlt: "#d0cabd",
+  ink: "#171512",
+  ink2: "#302d29",
+  ink3: "#5c5850",
+  ink4: "#817b70",
+  line: "#c7c0b3",
+  line2: "#d9d2c5",
+  primary: "#2d2a26",
+  primaryDark: "#1d1a17",
+  primaryInk: "#faf7ef",
+  accent: "#7d3430",
+  accentBg: "#e9d4cf",
+  high: "#7d3430",
+  highBg: "#e9d4cf",
+  med: "#765b17",
+  medBg: "#eadbb7",
+  low: "#31506b",
+  lowBg: "#d2dbe4",
+  ok: "#3b623f",
+  okBg: "#d5e2d0",
+};
+
 export const ThemeCtx = createContext<Theme>(THEME);
+export const ThemeModeCtx = createContext<{
+  mode: "light" | "dark";
+  setMode: (mode: "light" | "dark") => void;
+}>({
+  mode: "light",
+  setMode: () => undefined,
+});
 export const useT = () => useContext(ThemeCtx);
+export const useThemeMode = () => useContext(ThemeModeCtx);

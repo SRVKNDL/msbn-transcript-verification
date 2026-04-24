@@ -113,6 +113,30 @@ Return a single JSON object with exactly the keys listed. Use only the allowed \
 enum values. If a value cannot be determined from this page, use "unclear".
 Return valid JSON only — no markdown fences, no preamble, no explanation.
 
+=== SECTION 0: Transcript Identity Fields ===
+
+applicant_name
+  Value: free text string extracted from the transcript, or null if absent
+  Description: The student/applicant name printed on the transcript. Prefer the most complete
+               legal name. Do not infer from filenames or surrounding context.
+
+institution
+  Value: free text string extracted from the transcript, or null if absent
+  Description: The school, college, university, or nursing program name that issued the transcript.
+
+country
+  Value: free text country name extracted from the transcript, or null if absent
+  Description: Country of issue or country of study. Use the country explicitly printed in the
+               institution address or transcript body. Do not infer from institution name alone.
+
+license_number
+  Value: free text license, student, registration, or candidate number, or null if absent
+  Description: Identifier printed for the applicant if present.
+
+program_year
+  Value: free text graduation/completion/program year, or null if absent
+  Description: The graduation year, completion year, or program year printed on the transcript.
+
 === SECTION 1: Physical Document Fields ===
 
 seal_type

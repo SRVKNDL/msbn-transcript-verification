@@ -1,5 +1,6 @@
+import { useEffect, useState } from "react";
 import { useT } from "../theme";
-import { MOCK_APPLICATIONS } from "../mock-data";
+import { listApplications } from "../api";
 
 interface ShellProps {
   page: string;
@@ -9,8 +10,15 @@ interface ShellProps {
 
 export function Shell({ page, onNavigate, children }: ShellProps) {
   const t = useT();
+  const [pendingCount, setPendingCount] = useState(0);
 
-  const pendingCount = MOCK_APPLICATIONS.filter((a) => a.status === "READY_FOR_REVIEW").length;
+  useEffect(() => {
+    listApplications()
+      .then((apps) =>
+        setPendingCount(apps.filter((a) => a.status === "READY_FOR_REVIEW").length)
+      )
+      .catch(() => setPendingCount(0));
+  }, []);
 
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: "\u25ce" },

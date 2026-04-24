@@ -1,57 +1,15 @@
 import { useState, useRef } from "react";
 import { useT } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
-import { COUNTRIES } from "../countries";
-
-function Field({
-  label,
-  value,
-  onChange,
-  mono,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  mono?: boolean;
-}) {
-  const t = useT();
-  return (
-    <div>
-      <div
-        style={{
-          fontSize: 10,
-          color: t.ink3,
-          letterSpacing: 0.5,
-          textTransform: "uppercase",
-          fontFamily: t.mono,
-          marginBottom: 5,
-        }}
-      >
-        {label}
-      </div>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          width: "100%",
-          padding: "9px 12px",
-          background: t.surfaceAlt,
-          border: `1px solid ${t.line}`,
-          borderRadius: 3,
-          fontSize: 13,
-          color: t.ink,
-          fontFamily: mono ? t.mono : "inherit",
-          boxSizing: "border-box",
-        }}
-      />
-    </div>
-  );
-}
+import { uploadTranscript } from "../api";
 
 interface FileEntry {
+  id: string;
   name: string;
   size: string;
-  status: "uploading" | "uploaded";
+  status: "queued" | "uploading" | "uploaded" | "failed";
+  s3Key?: string;
+  error?: string;
 }
 
 export function UploadPage() {
@@ -59,28 +17,10 @@ export function UploadPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [dragOver, setDragOver] = useState(false);
-  const [applicantName, setApplicantName] = useState("");
-  const [applicationNum, setApplicationNum] = useState("");
-  const [institution, setInstitution] = useState("");
-  const [country, setCountry] = useState("");
-  const [extracting, setExtracting] = useState(false);
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + " KB";
     return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-  };
-
-  // Simulated metadata extraction from uploaded transcript
-  // In production this calls the Extract Lambda / Nova to read the PDF
-  const simulateExtraction = () => {
-    setExtracting(true);
-    setTimeout(() => {
-      setApplicantName("Okonkwo, Patricia A.");
-      setApplicationNum("MSBN-2026-" + String(Math.floor(1000 + Math.random() * 9000)));
-      setInstitution("St. Therese School of Nursing");
-      setCountry("Philippines");
-      setExtracting(false);
-    }, 1500);
   };
 
   const addFiles = (incoming: FileList | null) => {
@@ -89,25 +29,50 @@ export function UploadPage() {
       (f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")
     );
     if (pdfFiles.length === 0) return;
-    const isFirstUpload = files.length === 0;
     const newEntries: FileEntry[] = pdfFiles.map((f) => ({
+      id: crypto.randomUUID(),
       name: f.name,
       size: formatSize(f.size),
-      status: "uploading" as const,
+      status: "queued" as const,
     }));
     setFiles((prev) => [...prev, ...newEntries]);
-    setTimeout(
-      () =>
-        setFiles((prev) =>
-          prev.map((x) =>
-            x.status === "uploading" ? { ...x, status: "uploaded" as const } : x
-          )
-        ),
-      900
+    void Promise.all(
+      pdfFiles.map((file, index) => {
+        const entry = newEntries[index];
+        return entry ? uploadOne(file, entry.id) : Promise.resolve();
+      })
     );
-    // Auto-fill metadata on first upload
-    if (isFirstUpload) {
-      simulateExtraction();
+  };
+
+  const uploadOne = async (file: File, id: string) => {
+    setFiles((prev) =>
+      prev.map((entry) =>
+        entry.id === id
+          ? { ...entry, status: "uploading" }
+          : entry
+      )
+    );
+    try {
+      const result = await uploadTranscript(file);
+      setFiles((prev) =>
+        prev.map((entry) =>
+          entry.id === id
+            ? { ...entry, status: "uploaded", s3Key: result.s3Key }
+            : entry
+        )
+      );
+    } catch (err) {
+      setFiles((prev) =>
+        prev.map((entry) =>
+          entry.id === id
+            ? {
+                ...entry,
+                status: "failed",
+                error: err instanceof Error ? err.message : "Upload failed",
+              }
+            : entry
+        )
+      );
     }
   };
 
@@ -121,58 +86,13 @@ export function UploadPage() {
       <div style={{ padding: "24px 34px 40px", maxWidth: 880 }}>
         <Card
           title="Application details"
-          subtitle={
-            extracting
-              ? "Extracting metadata from transcript..."
-              : files.length === 0
-                ? "Upload a transcript to auto-fill details"
-                : "Match to an existing MSBN application or create a new one"
-          }
+          subtitle="Applicant, institution, country, and program details are extracted from the transcript after upload. Application ID is assigned by intake."
         >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 14,
-            }}
-          >
-            <Field label="Applicant name" value={applicantName} onChange={setApplicantName} />
-            <Field label="MSBN application #" value={applicationNum} onChange={setApplicationNum} mono />
-            <Field label="Institution" value={institution} onChange={setInstitution} />
-            <div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: t.ink3,
-                  letterSpacing: 0.5,
-                  textTransform: "uppercase",
-                  fontFamily: t.mono,
-                  marginBottom: 5,
-                }}
-              >
-                Country of issue
-              </div>
-              <select
-                value={country}
-                onChange={(e) => setCountry(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "9px 12px",
-                  background: t.surfaceAlt,
-                  border: `1px solid ${t.line}`,
-                  borderRadius: 3,
-                  fontSize: 13,
-                  color: t.ink,
-                  fontFamily: "inherit",
-                  boxSizing: "border-box",
-                  cursor: "pointer",
-                }}
-              >
-                {COUNTRIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
+          <div style={{ fontSize: 13, color: t.ink2, lineHeight: 1.6 }}>
+            Once the PDF is uploaded, S3 starts the extraction pipeline. The case
+            appears in the review queue when Nova extraction and rule validation
+            finish. If no country is printed on the transcript, the system stores
+            USA by default.
           </div>
         </Card>
 
@@ -250,7 +170,7 @@ export function UploadPage() {
             >
               {files.map((f, i) => (
                 <div
-                  key={i}
+                  key={f.id}
                   style={{
                     padding: "10px 14px",
                     display: "flex",
@@ -297,7 +217,7 @@ export function UploadPage() {
                       {f.size}
                     </div>
                   </div>
-                  {f.status === "uploading" ? (
+                  {f.status === "uploading" || f.status === "queued" ? (
                     <span
                       style={{
                         fontSize: 11,
@@ -307,7 +227,20 @@ export function UploadPage() {
                         textTransform: "uppercase",
                       }}
                     >
-                      &bull; Uploading
+                      &bull; {f.status === "queued" ? "Queued" : "Uploading"}
+                    </span>
+                  ) : f.status === "failed" ? (
+                    <span
+                      title={f.error}
+                      style={{
+                        fontSize: 11,
+                        color: t.high,
+                        fontFamily: t.mono,
+                        letterSpacing: 0.4,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      &times; Failed
                     </span>
                   ) : (
                     <span
@@ -325,7 +258,7 @@ export function UploadPage() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setFiles((x) => x.filter((_, j) => j !== i));
+                      setFiles((x) => x.filter((entry) => entry.id !== f.id));
                     }}
                     style={{
                       background: "transparent",
@@ -353,9 +286,8 @@ export function UploadPage() {
           }}
         >
           <Btn variant="ghost">Cancel</Btn>
-          <Btn variant="outline">Save draft</Btn>
-          <Btn variant="primary" disabled={files.length === 0}>
-            Submit for extraction &rarr;
+          <Btn variant="primary" disabled={files.length === 0 || files.some((f) => f.status === "uploading" || f.status === "queued")}>
+            Processing starts automatically
           </Btn>
         </div>
       </div>

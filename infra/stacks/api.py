@@ -61,6 +61,7 @@ class ApiConstruct(Construct):
 
         routes = [
             ("GET", "/applications"),
+            ("POST", "/uploads"),
             ("GET", "/applications/{id}"),
             ("POST", "/applications/{id}/decision"),
             ("GET", "/applications/{id}/audit"),

@@ -40,13 +40,12 @@ class AuthConstruct(Construct):
             ),
         )
 
-        # SPA client: no secret, SRP auth, refresh tokens.
+        # SPA client: no secret, browser password auth, SRP, refresh tokens.
         # Auth flows:
-        #   - SRP: primary client-side flow (challenge-response, never sends password)
+        #   - User password auth: in-page Cognito login over TLS
+        #   - SRP: supported for future SDK-based auth
         #   - Admin user password: server-side only, for admin-initiate-auth smoke tests
         #   - Refresh: token renewal
-        # USER_PASSWORD_AUTH is intentionally excluded — it sends the password
-        # in plaintext to Cognito. SRP is the correct client-side flow.
         callback_urls = callback_urls or ["http://localhost:3000/"]
         logout_urls = logout_urls or ["http://localhost:3000/"]
 
@@ -54,6 +53,7 @@ class AuthConstruct(Construct):
             "DashboardClient",
             user_pool_client_name="msbn-dashboard",
             auth_flows=cognito.AuthFlow(
+                user_password=True,
                 user_srp=True,
                 admin_user_password=True,
             ),

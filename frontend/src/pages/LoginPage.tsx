@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  handleAuthRedirect,
-  isApiMode,
+  hasAuthSession,
   isAuthConfigured,
   signIn,
 } from "../auth";
@@ -10,15 +10,18 @@ import { useT } from "../theme";
 
 function LoginField({
   label,
-  value: initial,
+  value,
+  onChange,
   type = "text",
+  autoComplete,
 }: {
   label: string;
   value: string;
+  onChange: (value: string) => void;
   type?: string;
+  autoComplete?: string;
 }) {
   const t = useT();
-  const [value, setValue] = useState(initial);
   const [focus, setFocus] = useState(false);
 
   return (
@@ -38,7 +41,8 @@ function LoginField({
       <input
         type={type}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        autoComplete={autoComplete}
+        onChange={(e) => onChange(e.target.value)}
         onFocus={() => setFocus(true)}
         onBlur={() => setFocus(false)}
         style={{
@@ -63,42 +67,36 @@ function LoginField({
 export function LoginPage() {
   const t = useT();
   const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let mounted = true;
-    handleAuthRedirect()
-      .then((signedIn) => {
-        if (mounted && signedIn) navigate("/dashboard", { replace: true });
-      })
-      .catch((err: Error) => {
-        if (mounted) setError(err.message);
-      });
-    return () => {
-      mounted = false;
-    };
+    if (hasAuthSession()) navigate("/dashboard", { replace: true });
   }, [navigate]);
 
-  const handleSignIn = async () => {
+  const handleSignIn = async (event: FormEvent) => {
+    event.preventDefault();
     setError(null);
-
-    if (!isApiMode) {
-      navigate("/dashboard");
-      return;
-    }
 
     if (!isAuthConfigured) {
       setError("Cognito settings are missing from this frontend build.");
       return;
     }
+    if (!email.trim() || !password) {
+      setError("Email and password are required.");
+      return;
+    }
 
     setLoading(true);
     try {
-      await signIn();
+      await signIn(email.trim(), password);
+      navigate("/dashboard", { replace: true });
     } catch (err) {
-      setLoading(false);
       setError(err instanceof Error ? err.message : "Sign-in failed.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -196,75 +194,62 @@ export function LoginPage() {
             marginBottom: 24,
           }}
         >
-          Use your MSBN credentials to continue.
+          Use your Cognito reviewer account to continue.
         </div>
 
-        <LoginField label="Email" value="saurav.pant@msbn.ms.gov" />
-        <div style={{ height: 12 }} />
-        <LoginField
-          label="Password"
-          value="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-          type="password"
-        />
-        <div style={{ height: 18 }} />
+        <form onSubmit={handleSignIn}>
+          <LoginField
+            label="Email"
+            value={email}
+            onChange={setEmail}
+            autoComplete="username"
+          />
+          <div style={{ height: 12 }} />
+          <LoginField
+            label="Password"
+            value={password}
+            onChange={setPassword}
+            type="password"
+            autoComplete="current-password"
+          />
+          <div style={{ height: 18 }} />
 
-        {error && (
-          <div
+          {error && (
+            <div
+              style={{
+                background: t.highBg,
+                border: `1px solid ${t.high}`,
+                color: t.high,
+                fontSize: 12,
+                padding: "8px 10px",
+                borderRadius: 3,
+                marginBottom: 12,
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
             style={{
-              background: t.highBg,
-              border: `1px solid ${t.high}`,
-              color: t.high,
-              fontSize: 12,
-              padding: "8px 10px",
+              width: "100%",
+              padding: "11px",
+              background: t.primary,
+              color: t.primaryInk,
+              border: "none",
               borderRadius: 3,
-              marginBottom: 12,
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        <button
-          onClick={handleSignIn}
-          disabled={loading}
-          style={{
-            width: "100%",
-            padding: "11px",
-            background: t.primary,
-            color: t.primaryInk,
-            border: "none",
-            borderRadius: 3,
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: loading ? "wait" : "pointer",
-            opacity: loading ? 0.7 : 1,
-            fontFamily: "inherit",
-          }}
-        >
-          {isApiMode ? "Sign in with Cognito" : "Open local demo"}
-        </button>
-
-        <div style={{ marginTop: 16, textAlign: "center", fontSize: 12 }}>
-          <a
-            href="#"
-            onClick={(e) => e.preventDefault()}
-            style={{
-              color: t.primary,
+              fontSize: 14,
               fontWeight: 600,
-              textDecoration: "none",
+              cursor: loading ? "wait" : "pointer",
+              opacity: loading ? 0.7 : 1,
+              fontFamily: "inherit",
             }}
           >
-            Forgot password?
-          </a>
-          <span style={{ color: t.ink4, margin: "0 8px" }}>&middot;</span>
-          <a
-            href="#"
-            onClick={(e) => e.preventDefault()}
-            style={{ color: t.ink3, textDecoration: "none" }}
-          >
-            Request access
-          </a>
-        </div>
+            {loading ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
 
         <div
           style={{

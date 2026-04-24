@@ -24,6 +24,14 @@ class StorageConstruct(Construct):
             encryption=s3.BucketEncryption.S3_MANAGED,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             enforce_ssl=True,
+            cors=[
+                s3.CorsRule(
+                    allowed_methods=[s3.HttpMethods.PUT],
+                    allowed_origins=["*"],
+                    allowed_headers=["Content-Type"],
+                    max_age=300,
+                )
+            ],
             removal_policy=RemovalPolicy.RETAIN,
             lifecycle_rules=[
                 s3.LifecycleRule(

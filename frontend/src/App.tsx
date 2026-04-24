@@ -28,6 +28,7 @@ function ShellRoute({ page }: { page: string }) {
   return (
     <Shell page={page} onNavigate={handleNavigate}>
       {page === "dashboard" && <DashboardPage onNavigate={handleNavigate} />}
+      {page === "queue" && <QueuePage />}
       {page === "upload" && <UploadPage />}
       {page === "audit" && <AuditOverviewPage />}
       {page === "settings" && <SettingsPage />}
@@ -42,7 +43,7 @@ function App() {
         <Routes>
           <Route path="/" element={<LoginPage />} />
           <Route path="/dashboard" element={<ShellRoute page="dashboard" />} />
-          <Route path="/queue" element={<QueuePage />} />
+          <Route path="/queue" element={<ShellRoute page="queue" />} />
           <Route path="/upload" element={<ShellRoute page="upload" />} />
           <Route path="/settings" element={<ShellRoute page="settings" />} />
           <Route path="/audit" element={<ShellRoute page="audit" />} />

@@ -106,6 +106,65 @@ graduation_confirmation_present: yes | no | unclear
 required_nursing_domains_present: [adult_med_surg, obstetrics, pediatrics, psychiatric, gerontology, community_health]
 ```
 
+## Section 3b — Course-level fields (feeds `PROG_004`–`PROG_007` rules)
+
+These fields are extracted per-course from the transcript. Nova should return an array of course objects for each page that contains coursework.
+
+```yaml
+# Array of course records extracted from the transcript.
+# Each entry represents one row in a semester table.
+courses:
+  - code: <string>        # e.g. "PNV 1213", "PNV 1914", "BIO 2514"
+    name: <string>        # e.g. "Body Structure and Function"
+    credit_hours: <int>   # Semester credit hours listed on transcript
+    semester: <int>       # Which semester (1, 2, 3, etc.) this course appears in
+    grade: <string>       # Grade received (e.g. "A", "B", "Pass")
+    source_location: { page_number: int, text_spans: [str] }
+
+# The total credit hours reported on the transcript (usually on the summary page).
+total_credit_hours: <int>
+
+# Whether the transcript is for a Mississippi Practical Nursing program.
+# Set to "ms_practical_nursing" when the institution is a MS community college
+# and the program title matches "Practical Nursing" or "Licensed Practical/Vocational Nurse".
+# The rule engine uses this to activate MS-curriculum-specific rules (PROG_004–007).
+program_type: ms_practical_nursing | other | unclear
+```
+
+### Valid MS Practical Nursing course codes (2024 framework, CIP 51.3901)
+
+Nova should recognize these PNV codes when extracting course data from Mississippi nursing transcripts:
+
+| Code | Name | Credit Hours |
+|------|------|-------------|
+| PNV 1116 | Practical Nursing Foundations | 16 |
+| PNV 1213 | Body Structure and Function | 3 |
+| PNV 1216 | Intermediate Practical Nursing (FS) | 16 |
+| PNV 1312 | Intermediate Practical Nursing (SS) | 12 |
+| PNV 1412 | Advanced Practical Nursing | 12 |
+| PNV 1426 | Fundamentals of Nursing Theory | 6 |
+| PNV 1437 | Fundamentals of Nursing Lab/Clinical | 7 |
+| PNV 1443 | Nursing Fundamentals and Clinical | 13 |
+| PNV 1516 | Advanced Practical Nursing (SS) | 16 |
+| PNV 1524 | IV Therapy & Pharmacology | 4 |
+| PNV 1614 | Medical/Surgical Nursing Theory | 4 |
+| PNV 1622 | Medical/Surgical Nursing Clinical | 2 |
+| PNV 1634 | Alterations in Adult Health Theory | 4 |
+| PNV 1642 | Alterations in Adult Health Clinical | 2 |
+| PNV 1666 | Medical/Surgical Nursing Concepts & Clinical | 6 |
+| PNV 1676 | Alterations in Adult Health Concepts & Clinical | 6 |
+| PNV 1682 | Adult Health Nursing Concepts & Clinical | 12 |
+| PNV 1714 | Maternal-Child Nursing | 4 |
+| PNV 1728 | Specialty Areas in Nursing | 8 |
+| PNV 1814 | Mental Health Nursing | 4 |
+| PNV 1914 | Nursing Transition | 4 |
+
+**BIO substitutions:** BIO 2514 (A&P I) and BIO 2524 (A&P II) may substitute for PNV 1213.
+
+**Total program:** 44 semester hours, 980 clock hours (455 lecture, 180 lab, 345 clinical).
+
+**Scheduling options:** Programs may be 1-semester (accelerated), 2-semester, 3-semester (most common), 4-semester, or 5-semester (part-time/weekend). Not all 22 courses appear on every transcript — different scheduling options use different course groupings.
+
 ## Section 4 — Cross-document fields (feeds `CROSS_` rules)
 
 **Architectural note:** These fields are NOT extracted by the per-page Extract Lambda. The Extract Lambda only handles single-page extraction against one document at a time. Cross-document comparison runs in a separate aggregation step after all documents in an application have been extracted. This section is included here for completeness — the values Nova or the aggregation Lambda must return follow the same enum style as above.

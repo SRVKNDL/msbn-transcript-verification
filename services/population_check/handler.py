@@ -1,4 +1,4 @@
-"""PopulationCheckLambda: Applies population-level rules across all applications."""
+"""Stub for population-level checks across applications."""
 
 import json
 import logging
@@ -8,12 +8,7 @@ logger.setLevel(logging.INFO)
 
 
 def handler(event, context):
-    """Run population-level rules (POP_001-003) using DynamoDB GSI queries.
-
-    Checks for patterns across multiple applications: duplicate license
-    numbers, curriculum overlap within institution clusters, and
-    submission volume anomalies.
-    """
+    """Run POP_001-003 once the population indexes are wired."""
     logger.info("PopulationCheckLambda invoked: %s", json.dumps(event))
 
     # TODO: POP_001 — License number dedup via GSI2

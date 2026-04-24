@@ -1,43 +1,4 @@
-"""AggregationLambda: flatten per-page extraction into document-level fields.
-
-Runs between ExtractLambda and ValidateLambda in the Step Functions pipeline.
-
-The ExtractLambda produces a per-page extraction JSON at
-``processed/{applicationId}/extraction_transcript.json`` with the shape::
-
-    {
-      "schema_version": "1.0",
-      "application_id": "...",
-      "document_type": "TRANSCRIPT",
-      "page_count": N,
-      "pages": [
-        {
-          "page_number": 1,
-          "<field>": <value>,
-          "<field>_confidence": "high|medium|low",
-          "<field>_source":     {"page_number": 1, "text_spans": [...]},
-          ...
-        },
-        ...
-      ]
-    }
-
-The ValidateLambda expects a flat document-level ``aggregation.json`` where
-each field from the extraction vocabulary appears once at the top level, with
-its sibling ``_source`` and ``_confidence`` keys. This handler produces that
-flat document from the per-page list:
-
-- **Enum / scalar fields**: value from the page with the highest confidence.
-  Ties are broken by page_number (earlier page wins). The matching
-  ``_source`` and ``_confidence`` come from the same page.
-- **Array fields** (``security_features_present``, ``suspicious_course_names``,
-  ``diploma_mill_phrases_found``, ``required_nursing_domains_present``):
-  union across all pages, deduplicated while preserving first-seen order.
-  ``_source`` is merged (all source pages concatenated).
-
-See: design/extraction-vocabulary.md for field definitions.
-See: design/architecture-plan.md Section 1.4 for pipeline context.
-"""
+"""Flatten per-page extraction into the rule engine input document."""
 
 import json
 import logging
@@ -52,12 +13,11 @@ _s3 = boto3.client("s3")
 
 _BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
 
-# Rank confidence values so we can compare pages deterministically.
-# High values win; unknown/missing confidence is treated as below "low".
+# Highest confidence wins when the same scalar field appears on multiple pages.
+# Missing or unknown confidence ranks below "low".
 _CONFIDENCE_RANK = {"high": 3, "medium": 2, "low": 1}
 
-# Array-valued fields — merged (union) across pages, not winner-take-all.
-# Matches the vocabulary's array fields in Sections 1-3.
+# These fields collect evidence across pages instead of picking one winner.
 _ARRAY_FIELDS = frozenset({
     "security_features_present",
     "suspicious_course_names",
@@ -65,22 +25,12 @@ _ARRAY_FIELDS = frozenset({
     "required_nursing_domains_present",
 })
 
-# Keys that are per-page bookkeeping, not extraction fields.
+# Per-page bookkeeping, not extraction fields.
 _PAGE_META_KEYS = frozenset({"page_number", "image_dimensions"})
 
 
 def handler(event, context):
-    """Read extraction JSON, flatten per-page to document-level, write aggregation.json.
-
-    Input event (from Step Functions):
-        {
-            "applicationId":     "<id>",
-            "extraction_s3_key": "processed/<id>/extraction_transcript.json"
-        }
-
-    Returns:
-        {"applicationId": "<id>", "aggregation_s3_key": "processed/<id>/aggregation.json"}
-    """
+    """Read extraction JSON and write the flattened aggregation document."""
 
     application_id = event["applicationId"]
     extraction_key = event["extraction_s3_key"]
@@ -92,17 +42,17 @@ def handler(event, context):
         "extraction_s3_key": extraction_key,
     }))
 
-    # ── 1. Load extraction JSON ────────────────────────────────────────────────
+    # Load the per-page extraction written by ExtractLambda.
     obj = _s3.get_object(Bucket=bucket, Key=extraction_key)
     extraction = json.loads(obj["Body"].read().decode("utf-8"))
 
     pages = extraction.get("pages", [])
 
-    # ── 2. Flatten per-page → document-level ───────────────────────────────────
+    # Collapse page-level values into one document-level record.
     aggregation = _flatten_pages(pages)
     aggregation["applicationId"] = application_id
 
-    # ── 3. Write aggregation.json ──────────────────────────────────────────────
+    # Store the RuleEngineLambda input under the application prefix.
     aggregation_key = f"processed/{application_id}/aggregation.json"
     _s3.put_object(
         Bucket=bucket,
@@ -125,19 +75,8 @@ def handler(event, context):
 
 
 def _flatten_pages(pages: list[dict]) -> dict:
-    """Collapse per-page records into a single flat document-level dict.
-
-    For each field name ``F`` found across any page:
-      - If ``F`` is in ``_ARRAY_FIELDS``, the top-level value is the union
-        (preserving first-seen order) of the per-page lists.
-      - Otherwise, the top-level value is the value from the page with the
-        highest confidence; its matching ``F_source`` is copied too.
-      - ``F_confidence`` is always the confidence from the winning page
-        (or, for arrays, from the first page that contributed any value).
-    """
-    # Collect the set of all field names present on any page. Exclude
-    # ``*_confidence`` and ``*_source`` sibling keys — they travel with the
-    # base field. Exclude per-page meta (page_number, image_dimensions).
+    """Collapse per-page records into one flat document-level dict."""
+    # Sibling keys travel with their base field; they are not merged directly.
     field_names: set[str] = set()
     for page in pages:
         for key in page.keys():
@@ -158,12 +97,7 @@ def _flatten_pages(pages: list[dict]) -> dict:
 
 
 def _pick_highest_confidence(field: str, pages: list[dict], out: dict) -> None:
-    """Write ``field``, ``field_confidence``, ``field_source`` to ``out`` using
-    the value from the page with the highest confidence.
-
-    Tie-breaker: earlier page (lower page_number) wins. Pages that do not
-    contain the field are skipped entirely.
-    """
+    """Copy the highest-confidence page value and its metadata into ``out``."""
     best_page = None
     best_rank = -1
     for page in pages:
@@ -188,13 +122,7 @@ def _pick_highest_confidence(field: str, pages: list[dict], out: dict) -> None:
 
 
 def _merge_array_field(field: str, pages: list[dict], out: dict) -> None:
-    """Union of per-page lists for an array-valued field, deduplicated.
-
-    The companion ``_source`` is merged by concatenating text_spans across
-    every page that reported a non-empty value; page_number is taken from the
-    first such page. ``_confidence`` is the highest confidence among
-    contributing pages.
-    """
+    """Merge an array field across pages while preserving first-seen order."""
     merged: list = []
     seen: set = set()
     merged_spans: list[str] = []
@@ -208,8 +136,7 @@ def _merge_array_field(field: str, pages: list[dict], out: dict) -> None:
             continue
 
         for item in value:
-            # Items are strings in every vocabulary array field; use the item
-            # itself as the dedup key.
+            # Vocabulary array fields are strings, so the item is the dedup key.
             if item in seen:
                 continue
             seen.add(item)

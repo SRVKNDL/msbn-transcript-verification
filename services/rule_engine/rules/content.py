@@ -1,31 +1,9 @@
-"""Educational content and chronology rules (CONT_001 – CONT_006).
-
-SP-5: Analysis of Educational Chronology.
-
-Each function accepts an aggregation dict and returns list[Flag].
-
-Aggregation fields consumed (see design/extraction-vocabulary.md Section 2):
-  grading_scale_format      : letter_grade_us | percentage | 20_point_french |
-                              5_point_russian | pass_fail | mixed | unclear
-  language_of_issue         : english | french | spanish | other | unclear
-  country_of_study          : lower-case country name string (may be absent)
-  declared_language_of_instruction : lower-case language string (may be absent)
-  course_relevance          : nursing_standard | mixed_with_non_nursing |
-                              predominantly_non_nursing | unclear
-  duplicate_courses_detected: yes | no | unclear
-  suspicious_course_names   : list of strings
-  gpa_arithmetic_consistency: consistent | inconsistent | unclear
-  dates_chronology_ok       : yes | no | unclear
-  dates_chronology_issue    : none | overlap | gap | enrollment_implausibly_early |
-                              enrollment_implausibly_late | other
-  program_duration_consistency: consistent_with_degree | unusually_short |
-                                unusually_long | unclear
-"""
+"""Academic content and chronology checks for SP-5."""
 
 from rules.base import Flag, _src
 
-# For CONT_001: which grading scales are expected per document language.
-# "other" and "unclear" are intentionally excluded — not enough signal.
+# CONT_001 reference: expected grading scales by document language.
+# "other" and "unclear" do not carry enough signal to flag.
 _LANGUAGE_TO_EXPECTED_SCALES: dict[str, set[str]] = {
     "english": {"letter_grade_us", "percentage", "pass_fail"},
     "french": {"20_point_french", "percentage"},
@@ -33,10 +11,7 @@ _LANGUAGE_TO_EXPECTED_SCALES: dict[str, set[str]] = {
     "russian": {"5_point_russian", "percentage"},
 }
 
-# For CONT_004: official languages per country of study.
-# Keys are lower-case country names as extracted.  Values are sets of
-# lower-case language strings.
-# NOTE: This list is provisional; MSBN must supply a complete reference table.
+# CONT_004 reference. Provisional until MSBN provides the official table.
 _COUNTRY_OFFICIAL_LANGUAGES: dict[str, set[str]] = {
     "philippines": {"english", "filipino"},
     "nigeria": {"english"},
@@ -70,11 +45,7 @@ _COUNTRY_OFFICIAL_LANGUAGES: dict[str, set[str]] = {
 
 
 def check_cont_001(agg: dict) -> list:
-    """CONT_001 — Grading scale does not match the country-of-study convention.
-
-    E.g., U.S.-style A/B/C letter grades on a French-language transcript
-    (France uses the 20-point scale).
-    """
+    """Flag grading scales that do not match the document language."""
     language = agg.get("language_of_issue")
     scale = agg.get("grading_scale_format")
 
@@ -104,12 +75,7 @@ def check_cont_001(agg: dict) -> list:
 
 
 def check_cont_002(agg: dict) -> list:
-    """CONT_002 — Enrollment or graduation dates are chronologically impossible.
-
-    Fires when dates_chronology_ok is 'no', covering: applicant enrolled
-    implausibly early (age < ~16), graduation before enrollment, overlapping
-    programs, or unexplained date gaps.
-    """
+    """Flag impossible or incoherent program dates."""
     chron_ok = agg.get("dates_chronology_ok")
     chron_issue = agg.get("dates_chronology_issue", "other")
 
@@ -140,13 +106,7 @@ def check_cont_002(agg: dict) -> list:
 
 
 def check_cont_003(agg: dict) -> list:
-    """CONT_003 — Non-nursing or duplicate course names detected.
-
-    Fires in up to two situations:
-    1. course_relevance indicates predominantly non-nursing content, OR
-       suspicious_course_names is non-empty.
-    2. duplicate_courses_detected is 'yes'.
-    """
+    """Flag suspicious course names and duplicate course entries."""
     flags = []
 
     relevance = agg.get("course_relevance")
@@ -196,11 +156,7 @@ def check_cont_003(agg: dict) -> list:
 
 
 def check_cont_004(agg: dict) -> list:
-    """CONT_004 — Document language does not match the country of study.
-
-    Fires when the language the document is written in is neither the official
-    language of the declared country of study nor the declared instruction language.
-    """
+    """Flag document language mismatches for the declared country."""
     language = agg.get("language_of_issue")
     country = agg.get("country_of_study")
     declared_instruction_lang = agg.get("declared_language_of_instruction")
@@ -212,10 +168,10 @@ def check_cont_004(agg: dict) -> list:
 
     official = _COUNTRY_OFFICIAL_LANGUAGES.get(country.lower())
     if official is None:
-        # Unknown country — not enough reference data to flag
+        # Unknown country: not enough reference data to flag.
         return []
 
-    # If the declared instruction language is in official languages, accept it
+    # Accept the declared instruction language as well as official languages.
     accepted = set(official)
     if declared_instruction_lang:
         accepted.add(declared_instruction_lang.lower())
@@ -241,12 +197,7 @@ def check_cont_004(agg: dict) -> list:
 
 
 def check_cont_005(agg: dict) -> list:
-    """CONT_005 — Reported GPA does not match arithmetic mean of individual grades.
-
-    Fires when the aggregation step has determined GPA arithmetic is inconsistent.
-    A mismatch is a strong signal that a grade value was inserted or altered
-    (see MSBN Case A: '+2.0' addend inflating the final GPA).
-    """
+    """Flag reported GPA arithmetic mismatches."""
     consistency = agg.get("gpa_arithmetic_consistency")
     if consistency == "inconsistent":
         return [
@@ -268,11 +219,7 @@ def check_cont_005(agg: dict) -> list:
 
 
 def check_cont_006(agg: dict) -> list:
-    """CONT_006 — Program duration is implausibly short or long.
-
-    Fires when total enrollment-to-graduation span deviates materially from
-    the expected length for the declared degree type.
-    """
+    """Flag program duration outside the expected range."""
     duration = agg.get("program_duration_consistency")
     if duration in ("unusually_short", "unusually_long"):
         direction = "shorter" if duration == "unusually_short" else "longer"

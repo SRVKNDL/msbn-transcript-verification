@@ -1,38 +1,4 @@
-"""QueueForReviewLambda: Final Step Functions pipeline state.
-
-Marks an application as READY_FOR_REVIEW in DynamoDB and appends an
-AUDIT record so the dashboard timeline (SP-9) shows a complete history.
-
-Input (from Step Functions, forwarded from ValidateLambda):
-    {
-        "applicationId": "<id>",
-        "flag_count": <int>,
-        "flags": [...]        # list forwarded for reference; not stored here
-    }
-
-Output (returned to Step Functions):
-    {
-        "applicationId": "<id>",
-        "status": "READY_FOR_REVIEW",
-        "flag_count": <int>
-    }
-
-DynamoDB writes
----------------
-1. UpdateItem on the METADATA record (PK=APP#<id>, SK=METADATA):
-   - status          → "READY_FOR_REVIEW"
-   - flag_count      → int
-   - ready_for_review_at → ISO-8601 UTC
-   - last_updated_ts → ISO-8601 UTC
-   - submission_ts   → ISO-8601 UTC  (GSI1-ReviewQueue sort key: oldest first)
-
-2. PutItem for an AUDIT record (PK=APP#<id>, SK=AUDIT#<timestamp>):
-   - entity_type  → "AUDIT"
-   - actor        → "system"
-   - event_type   → "STATUS_CHANGED"
-   - previous_state → {"status": "EVALUATING"}
-   - new_state    → {"status": "READY_FOR_REVIEW", "flag_count": <int>}
-"""
+"""Move evaluated applications into the reviewer queue."""
 
 import json
 import logging
@@ -68,9 +34,8 @@ def handler(event, context):
         )
     )
 
-    # ── 1. Update METADATA ─────────────────────────────────────────────────────
-    # UpdateItem upserts: works whether or not METADATA exists yet.
-    # Uses ExpressionAttributeNames to avoid the reserved word "status".
+    # UpdateItem handles retries where METADATA may already exist.
+    # "status" is reserved, so use an expression name.
     _table.update_item(
         Key={"PK": f"APP#{application_id}", "SK": "METADATA"},
         UpdateExpression=(
@@ -88,8 +53,7 @@ def handler(event, context):
         },
     )
 
-    # ── 2. Append AUDIT record ─────────────────────────────────────────────────
-    # SK encodes the event time so audit items sort chronologically.
+    # Timestamp in SK keeps audit records naturally ordered.
     _table.put_item(
         Item={
             "PK": f"APP#{application_id}",

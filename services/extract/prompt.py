@@ -1,30 +1,11 @@
-"""Bedrock Nova extraction prompt for MSBN transcript pages.
-
-build_extraction_prompt() returns (system_prompt, user_prompt) for a single
-page extraction call.  The caller base64-encodes the page PNG and builds the
-full messages array; this module owns only the text content of both prompts.
-
-VOCABULARY maps field names to their allowed enum value sets.  The handler
-uses this dict for post-response validation: unexpected values trigger a
-WARNING log but do not crash the Lambda (advisory-only behaviour).
-
-Array-valued fields (security_features_present, suspicious_course_names,
-diploma_mill_phrases_found, required_nursing_domains_present) are validated
-element-by-element.  Free-text and object fields (accreditation_claim,
-accreditation_claim_location) are not in VOCABULARY; no enum check is run.
-
-The special key "_confidence" holds the allowed values for the confidence
-metadata field that wraps every extracted field.
-"""
+"""Prompt text and enum vocabulary for transcript extraction."""
 
 PROMPT_VERSION = "1.0"
 
-# ---------------------------------------------------------------------------
-# Controlled vocabulary — allowed enum values per field.
-# ---------------------------------------------------------------------------
+# Enum values the handler accepts from Nova.
 
 VOCABULARY: dict[str, set] = {
-    # Section 1 — Physical document fields
+    # Physical document fields.
     "seal_type": {
         "embossed", "stamped_ink", "printed_flat",
         "sticker_foil", "absent", "unclear",
@@ -42,7 +23,7 @@ VOCABULARY: dict[str, set] = {
         "watermark", "micro_printing", "hologram", "serial_number",
     },
     "security_features_assessable": {"yes", "no"},
-    # Section 2 — Content fields
+    # Academic content fields.
     "grading_scale_format": {
         "letter_grade_us", "percentage", "20_point_french",
         "5_point_russian", "pass_fail", "mixed", "unclear",
@@ -62,7 +43,7 @@ VOCABULARY: dict[str, set] = {
     "program_duration_consistency": {
         "consistent_with_degree", "unusually_short", "unusually_long", "unclear",
     },
-    # Section 3 — Program/institution fields
+    # Program and institution fields.
     "diploma_mill_language_detected": {"yes", "no", "possible"},
     "institution_address_present": {"yes", "no", "unclear"},
     "institution_phone_present": {"yes", "no", "unclear"},
@@ -72,13 +53,11 @@ VOCABULARY: dict[str, set] = {
         "adult_med_surg", "obstetrics", "pediatrics",
         "psychiatric", "gerontology", "community_health",
     },
-    # Confidence level — validated on every field
+    # Confidence appears beside every extracted field.
     "_confidence": {"high", "medium", "low"},
 }
 
-# ---------------------------------------------------------------------------
-# System prompt — output rules and field format
-# ---------------------------------------------------------------------------
+# System prompt: response shape and output constraints.
 
 _SYSTEM_PROMPT = """\
 You are a forensic document examiner assisting the Mississippi State Board of \
@@ -126,9 +105,7 @@ allowed set.
 "medium" when inferred, "low" when the page quality or content is poor.
 """
 
-# ---------------------------------------------------------------------------
-# User prompt — full field list with allowed values
-# ---------------------------------------------------------------------------
+# User prompt: extraction fields and allowed values.
 
 _USER_PROMPT = """\
 Extract all fields below from the attached transcript page image.
@@ -265,25 +242,5 @@ required_nursing_domains_present
 
 
 def build_extraction_prompt() -> tuple[str, str]:
-    """Return ``(system_prompt, user_prompt)`` for a single page extraction call.
-
-    Caller contract:
-      1. Base64-encode the page PNG.
-      2. Build the Nova messages body::
-
-           {
-             "schemaVersion": "messages-v1",
-             "messages": [{
-               "role": "user",
-               "content": [
-                 {"image": {"format": "png", "source": {"bytes": b64_image}}},
-                 {"text": user_prompt},
-               ],
-             }],
-             "system": [{"text": system_prompt}],
-             "inferenceConfig": {"max_new_tokens": 4096, "temperature": 0.0},
-           }
-
-      3. Call ``bedrock-runtime invoke_model`` with that body.
-    """
+    """Return the prompt pair used for one page image."""
     return _SYSTEM_PROMPT, _USER_PROMPT

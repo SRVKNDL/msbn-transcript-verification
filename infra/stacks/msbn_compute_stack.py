@@ -1,7 +1,4 @@
-"""MsbnComputeStack: all Lambdas + Step Functions + IAM.
-
-Depends on MsbnStorageStack (imports bucket and table via cross-stack refs).
-"""
+"""Compute stack: Lambdas, workflow, and S3 trigger wiring."""
 
 import aws_cdk as cdk
 from aws_cdk import (
@@ -31,8 +28,7 @@ class MsbnComputeStack(cdk.Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # ComputeConstruct expects a StorageConstruct-shaped object with
-        # .bucket and .table attributes.  Create a lightweight namespace.
+        # ComputeConstruct only needs bucket/table attributes.
         storage_ref = _StorageRef(bucket=bucket, table=table)
 
         compute = ComputeConstruct(self, "Compute", storage=storage_ref)
@@ -47,20 +43,16 @@ class MsbnComputeStack(cdk.Stack):
             table=table,
         )
 
-        # Break the Compute <-> Workflow dependency cycle.
+        # Wire the state machine ARN after both constructs exist.
         compute.intake_lambda.add_environment(
             "STATE_MACHINE_ARN", workflow.state_machine.state_machine_arn
         )
         workflow.state_machine.grant_start_execution(compute.intake_lambda)
 
-        # ── S3 event notification ─────────────────────────────────────────────
-        # Wired here (not in ComputeConstruct) to avoid a cyclic cross-stack
-        # dependency: add_event_notification creates a custom resource scoped
-        # to the bucket's stack, which would reference this stack's Lambda ARN,
-        # creating a cycle.  Using L1/custom-resource constructs keeps all
-        # notification resources in this stack.
+        # Keep the S3 notification resources in this stack to avoid a
+        # StorageStack -> ComputeStack -> StorageStack cycle.
 
-        # 1. Allow S3 to invoke IntakeLambda.
+        # S3 must be allowed to invoke IntakeLambda before notifications attach.
         intake_invoke_permission = lambda_.CfnPermission(
             self,
             "S3InvokeIntakePermission",
@@ -71,7 +63,7 @@ class MsbnComputeStack(cdk.Stack):
             source_account=self.account,
         )
 
-        # 2. Configure S3 bucket notification via AWS SDK call.
+        # Configure the bucket notification with a custom resource.
         s3_bucket_notification = cr.AwsCustomResource(
             self,
             "S3BucketNotification",
@@ -151,15 +143,14 @@ class MsbnComputeStack(cdk.Stack):
                 ]
             ),
         )
-        #S3 validates the target Lambda permission when the notification is
-        #configured. Make the dependency explicit so deploys cannot race.
+        # S3 validates the Lambda permission when the notification is configured.
         s3_bucket_notification.node.add_dependency(intake_invoke_permission)
-        # Expose for the API stack.
+        # The API stack needs this Lambda for route integration.
         self.dashboard_api_lambda = compute.dashboard_api_lambda
 
 
 class _StorageRef:
-    """Lightweight adapter so ComputeConstruct can accept cross-stack refs."""
+    """Adapter for passing imported storage resources into ComputeConstruct."""
 
     def __init__(self, *, bucket: s3.IBucket, table: dynamodb.ITable) -> None:
         self.bucket = bucket

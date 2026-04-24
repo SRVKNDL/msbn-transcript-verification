@@ -1,11 +1,4 @@
-"""Auth construct: Cognito User Pool and client for reviewer authentication.
-
-Cognito (architecture-plan.md Section 2.2):
-  - User pool for reviewer authentication
-  - Self-sign-up disabled (admin creates test accounts)
-  - MFA off for POC (Phase 4 item to enable for production)
-  - Free at POC user counts (< 50,000 MAU)
-"""
+"""Cognito auth for reviewer access."""
 
 from aws_cdk import (
     aws_cognito as cognito,
@@ -24,7 +17,6 @@ class AuthConstruct(Construct):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # ── Cognito User Pool ─────────────────────────────────────────────────
         self.user_pool = cognito.UserPool(
             self,
             "ReviewerPool",
@@ -47,7 +39,7 @@ class AuthConstruct(Construct):
             ),
         )
 
-        # App client for the React dashboard (no secret — SPA cannot keep one).
+        # SPA client: no secret, SRP auth, refresh tokens.
         # Auth flows:
         #   - SRP: primary client-side flow (challenge-response, never sends password)
         #   - Admin user password: server-side only, for admin-initiate-auth smoke tests

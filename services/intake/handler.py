@@ -1,13 +1,4 @@
-"""IntakeLambda — S3 PUT event → DynamoDB application record → Step Functions start.
-
-Triggered by S3 ObjectCreated events on the transcripts bucket (uploads/ prefix).
-For each uploaded PDF, generates a unique applicationId, creates a METADATA item in
-DynamoDB, then starts the Step Functions pipeline execution with the applicationId
-as the execution name (idempotency + traceability).
-
-If the Step Functions call fails, the handler logs a structured error and re-raises
-so that the S3 event source retries delivery.
-"""
+"""S3 upload entry point for the transcript pipeline."""
 
 import json
 import logging
@@ -22,9 +13,7 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Module-level resources are created once per cold start and re-used across
-# warm invocations.  boto3 clients make no network calls at construction time,
-# so moto can safely patch the underlying botocore session later.
+# Reuse clients across warm invocations.
 _dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 _sfn = boto3.client("stepfunctions", region_name="us-east-1")
 
@@ -33,12 +22,7 @@ _STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "")
 
 
 def handler(event: dict, context) -> dict:
-    """Process S3 event notification for one or more new document uploads.
-
-    Returns a statusCode-200 response dict.  S3 event sources do not use the
-    return value, but a well-formed response keeps CloudWatch logs clean and
-    simplifies local integration testing.
-    """
+    """Process one or more S3 upload events."""
 
     records = event.get("Records", [])
     if not records:
@@ -56,11 +40,7 @@ def handler(event: dict, context) -> dict:
 
 
 def _parse_s3_record(record: dict) -> tuple:
-    """Return (bucket, s3_key, size_bytes, original_filename) from an S3 event record.
-
-    Raises ValueError on missing required fields or an unparseable key so the
-    caller can decide whether to skip, dead-letter, or re-raise.
-    """
+    """Pull bucket/key/size/filename out of an S3 event record."""
     try:
         s3_info = record["s3"]
         bucket: str = s3_info["bucket"]["name"]
@@ -69,13 +49,11 @@ def _parse_s3_record(record: dict) -> tuple:
     except (KeyError, TypeError) as exc:
         raise ValueError(f"Malformed S3 event record: {exc}") from exc
 
-    # S3 notification keys are URL-encoded (spaces → '+', specials → '%XX').
-    s3_key = unquote_plus(raw_key)
+    s3_key = unquote_plus(raw_key)  # S3 URL-encodes the key
 
     if s3_key.endswith("/"):
         return bucket, s3_key, size_bytes, ""
 
-    # Extract the last path component as the display filename.
     original_filename = s3_key.rsplit("/", 1)[-1] if "/" in s3_key else s3_key
     if not original_filename:
         raise ValueError(f"Cannot derive filename from S3 key: {s3_key!r}")
@@ -84,8 +62,7 @@ def _parse_s3_record(record: dict) -> tuple:
 
 
 def _process_record(record: dict) -> dict:
-    """Write a METADATA item to DynamoDB, start the Step Functions pipeline, and
-    return the new applicationId."""
+    """Write METADATA to Dynamo, kick off the pipeline, return the new ID."""
     bucket, s3_key, size_bytes, original_filename = _parse_s3_record(record)
 
     if s3_key.endswith("/"):
@@ -99,10 +76,7 @@ def _process_record(record: dict) -> dict:
         )
         return {"skipped": True, "s3_key": s3_key}
 
-    # UUID v4 (stdlib) chosen to avoid extra dependencies.
-    # ULID (python-ulid) would be preferable in production: its time-sortable
-    # property aligns with the GSI1-ReviewQueue access pattern and makes IDs
-    # naturally ordered in logs and DynamoDB scans.
+    # UUID is good enough for the POC; switch to ULID if queue ordering needs it.
     application_id = str(uuid.uuid4())
     uploaded_at = datetime.now(timezone.utc).isoformat()
 
@@ -139,22 +113,13 @@ def _process_record(record: dict) -> dict:
 
 
 def _start_pipeline(*, application_id: str, bucket: str, s3_key: str) -> None:
-    """Start the Step Functions pipeline execution for this application.
-
-    Uses applicationId as the execution name for idempotency and traceability
-    (one application → one execution, easy to correlate in CloudWatch and the
-    Step Functions console).
-
-    Logs and re-raises on failure so that the S3 event source retries delivery.
-    """
+    """Fire off the SFN execution. Re-raises on failure so S3 retries."""
     execution_input = json.dumps(
         {
             "applicationId": application_id,
             "bucket": bucket,
             "s3_key": s3_key,
-            # Precomputed DynamoDB partition key; the pipeline's catch handler
-            # uses this to write FAILED status without an intrinsic-function
-            # string-format step.
+            # Step Functions can write FAILED without building the key itself.
             "pk": f"APP#{application_id}",
         }
     )

@@ -1,20 +1,4 @@
-"""Base types for the MSBN rule engine.
-
-Every rule function takes an aggregation dict (loaded from aggregation.json)
-and returns list[Flag]. An empty list means the rule did not fire.
-
-Flag fields
------------
-rule_code       : e.g. "PHYS_001"
-rule_description: short label matching requirements-draft.md
-severity        : "high" | "medium" | "low"  (public-safety risk if undetected)
-category        : Safe Practice category, "SP-1" through "SP-10"
-rationale       : human-readable explanation of WHY the rule fired, referencing
-                  the specific extracted values that triggered it
-source_location : dict with page_number and text_spans copied from the
-                  aggregation field that triggered the rule; None if unavailable
-timestamp       : ISO-8601 UTC string, set at evaluation time
-"""
+"""Shared rule engine types."""
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -46,5 +30,5 @@ class Flag:
 
 
 def _src(agg: dict, field_name: str) -> Optional[dict]:
-    """Return the source_location dict for a given aggregation field, or None."""
+    """Return the source metadata paired with an aggregation field."""
     return agg.get(f"{field_name}_source")

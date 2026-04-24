@@ -1,4 +1,4 @@
-"""CrossDocLambda: Applies cross-document validation rules across all documents in an application."""
+"""Stub for multi-document consistency checks."""
 
 import json
 import logging
@@ -8,11 +8,7 @@ logger.setLevel(logging.INFO)
 
 
 def handler(event, context):
-    """Run cross-document rules (CROSS_001-003) after all documents are extracted.
-
-    Compares fields across multiple extraction JSONs for a single
-    application (e.g., name consistency between transcript and diploma).
-    """
+    """Run CROSS_001-003 after multi-document extraction is enabled."""
     logger.info("CrossDocLambda invoked: %s", json.dumps(event))
 
     # TODO: Load all extraction JSONs for this application from S3

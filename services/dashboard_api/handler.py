@@ -1,17 +1,4 @@
-"""DashboardApiLambda — REST backend for the MSBN reviewer dashboard.
-
-Routes (all require Cognito JWT via API Gateway authorizer):
-  GET  /applications                  List applications pending review
-  GET  /applications/{id}             Full application detail with flags
-  POST /applications/{id}/decision    Submit flag decisions + overall decision
-  GET  /applications/{id}/audit       Audit trail for one application
-
-API Gateway HTTP API v2 proxy integration.  Reviewer identity is extracted
-from requestContext.authorizer.jwt.claims.email, which API Gateway populates
-after validating the Cognito JWT.
-
-This Lambda is a read/write layer over DynamoDB — no business logic.
-"""
+"""HTTP API handlers for the reviewer dashboard."""
 
 import base64
 import json
@@ -52,7 +39,7 @@ _DEFAULT_PAGE_SIZE = 20
 
 
 class _DecimalEncoder(json.JSONEncoder):
-    """DynamoDB returns Decimal; convert to int or float for JSON."""
+    """Convert DynamoDB Decimal values before JSON serialization."""
 
     def default(self, o):
         if isinstance(o, Decimal):
@@ -75,7 +62,7 @@ def _get_reviewer_email(event: dict) -> str | None:
         return None
 
 
-# ── Router ────────────────────────────────────────────────────────────────────
+# Router.
 
 
 def handler(event: dict, context) -> dict:
@@ -116,7 +103,7 @@ def handler(event: dict, context) -> dict:
         return _response(500, {"error": "Internal server error"})
 
 
-# ── GET /applications ─────────────────────────────────────────────────────────
+# GET /applications.
 
 
 def _list_applications(event: dict, table) -> dict:
@@ -181,7 +168,7 @@ def _list_applications(event: dict, table) -> dict:
     return _response(200, {"items": items, "nextCursor": next_cursor})
 
 
-# ── GET /applications/{id} ───────────────────────────────────────────────────
+# GET /applications/{id}.
 
 
 def _get_application(app_id: str | None, table) -> dict:
@@ -228,7 +215,7 @@ def _get_application(app_id: str | None, table) -> dict:
     )
 
 
-# ── POST /applications/{id}/decision ─────────────────────────────────────────
+# POST /applications/{id}/decision.
 
 
 def _post_decision(

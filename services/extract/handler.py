@@ -1,28 +1,4 @@
-"""ExtractLambda — Session 2: Bedrock Nova per-page extraction.
-
-Downloads a transcript PDF from S3, converts each page to a PNG image,
-calls Amazon Nova (Lite by default) via Bedrock for structured field
-extraction, validates response enum values, merges page-level results,
-and writes the full extraction JSON to S3.
-
-Step Functions input:
-    {
-        "applicationId": "<uuid>",
-        "s3_key":        "uploads/<applicationId>/transcript.pdf",
-        "bucket":        "<bucket-name>"
-    }
-
-Return value:
-    {
-        "applicationId":     "<uuid>",
-        "page_count":        <int>,
-        "extraction_s3_key": "processed/<applicationId>/extraction_transcript.json"
-    }
-
-S3 outputs written by this function:
-    processed/<applicationId>/page_transcript_<n>.png   (one per page)
-    processed/<applicationId>/extraction_transcript.json
-"""
+"""Extract transcript PDFs into the JSON contract consumed by the rules."""
 
 import base64
 import datetime
@@ -39,16 +15,13 @@ from prompt import PROMPT_VERSION, VOCABULARY, build_extraction_prompt
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Module-level clients.
-# _s3: moto patches the botocore transport layer so this uses the mock in tests.
-# _bedrock: patched directly in tests via unittest.mock.patch.object.
+# Keep clients warm between Lambda invocations.
 _s3 = boto3.client("s3")
 _bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
 
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
 
-# Fields whose vocabulary values are array elements, not the array itself.
 _ARRAY_FIELDS = {
     "security_features_present",
     "suspicious_course_names",
@@ -63,27 +36,7 @@ def _validate_and_build_page_record(
     width: int,
     height: int,
 ) -> dict:
-    """Flatten and validate Nova's per-field response into a page record.
-
-    Nova returns each field wrapped as::
-
-        {
-          "field_name": {
-            "value":           <str | list | dict>,
-            "confidence":      "high" | "medium" | "low",
-            "source_location": {"page_number": int, "text_spans": [str]}  # optional
-          }
-        }
-
-    The returned flat record stores:
-        field_name              → the extracted value
-        field_name_confidence   → the confidence string
-        field_name_source       → the source_location dict, with page_number stamped
-
-    ``accreditation_claim_location`` is additionally mirrored as
-    ``accreditation_claim_source`` so the rule engine's ``_src()`` helper finds
-    it under the standard ``{field}_source`` key.
-    """
+    """Flatten Nova output and warn on enum drift without failing the run."""
     record: dict = {
         "page_number": page_number,
         "image_dimensions": {"width": width, "height": height},
@@ -106,11 +59,10 @@ def _validate_and_build_page_record(
         confidence = meta.get("confidence")
         source_location = meta.get("source_location")
 
-        # Always stamp page_number into every source_location dict.
         if isinstance(source_location, dict):
             source_location["page_number"] = page_number
 
-        # ── Enum validation ────────────────────────────────────────────────
+        # Treat vocabulary drift as a data-quality warning, not a pipeline failure.
         if field in VOCABULARY:
             allowed = VOCABULARY[field]
             if field in _ARRAY_FIELDS and isinstance(value, list):
@@ -146,15 +98,14 @@ def _validate_and_build_page_record(
                 })
             )
 
-        # ── Store flattened fields ─────────────────────────────────────────
+        # Store the field plus its optional confidence/source siblings.
         record[field] = value
         if confidence is not None:
             record[f"{field}_confidence"] = confidence
         if source_location is not None:
             record[f"{field}_source"] = source_location
 
-    # Mirror accreditation_claim_location as accreditation_claim_source so the
-    # rule engine _src("accreditation_claim") finds it via the standard suffix.
+    # Rule helpers expect the usual <field>_source shape.
     acc_loc = record.get("accreditation_claim_location")
     if isinstance(acc_loc, dict):
         record.setdefault("accreditation_claim_source", acc_loc)
@@ -163,11 +114,7 @@ def _validate_and_build_page_record(
 
 
 def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
-    """Invoke Bedrock Nova for one PNG image and return the parsed JSON dict.
-
-    Raises ``ValueError`` if Nova's response cannot be parsed as JSON so the
-    Lambda re-raises and Step Functions routes to the error state.
-    """
+    """Run one page through Nova and parse the JSON response."""
     system_prompt, user_prompt = build_extraction_prompt()
     b64_image = base64.b64encode(image_bytes).decode("utf-8")
 
@@ -222,19 +169,14 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
 
 
 def handler(event, context):
-    """Extract structured data from a transcript PDF via Bedrock Nova.
-
-    Raises on S3 download failure, PDF conversion failure, or Bedrock error
-    so Step Functions retries the state and ultimately routes to the failure
-    handler.
-    """
+    """Download the PDF, extract each page, and persist the merged result."""
     logger.info("ExtractLambda invoked: %s", json.dumps(event))
 
     application_id = event["applicationId"]
     s3_key = event["s3_key"]
     bucket = event.get("bucket") or BUCKET_NAME
 
-    # ── 1. Download PDF from S3 ───────────────────────────────────────────────
+    # Download the source PDF to local Lambda storage.
     local_pdf = os.path.join(
         tempfile.gettempdir(), f"{application_id}_transcript.pdf"
     )
@@ -251,7 +193,7 @@ def handler(event, context):
         )
         raise
 
-    # ── 2. Convert PDF pages to PNG images ────────────────────────────────────
+    # Render once up front so each page can be stored and sent to Nova.
     try:
         images = convert_from_path(local_pdf)
     except Exception as exc:
@@ -272,7 +214,7 @@ def handler(event, context):
     for page_idx, img in enumerate(images, start=1):
         width, height = img.size
 
-        # ── 3. Write page PNG to S3 ───────────────────────────────────────────
+        # Persist the rendered page for reviewer highlighting.
         img_key = f"processed/{application_id}/page_transcript_{page_idx}.png"
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             img.save(tmp.name, format="PNG")
@@ -284,16 +226,16 @@ def handler(event, context):
         finally:
             os.unlink(tmp_path)
 
-        # ── 4. Call Bedrock Nova for this page ────────────────────────────────
+        # Extract the page into the prompt schema.
         nova_raw = _call_bedrock_for_page(image_bytes, page_idx)
 
-        # ── 5. Validate enums and flatten into a page record ──────────────────
+        # Convert Nova's nested field records into the downstream page shape.
         page_record = _validate_and_build_page_record(
             nova_raw, page_idx, width, height
         )
         page_extractions.append(page_record)
 
-    # ── 6. Write full extraction JSON to S3 ───────────────────────────────────
+    # Write the document-level extraction payload for AggregationLambda.
     extraction_key = f"processed/{application_id}/extraction_transcript.json"
     extraction_doc = {
         "schema_version": "1.0",

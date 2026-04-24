@@ -1,31 +1,4 @@
-"""RuleEngineLambda: Deterministic rule engine for transcript fraud detection.
-
-Reads aggregation.json from S3, applies every rule in the rules registry,
-writes FLAG items to DynamoDB, and returns a summary to Step Functions.
-
-Input event (from Step Functions):
-    {
-        "applicationId": "<id>",
-        "aggregation_s3_key": "processed/<id>/aggregation.json"
-    }
-
-Output (returned to Step Functions):
-    {
-        "applicationId": "<id>",
-        "flag_count": <int>,
-        "flags": [ <flag dict>, ... ]
-    }
-
-DynamoDB item layout:
-    PK  = APP#<applicationId>
-    SK  = FLAG#<rule_code>#<seq:04d>
-    entity_type = FLAG
-    + all Flag fields (rule_code, rule_description, severity, category,
-      rationale, source_location, timestamp)
-
-No LLM calls are made here. All logic is pure Python against the structured
-extraction vocabulary defined in design/extraction-vocabulary.md.
-"""
+"""Run deterministic transcript rules and persist any flags."""
 
 import json
 import logging
@@ -47,14 +20,7 @@ _table = _dynamo.Table(TABLE_NAME)
 
 
 def handler(event, context):
-    """Evaluate all fraud-detection rules against aggregation.json.
-
-    Steps:
-    1. Read aggregation.json from S3 (processed/ prefix).
-    2. Run every rule in ALL_RULES; collect Flag objects.
-    3. Write each flag as a FLAG item in DynamoDB.
-    4. Return a summary dict to Step Functions.
-    """
+    """Evaluate all registered rules against an aggregation document."""
 
     application_id = event["applicationId"]
     s3_key = event["aggregation_s3_key"]
@@ -69,17 +35,17 @@ def handler(event, context):
         )
     )
 
-    # ── 1. Read aggregation.json ───────────────────────────────────────────────
+    # Read the flattened document created by AggregationLambda.
     response = _s3.get_object(Bucket=BUCKET_NAME, Key=s3_key)
     aggregation = json.loads(response["Body"].read().decode("utf-8"))
 
-    # ── 2. Run rule engine ────────────────────────────────────────────────────
+    # Rules are pure functions over the aggregation dict.
     flags = []
     for rule_fn in ALL_RULES:
         results = rule_fn(aggregation)
         flags.extend(results)
 
-    # ── 3. Write FLAG items to DynamoDB ───────────────────────────────────────
+    # Store flags under the application partition for the dashboard.
     for seq, flag in enumerate(flags):
         item = {
             "PK": f"APP#{application_id}",
@@ -97,7 +63,7 @@ def handler(event, context):
             item["source_location"] = flag.source_location
         _table.put_item(Item=item)
 
-    # ── 4. Return summary ─────────────────────────────────────────────────────
+    # Step Functions only needs the count; tests also assert the flag payload.
     flag_count = len(flags)
     logger.info(
         json.dumps(

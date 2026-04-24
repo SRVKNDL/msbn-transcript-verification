@@ -1,11 +1,4 @@
-"""API construct: API Gateway HTTP API and JWT authorizer.
-
-API Gateway HTTP API (architecture-plan.md Section 2.1):
-  - HTTP API (not REST API) for lower cost
-  - JWT authorizer backed by Cognito
-  - Routes proxy to DashboardApiLambda
-  - CORS enabled for dashboard origin
-"""
+"""API Gateway HTTP API for the dashboard."""
 
 from aws_cdk import (
     CfnOutput,
@@ -33,7 +26,6 @@ class ApiConstruct(Construct):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # ── HTTP API ──────────────────────────────────────────────────────────
         self.http_api = apigwv2.HttpApi(
             self,
             "DashboardApi",
@@ -49,28 +41,24 @@ class ApiConstruct(Construct):
             ),
         )
 
-        # ── Throttling ────────────────────────────────────────────────────────
-        # POC-scale limits. Raise for production traffic.
+        # POC-scale limits. Raise before production traffic.
         cfn_stage = self.http_api.default_stage.node.default_child
         cfn_stage.add_property_override("DefaultRouteSettings", {
             "ThrottlingBurstLimit": 50,
             "ThrottlingRateLimit": 25,
         })
 
-        # ── JWT Authorizer ────────────────────────────────────────────────────
         authorizer = apigwv2_auth.HttpJwtAuthorizer(
             "CognitoAuthorizer",
             jwt_issuer=f"https://cognito-idp.us-east-1.amazonaws.com/{user_pool.user_pool_id}",
             jwt_audience=[user_pool_client.user_pool_client_id],
         )
 
-        # ── Lambda Integration ────────────────────────────────────────────────
         integration = apigwv2_int.HttpLambdaIntegration(
             "DashboardApiIntegration",
             handler=dashboard_api_lambda,
         )
 
-        # ── Routes ────────────────────────────────────────────────────────────
         routes = [
             ("GET", "/applications"),
             ("GET", "/applications/{id}"),
@@ -90,5 +78,4 @@ class ApiConstruct(Construct):
                 authorizer=authorizer,
             )
 
-        # ── Outputs ───────────────────────────────────────────────────────────
         CfnOutput(self, "ApiUrl", value=self.http_api.api_endpoint)

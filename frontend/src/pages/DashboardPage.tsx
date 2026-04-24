@@ -170,11 +170,6 @@ export function DashboardPage({
         eyebrow={`Tuesday \u00b7 21 April 2026 \u00b7 ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} CT`}
         title="Good afternoon, Saurav"
         subtitle="6 applications awaiting review \u00b7 2 flagged as high severity"
-        actions={
-          <Btn variant="primary" onClick={() => onNavigate("queue")}>
-            Open review queue &rarr;
-          </Btn>
-        }
       />
 
       <div

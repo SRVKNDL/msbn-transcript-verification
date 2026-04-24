@@ -1,8 +1,6 @@
 """Cognito auth for reviewer access."""
 
-from aws_cdk import (
-    aws_cognito as cognito,
-)
+from aws_cdk import Stack, aws_cognito as cognito
 from constructs import Construct
 
 
@@ -13,6 +11,9 @@ class AuthConstruct(Construct):
         self,
         scope: Construct,
         construct_id: str,
+        *,
+        callback_urls: list[str] | None = None,
+        logout_urls: list[str] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -46,6 +47,9 @@ class AuthConstruct(Construct):
         #   - Refresh: token renewal
         # USER_PASSWORD_AUTH is intentionally excluded — it sends the password
         # in plaintext to Cognito. SRP is the correct client-side flow.
+        callback_urls = callback_urls or ["http://localhost:3000/"]
+        logout_urls = logout_urls or ["http://localhost:3000/"]
+
         self.user_pool_client = self.user_pool.add_client(
             "DashboardClient",
             user_pool_client_name="msbn-dashboard",
@@ -54,5 +58,22 @@ class AuthConstruct(Construct):
                 admin_user_password=True,
             ),
             generate_secret=False,
-            disable_o_auth=True,
+            o_auth=cognito.OAuthSettings(
+                flows=cognito.OAuthFlows(authorization_code_grant=True),
+                scopes=[
+                    cognito.OAuthScope.OPENID,
+                    cognito.OAuthScope.EMAIL,
+                    cognito.OAuthScope.PROFILE,
+                ],
+                callback_urls=callback_urls,
+                logout_urls=logout_urls,
+            ),
+        )
+
+        stack = Stack.of(self)
+        self.user_pool_domain = self.user_pool.add_domain(
+            "DashboardDomain",
+            cognito_domain=cognito.CognitoDomainOptions(
+                domain_prefix=f"msbn-reviewers-{stack.account}",
+            ),
         )

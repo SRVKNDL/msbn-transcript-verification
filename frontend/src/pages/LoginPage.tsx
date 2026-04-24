@@ -1,5 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  handleAuthRedirect,
+  isApiMode,
+  isAuthConfigured,
+  signIn,
+} from "../auth";
 import { useT } from "../theme";
 
 function LoginField({
@@ -57,6 +63,44 @@ function LoginField({
 export function LoginPage() {
   const t = useT();
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    handleAuthRedirect()
+      .then((signedIn) => {
+        if (mounted && signedIn) navigate("/dashboard", { replace: true });
+      })
+      .catch((err: Error) => {
+        if (mounted) setError(err.message);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [navigate]);
+
+  const handleSignIn = async () => {
+    setError(null);
+
+    if (!isApiMode) {
+      navigate("/dashboard");
+      return;
+    }
+
+    if (!isAuthConfigured) {
+      setError("Cognito settings are missing from this frontend build.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await signIn();
+    } catch (err) {
+      setLoading(false);
+      setError(err instanceof Error ? err.message : "Sign-in failed.");
+    }
+  };
 
   return (
     <div
@@ -164,8 +208,25 @@ export function LoginPage() {
         />
         <div style={{ height: 18 }} />
 
+        {error && (
+          <div
+            style={{
+              background: t.highBg,
+              border: `1px solid ${t.high}`,
+              color: t.high,
+              fontSize: 12,
+              padding: "8px 10px",
+              borderRadius: 3,
+              marginBottom: 12,
+            }}
+          >
+            {error}
+          </div>
+        )}
+
         <button
-          onClick={() => navigate("/dashboard")}
+          onClick={handleSignIn}
+          disabled={loading}
           style={{
             width: "100%",
             padding: "11px",
@@ -175,11 +236,12 @@ export function LoginPage() {
             borderRadius: 3,
             fontSize: 14,
             fontWeight: 600,
-            cursor: "pointer",
+            cursor: loading ? "wait" : "pointer",
+            opacity: loading ? 0.7 : 1,
             fontFamily: "inherit",
           }}
         >
-          Sign in
+          {isApiMode ? "Sign in with Cognito" : "Open local demo"}
         </button>
 
         <div style={{ marginTop: 16, textAlign: "center", fontSize: 12 }}>

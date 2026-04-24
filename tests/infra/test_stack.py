@@ -275,26 +275,23 @@ class TestCognitoPasswordPolicy:
                 "Client should not allow USER_PASSWORD_AUTH — use admin-initiate-auth for testing"
             )
 
-    def test_no_oauth_flows(self, auth_template):
-        """No OAuth flows should be configured — SPA uses SDK-based SRP auth."""
+    def test_hosted_ui_oauth_code_flow(self, auth_template):
+        """SPA uses Cognito Hosted UI with authorization-code OAuth flow."""
         auth_template.has_resource_properties(
             "AWS::Cognito::UserPoolClient",
             Match.object_like({
-                "AllowedOAuthFlowsUserPoolClient": False,
+                "AllowedOAuthFlowsUserPoolClient": True,
+                "AllowedOAuthFlows": ["code"],
+                "AllowedOAuthScopes": ["openid", "email", "profile"],
+                "CallbackURLs": ["http://localhost:3000/"],
+                "LogoutURLs": ["http://localhost:3000/"],
+                "SupportedIdentityProviders": ["COGNITO"],
             }),
         )
-        clients = auth_template.find_resources("AWS::Cognito::UserPoolClient")
-        for _id, resource in clients.items():
-            props = resource.get("Properties", {})
-            assert "AllowedOAuthFlows" not in props, (
-                "Client should not have OAuth flows configured"
-            )
-            assert "AllowedOAuthScopes" not in props, (
-                "Client should not have OAuth scopes configured"
-            )
-            assert "CallbackURLs" not in props, (
-                "Client should not have callback URLs configured"
-            )
+
+    def test_hosted_ui_domain_exists(self, auth_template):
+        """Hosted UI requires a user-pool domain for login redirects."""
+        auth_template.resource_count_is("AWS::Cognito::UserPoolDomain", 1)
 
 
 # ── 6. API Gateway throttling ────────────────────────────────────────────────

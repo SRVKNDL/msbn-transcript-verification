@@ -262,31 +262,65 @@ function TranscriptPageViewer({
 // --- Queue row (sidebar) ---
 function QueueRow({ app, active, onClick }: { app: Application; active: boolean; onClick: () => void }) {
   const t = useT();
+  const dotColor = app.highestSeverity === "High" ? t.high
+    : app.highestSeverity === "Medium" ? t.med
+    : app.highestSeverity === "Low" ? t.low
+    : t.ink4;
 
   return (
     <div onClick={onClick} style={{
-      display: "grid", gridTemplateColumns: "14px 1fr 90px 60px 70px",
-      gap: 12, alignItems: "center", padding: "9px 14px",
-      borderBottom: "1px solid rgba(255,255,255,0.08)",
-      background: active ? "rgba(255,255,255,0.08)" : "transparent",
-      cursor: "pointer", fontSize: 13, color: "rgba(255,255,255,0.78)",
+      display: "grid",
+      gridTemplateColumns: "14px minmax(0, 1fr)",
+      gap: 10,
+      alignItems: "start",
+      padding: "9px 10px",
+      margin: "0 10px 2px",
+      borderRadius: 6,
+      border: "none",
+      background: active ? t.accentBg : "transparent",
+      cursor: "pointer",
+      fontSize: 13,
+      color: active ? t.primary : t.ink2,
     }}>
-      <div style={{ width: 6, height: 6, borderRadius: 3,
-        background: app.highestSeverity === "High" ? TOKENS.high
-          : app.highestSeverity === "Medium" ? TOKENS.med
-          : app.highestSeverity === "Low" ? TOKENS.low : TOKENS.ink5 }} />
-      <div>
-        <div style={{ fontWeight: 500, color: t.primaryInk }}>{app.applicantName}</div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.48)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", marginTop: 1 }}>{app.applicationId}</div>
-      </div>
-      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.62)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
-        {app.country} · {app.programYear}
-      </div>
-      <div style={{ fontSize: 11, color: app.flagCount ? "rgba(255,255,255,0.78)" : "rgba(255,255,255,0.48)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
-        {app.flagCount} flag{app.flagCount !== 1 ? "s" : ""}
-      </div>
-      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.62)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", textAlign: "right" }}>
-        {timeAgo(app.ageHours)}
+      <div style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, marginTop: 7 }} />
+      <div style={{ minWidth: 0 }}>
+        <div style={{
+          fontWeight: active ? 600 : 500,
+          color: active ? t.primary : t.ink2,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}>
+          {app.applicantName || app.originalFilename || "Transcript upload"}
+        </div>
+        <div style={{
+          fontSize: 11,
+          color: t.ink4,
+          fontFamily: t.mono,
+          marginTop: 2,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}>
+          {app.applicationId}
+        </div>
+        <div style={{
+          display: "flex",
+          gap: 6,
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginTop: 3,
+          fontSize: 10,
+          color: t.ink3,
+          fontFamily: t.mono,
+        }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {[app.country, app.programYear].filter(Boolean).join(" · ") || timeAgo(app.ageHours)}
+          </span>
+          <span style={{ flexShrink: 0 }}>
+            {app.flagCount} flag{app.flagCount !== 1 ? "s" : ""}
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -300,7 +334,7 @@ function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpen
   active: boolean; onClick: () => void; shaded?: boolean;
 }) {
   const resolved = !!decision;
-  const cardBackground = resolved ? LAYOUT.line2 : shaded ? "#f8fafc" : TOKENS.paper;
+  const cardBackground = resolved ? LAYOUT.line2 : shaded ? "#eef4fb" : TOKENS.paper;
   return (
     <div onClick={onClick} style={{
       border: `1px solid ${active ? TOKENS.ink3 : TOKENS.line}`,
@@ -820,7 +854,7 @@ export function ReviewPage() {
       width: "100vw", height: "100vh", position: "relative",
       background: t.bg, fontFamily: "'Open Sans', system-ui, sans-serif", color: t.ink,
       display: "grid",
-      gridTemplateColumns: queueOpen ? "240px 1fr 320px" : "0 1fr 320px",
+      gridTemplateColumns: queueOpen ? "220px 1fr 320px" : "0 1fr 320px",
       gridTemplateRows: "60px 1fr",
       overflow: "hidden",
     }}>
@@ -919,10 +953,28 @@ export function ReviewPage() {
       </div>
 
       {/* Queue sidebar */}
-      <div style={{ gridColumn: 1, gridRow: 2, borderRight: queueOpen ? `1px solid ${t.line}` : "none", background: t.primaryDark, overflow: "hidden", display: queueOpen ? "flex" : "none", flexDirection: "column" }}>
-        <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 }}>Review queue</div>
-          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.8)" }}>
+      <div style={{
+        gridColumn: 1,
+        gridRow: 2,
+        borderRight: queueOpen ? `1px solid ${t.line}` : "none",
+        background: t.surface,
+        overflow: "hidden",
+        display: queueOpen ? "flex" : "none",
+        flexDirection: "column",
+        padding: queueOpen ? "18px 0" : 0,
+      }}>
+        <div style={{ padding: "0 18px 10px", borderBottom: `1px solid ${t.line2}`, marginBottom: 8 }}>
+          <div style={{
+            fontSize: 10,
+            color: t.ink4,
+            fontFamily: t.mono,
+            letterSpacing: 0.8,
+            textTransform: "uppercase",
+            marginBottom: 4,
+          }}>
+            Review queue
+          </div>
+          <div style={{ fontSize: 13, color: t.ink2 }}>
             <span style={{ fontWeight: 600 }}>{reviewableQueueApps.length}</span> pending · sorted by age
           </div>
         </div>

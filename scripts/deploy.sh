@@ -197,7 +197,22 @@ deploy_backend() {
   local stack
   for stack in "${stacks[@]}"; do
     log "deploying $stack"
-    (cd "$INFRA_DIR" && cdk deploy "$stack" --require-approval "$REQUIRE_APPROVAL")
+    local cdk_log
+    cdk_log="$(mktemp)"
+    set +e
+    (cd "$INFRA_DIR" && cdk deploy "$stack" --require-approval "$REQUIRE_APPROVAL") 2>&1 | tee "$cdk_log"
+    local cdk_status="${PIPESTATUS[0]}"
+    set -e
+
+    if [[ "$cdk_status" -ne 0 ]]; then
+      if grep -Eq "(✅[[:space:]]+$stack|$stack[[:space:]]+\\(no changes\\))" "$cdk_log"; then
+        log "cdk exited with status $cdk_status after reporting $stack complete; continuing"
+      else
+        rm -f "$cdk_log"
+        die "cdk deploy failed for $stack"
+      fi
+    fi
+    rm -f "$cdk_log"
   done
 }
 

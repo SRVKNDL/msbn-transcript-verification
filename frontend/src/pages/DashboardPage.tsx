@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
@@ -62,19 +62,25 @@ function StatusPill({ status }: { status: string }) {
   const t = useT();
   const processing = status === "PROCESSING" || status === "INTAKE_COMPLETE";
   const failed = status === "FAILED";
+  const reviewed = status === "REVIEWED";
   const label = processing
     ? "Processing"
     : status === "READY_FOR_REVIEW"
       ? "Ready"
-      : status.replaceAll("_", " ").toLowerCase();
+      : reviewed
+        ? "Reviewed"
+        : status.replaceAll("_", " ").toLowerCase();
+  const borderColor = failed ? t.high : processing ? t.med : reviewed ? t.ink3 : t.ok;
+  const bgColor = failed ? t.highBg : processing ? t.medBg : reviewed ? t.surfaceAlt : t.okBg;
+  const textColor = failed ? t.high : processing ? t.med : reviewed ? t.ink3 : t.ok;
   return (
     <span
       style={{
         display: "inline-flex",
         alignItems: "center",
-        border: `1px solid ${failed ? t.high : processing ? t.med : t.ok}`,
-        background: failed ? t.highBg : processing ? t.medBg : t.okBg,
-        color: failed ? t.high : processing ? t.med : t.ok,
+        border: `1px solid ${borderColor}`,
+        background: bgColor,
+        color: textColor,
         borderRadius: 2,
         padding: "2px 7px",
         fontSize: 10,
@@ -93,7 +99,26 @@ function StatusPill({ status }: { status: string }) {
 function applicationTarget(app: Application) {
   if (isReadyForReview(app)) return `/review/${app.applicationId}`;
   if (app.status === "FAILED") return `/audit/${app.applicationId}`;
+  if (app.status === "REVIEWED") return `/audit/${app.applicationId}`;
   return null;
+}
+
+type SortKey = "date_desc" | "date_asc" | "status";
+
+interface EnabledGroups {
+  processing: boolean;
+  failed: boolean;
+  ready: boolean;
+  reviewed: boolean;
+}
+
+function resolveStatuses(groups: EnabledGroups): string[] {
+  return [
+    ...(groups.processing ? ["PROCESSING", "INTAKE_COMPLETE"] : []),
+    ...(groups.failed ? ["FAILED"] : []),
+    ...(groups.ready ? ["READY_FOR_REVIEW"] : []),
+    ...(groups.reviewed ? ["REVIEWED"] : []),
+  ];
 }
 
 export function DashboardPage({
@@ -106,10 +131,26 @@ export function DashboardPage({
   const [apps, setApps] = useState<Application[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const [enabledGroups, setEnabledGroups] = useState<EnabledGroups>({
+    processing: true,
+    failed: true,
+    ready: true,
+    reviewed: false,
+  });
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [sortBy, setSortBy] = useState<SortKey>("date_desc");
+  const [pageSize, setPageSize] = useState(10);
+
+  // Keep a stable ref to enabledGroups for the polling interval.
+  const groupsRef = useRef(enabledGroups);
+  groupsRef.current = enabledGroups;
+
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      listApplications({ limit: 50 })
+      const statuses = resolveStatuses(groupsRef.current);
+      listApplications({ statuses, limit: 200 })
         .then((items) => {
           if (cancelled) return;
           setApps(items);
@@ -125,14 +166,35 @@ export function DashboardPage({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, []);
+  // Re-mount the effect (and refetch immediately) when the status filter changes.
+  }, [enabledGroups]);
 
+  // Client-side pipeline: date filter → sort → paginate.
+  let displayed = [...apps];
+  if (dateFrom) {
+    displayed = displayed.filter((a) => a.submittedAt >= dateFrom);
+  }
+  if (dateTo) {
+    displayed = displayed.filter(
+      (a) => a.submittedAt <= `${dateTo}T23:59:59`
+    );
+  }
+  if (sortBy === "date_desc") {
+    displayed.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+  } else if (sortBy === "date_asc") {
+    displayed.sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+  } else {
+    displayed.sort((a, b) => a.status.localeCompare(b.status));
+  }
+  const queue = displayed.slice(0, pageSize);
+
+  // Stats are always computed from the unfiltered fetch.
   const awaiting = apps.filter(isReadyForReview);
   const processing = apps.filter(isProcessing);
   const failed = apps.filter((a) => a.status === "FAILED");
   const highSeverity = awaiting.filter((a) => a.highestSeverity === "High").length;
   const flagged = awaiting.reduce((sum, app) => sum + app.flagCount, 0);
-  const queue = [...processing, ...failed, ...awaiting].slice(0, 5);
+
   const today = new Date();
   const eyebrowDate = today.toLocaleDateString("en-US", {
     weekday: "long",
@@ -168,12 +230,36 @@ export function DashboardPage({
     },
   ];
 
+  function toggleGroup(key: keyof EnabledGroups) {
+    setEnabledGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  const statusToggles: { key: keyof EnabledGroups; label: string }[] = [
+    { key: "processing", label: "Processing" },
+    { key: "failed",     label: "Failed" },
+    { key: "ready",      label: "Ready" },
+    { key: "reviewed",   label: "Already Reviewed" },
+  ];
+
+  // Shared select style.
+  const selectStyle: React.CSSProperties = {
+    fontSize: 11,
+    fontFamily: t.mono,
+    color: t.ink2,
+    background: t.surface,
+    border: `1px solid ${t.line}`,
+    borderRadius: 3,
+    padding: "4px 8px",
+    cursor: "pointer",
+    outline: "none",
+  };
+
   return (
     <>
       <PageHeader
-        eyebrow={`${eyebrowDate} \u00b7 ${today.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} CT`}
+        eyebrow={`${eyebrowDate} · ${today.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} CT`}
         title="Reviewer dashboard"
-        subtitle={`${awaiting.length} applications awaiting review \u00b7 ${highSeverity} high severity`}
+        subtitle={`${awaiting.length} applications awaiting review · ${highSeverity} high severity`}
       />
 
       <div
@@ -184,6 +270,7 @@ export function DashboardPage({
           gap: 18,
         }}
       >
+        {/* Stats row */}
         <div
           style={{
             display: "grid",
@@ -242,7 +329,7 @@ export function DashboardPage({
         >
           <Card
             title="Transcript activity"
-            subtitle="Processing uploads appear before ready-for-review cases"
+            subtitle={`${queue.length} of ${displayed.length} entries`}
             pad={0}
             actions={
               <Btn
@@ -254,6 +341,172 @@ export function DashboardPage({
               </Btn>
             }
           >
+            {/* Filter toolbar */}
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 14px",
+                borderBottom: `1px solid ${t.line}`,
+                background: t.surfaceAlt,
+              }}
+            >
+              {/* Status toggles */}
+              <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                {statusToggles.map(({ key, label }) => {
+                  const active = enabledGroups[key];
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => toggleGroup(key)}
+                      style={{
+                        fontSize: 10,
+                        fontFamily: t.mono,
+                        fontWeight: 700,
+                        letterSpacing: 0.3,
+                        textTransform: "uppercase",
+                        padding: "3px 9px",
+                        borderRadius: 2,
+                        cursor: "pointer",
+                        border: `1px solid ${active ? t.accent : t.line}`,
+                        background: active ? t.accent : "transparent",
+                        color: active ? "#fff" : t.ink3,
+                        transition: "background 0.15s, color 0.15s",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Divider */}
+              <div
+                style={{
+                  width: 1,
+                  height: 20,
+                  background: t.line,
+                  margin: "0 2px",
+                }}
+              />
+
+              {/* Date range */}
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontFamily: t.mono,
+                    color: t.ink4,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.3,
+                  }}
+                >
+                  From
+                </span>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  style={{ ...selectStyle, padding: "3px 6px" }}
+                />
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontFamily: t.mono,
+                    color: t.ink4,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.3,
+                  }}
+                >
+                  To
+                </span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  style={{ ...selectStyle, padding: "3px 6px" }}
+                />
+                {(dateFrom || dateTo) && (
+                  <button
+                    onClick={() => { setDateFrom(""); setDateTo(""); }}
+                    style={{
+                      fontSize: 10,
+                      fontFamily: t.mono,
+                      color: t.ink4,
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "2px 4px",
+                    }}
+                    title="Clear date filter"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Divider */}
+              <div
+                style={{
+                  width: 1,
+                  height: 20,
+                  background: t.line,
+                  margin: "0 2px",
+                }}
+              />
+
+              {/* Sort */}
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontFamily: t.mono,
+                    color: t.ink4,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.3,
+                  }}
+                >
+                  Sort
+                </span>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as SortKey)}
+                  style={selectStyle}
+                >
+                  <option value="date_desc">Newest first</option>
+                  <option value="date_asc">Oldest first</option>
+                  <option value="status">By status</option>
+                </select>
+              </div>
+
+              {/* Per page */}
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontFamily: t.mono,
+                    color: t.ink4,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.3,
+                  }}
+                >
+                  Show
+                </span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  style={selectStyle}
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Table */}
             <table
               style={{
                 width: "100%",
@@ -303,121 +556,20 @@ export function DashboardPage({
                         fontSize: 13,
                       }}
                     >
-                      No transcript activity yet.
+                      No transcript activity matches the current filters.
                     </td>
                   </tr>
                 )}
                 {queue.map((r, i) => {
                   const target = applicationTarget(r);
                   return (
-                    <tr
+                    <ActivityRow
                       key={r.applicationId}
-                      onClick={() => target && navigate(target)}
-                      onKeyDown={(e) => {
-                        if (!target) return;
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          navigate(target);
-                        }
-                      }}
-                      tabIndex={target ? 0 : undefined}
-                      aria-label={target ? `Open ${displayApplicant(r)}` : undefined}
-                      style={{
-                        borderBottom:
-                          i < queue.length - 1
-                            ? `1px solid ${t.line2}`
-                            : "none",
-                        cursor: target ? "pointer" : "default",
-                      }}
-                    >
-                    <td
-                      style={{
-                        padding: "11px 14px",
-                        fontFamily: t.mono,
-                        fontSize: 11,
-                        color: t.ink2,
-                      }}
-                    >
-                      {r.applicationId}
-                    </td>
-                    <td
-                      style={{
-                        padding: "11px 14px",
-                        fontWeight: 500,
-                        color: t.ink,
-                      }}
-                    >
-                      {displayApplicant(r)}
-                    </td>
-                    <td
-                      style={{
-                        padding: "11px 14px",
-                        color: t.ink3,
-                        fontSize: 12,
-                      }}
-                    >
-                      {displayInstitution(r)}
-                    </td>
-                    <td style={{ padding: "11px 14px" }}>
-                      <StatusPill status={r.status} />
-                    </td>
-                    <td
-                      style={{
-                        padding: "11px 14px",
-                        color: t.ink3,
-                        fontFamily: t.mono,
-                        fontSize: 11,
-                      }}
-                    >
-                      {timeAgo(r.ageHours)}
-                    </td>
-                    <td style={{ padding: "11px 14px" }}>
-                      <div style={{ display: "flex", gap: 4 }}>
-                        {r.flagCount > 0 && (
-                          <FlagDot
-                            n={r.flagCount}
-                            color={r.highestSeverity === "High" ? t.high : t.med}
-                          />
-                        )}
-                        {r.flagCount === 0 && (
-                          <span
-                            style={{
-                              fontSize: 10,
-                              color: t.ok,
-                              fontFamily: t.mono,
-                              letterSpacing: 0.4,
-                              textTransform: "uppercase",
-                            }}
-                          >
-                            &check; clean
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td
-                      style={{ padding: "11px 14px", textAlign: "right" }}
-                    >
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (target) navigate(target);
-                        }}
-                        disabled={!target}
-                        style={{
-                          border: "none",
-                          background: "transparent",
-                          padding: 0,
-                          color: target ? t.primary : t.ink4,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: target ? "pointer" : "default",
-                          fontFamily: "inherit",
-                        }}
-                      >
-                        {isReadyForReview(r) ? "Review \u2192" : r.status === "FAILED" ? "Audit \u2192" : "Waiting"}
-                      </button>
-                    </td>
-                  </tr>
+                      app={r}
+                      target={target}
+                      isLast={i === queue.length - 1}
+                      onNavigate={navigate}
+                    />
                   );
                 })}
               </tbody>
@@ -449,80 +601,83 @@ export function DashboardPage({
                 {queue.map((a, i) => {
                   const target = applicationTarget(a);
                   return (
-                  <div
-                    key={a.applicationId}
-                    onClick={() => target && navigate(target)}
-                    onKeyDown={(e) => {
-                      if (!target) return;
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        navigate(target);
-                      }
-                    }}
-                    tabIndex={target ? 0 : undefined}
-                    aria-label={target ? `Open ${displayApplicant(a)}` : undefined}
-                    style={{
-                      padding: "11px 18px",
-                      borderBottom:
-                        i < queue.length - 1
-                          ? `1px solid ${t.line2}`
-                          : "none",
-                      display: "flex",
-                      gap: 10,
-                      alignItems: "flex-start",
-                      cursor: target ? "pointer" : "default",
-                    }}
-                  >
                     <div
-                      style={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: 3,
-                        marginTop: 6,
-                        background:
-                          t.accent,
+                      key={a.applicationId}
+                      onClick={() => target && navigate(target)}
+                      onKeyDown={(e) => {
+                        if (!target) return;
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          navigate(target);
+                        }
                       }}
-                    />
-                    <div
+                      tabIndex={target ? 0 : undefined}
+                      aria-label={
+                        target ? `Open ${displayApplicant(a)}` : undefined
+                      }
                       style={{
-                        flex: 1,
-                        fontSize: 12,
-                        color: t.ink2,
-                        lineHeight: 1.5,
+                        padding: "11px 18px",
+                        borderBottom:
+                          i < queue.length - 1
+                            ? `1px solid ${t.line2}`
+                            : "none",
+                        display: "flex",
+                        gap: 10,
+                        alignItems: "flex-start",
+                        cursor: target ? "pointer" : "default",
                       }}
                     >
-                      <span style={{ fontWeight: 600, color: t.ink }}>
-                        System
-                      </span>{" "}
-                      <span style={{ color: t.ink3 }}>
-                        {isProcessing(a)
-                          ? "started processing"
-                          : a.status === "FAILED"
-                            ? "failed"
-                            : "queued"}
-                      </span>{" "}
-                      <span
-                        style={{
-                          fontFamily: t.mono,
-                          fontSize: 11,
-                          color: t.ink2,
-                        }}
-                      >
-                        {a.applicationId}
-                      </span>
                       <div
                         style={{
-                          fontSize: 10,
-                          color: t.ink4,
-                          fontFamily: t.mono,
-                          marginTop: 2,
-                          letterSpacing: 0.2,
+                          width: 6,
+                          height: 6,
+                          borderRadius: 3,
+                          marginTop: 6,
+                          background: t.accent,
+                        }}
+                      />
+                      <div
+                        style={{
+                          flex: 1,
+                          fontSize: 12,
+                          color: t.ink2,
+                          lineHeight: 1.5,
                         }}
                       >
-                        {timeAgo(a.ageHours)}
+                        <span style={{ fontWeight: 600, color: t.ink }}>
+                          System
+                        </span>{" "}
+                        <span style={{ color: t.ink3 }}>
+                          {isProcessing(a)
+                            ? "started processing"
+                            : a.status === "FAILED"
+                              ? "failed"
+                              : a.status === "REVIEWED"
+                                ? "reviewed"
+                                : "queued"}
+                        </span>{" "}
+                        <span
+                          style={{
+                            fontFamily: t.mono,
+                            fontSize: 11,
+                            color: t.ink2,
+                          }}
+                        >
+                          {a.applicationId}
+                        </span>
+                        <div
+                          style={{
+                            fontSize: 10,
+                            color: t.ink4,
+                            fontFamily: t.mono,
+                            marginTop: 2,
+                            letterSpacing: 0.2,
+                          }}
+                        >
+                          {timeAgo(a.ageHours)}
+                        </div>
                       </div>
                     </div>
-                  </div>
                   );
                 })}
               </div>
@@ -531,5 +686,136 @@ export function DashboardPage({
         </div>
       </div>
     </>
+  );
+}
+
+// Extracted to its own component so hover state is per-row, not shared.
+function ActivityRow({
+  app: r,
+  target,
+  isLast,
+  onNavigate,
+}: {
+  app: Application;
+  target: string | null;
+  isLast: boolean;
+  onNavigate: (path: string) => void;
+}) {
+  const t = useT();
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <tr
+      onClick={() => target && onNavigate(target)}
+      onKeyDown={(e) => {
+        if (!target) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onNavigate(target);
+        }
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      tabIndex={target ? 0 : undefined}
+      aria-label={target ? `Open ${displayApplicant(r)}` : undefined}
+      style={{
+        borderBottom: isLast ? "none" : `1px solid ${t.line2}`,
+        cursor: target ? "pointer" : "default",
+        background: hovered && target ? t.surfaceAlt : "transparent",
+        transition: "background 0.1s",
+      }}
+    >
+      <td
+        style={{
+          padding: "11px 14px",
+          fontFamily: t.mono,
+          fontSize: 11,
+          color: t.ink2,
+        }}
+      >
+        {r.applicationId}
+      </td>
+      <td
+        style={{
+          padding: "11px 14px",
+          fontWeight: 500,
+          color: t.ink,
+        }}
+      >
+        {displayApplicant(r)}
+      </td>
+      <td
+        style={{
+          padding: "11px 14px",
+          color: t.ink3,
+          fontSize: 12,
+        }}
+      >
+        {displayInstitution(r)}
+      </td>
+      <td style={{ padding: "11px 14px" }}>
+        <StatusPill status={r.status} />
+      </td>
+      <td
+        style={{
+          padding: "11px 14px",
+          color: t.ink3,
+          fontFamily: t.mono,
+          fontSize: 11,
+        }}
+      >
+        {timeAgo(r.ageHours)}
+      </td>
+      <td style={{ padding: "11px 14px" }}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {r.flagCount > 0 && (
+            <FlagDot
+              n={r.flagCount}
+              color={r.highestSeverity === "High" ? t.high : t.med}
+            />
+          )}
+          {r.flagCount === 0 && (
+            <span
+              style={{
+                fontSize: 10,
+                color: t.ok,
+                fontFamily: t.mono,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+              }}
+            >
+              &check; clean
+            </span>
+          )}
+        </div>
+      </td>
+      <td style={{ padding: "11px 14px", textAlign: "right" }}>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (target) onNavigate(target);
+          }}
+          disabled={!target}
+          style={{
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            color: target ? t.primary : t.ink4,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: target ? "pointer" : "default",
+            fontFamily: "inherit",
+          }}
+        >
+          {isReadyForReview(r)
+            ? "Review →"
+            : r.status === "FAILED"
+              ? "Audit →"
+              : r.status === "REVIEWED"
+                ? "Audit →"
+                : "Waiting"}
+        </button>
+      </td>
+    </tr>
   );
 }

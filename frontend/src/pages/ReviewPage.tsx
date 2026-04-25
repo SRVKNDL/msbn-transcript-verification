@@ -12,6 +12,25 @@ import { getCurrentUser } from "../auth";
 import type { Application, Flag, Decisions, OverallDecision, ExtractionData, ExtractionRow } from "../types";
 
 const DEFAULT_TRANSCRIPT_ZOOM = 2;
+const SEVERITY_ORDER = { High: 0, Medium: 1, Low: 2 } as const;
+type QueueSort = "age" | "flags" | "severity" | "name";
+const QUEUE_SORT_LABELS: Record<QueueSort, string> = {
+  age: "age",
+  flags: "flag count",
+  severity: "severity",
+  name: "name",
+};
+
+function severityRank(severity: Flag["severity"]) {
+  return SEVERITY_ORDER[severity] ?? 3;
+}
+
+function appSeverityRank(severity: Application["highestSeverity"]) {
+  if (severity === "High") return 0;
+  if (severity === "Medium") return 1;
+  if (severity === "Low") return 2;
+  return 3;
+}
 
 // --- Toast notification ---
 function Toast({ message, onClose }: { message: string; onClose: () => void }) {
@@ -72,6 +91,125 @@ function ShortcutLegend({ onClose }: { onClose: () => void }) {
             <span style={{ fontSize: 12, color: t.ink2 }}>{desc}</span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function SubmitDecisionModal({
+  overallDecision,
+  onSelect,
+  onClose,
+  onSubmit,
+  isSubmitting,
+}: {
+  overallDecision: OverallDecision;
+  onSelect: (decision: OverallDecision) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+  isSubmitting: boolean;
+}) {
+  const t = useT();
+  const options: Array<{ value: Exclude<OverallDecision, null>; label: string; tone: string; bg: string }> = [
+    { value: "READY_FOR_LICENSING_REVIEW", label: "Ready for licensing review", tone: t.ok, bg: t.okBg },
+    { value: "RETURN_TO_APPLICANT", label: "Return to applicant", tone: t.med, bg: t.medBg },
+    { value: "DEFERRED", label: "Deferred", tone: t.low, bg: t.lowBg },
+    { value: "DENIED", label: "Denied", tone: t.high, bg: t.highBg },
+  ];
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: "rgba(12,18,28,0.42)",
+        zIndex: 80,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(520px, 100%)",
+          background: t.surface,
+          border: `1px solid ${t.line}`,
+          borderTop: `3px solid ${t.accent}`,
+          borderRadius: 4,
+          boxShadow: "0 24px 60px rgba(0,0,0,0.24)",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: "18px 22px 14px", borderBottom: `1px solid ${t.line2}` }}>
+          <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 6 }}>
+            Final decision
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: t.serif, color: t.ink }}>Submit review outcome</div>
+        </div>
+        <div style={{ padding: 18, display: "grid", gap: 10 }}>
+          {options.map((option) => {
+            const active = overallDecision === option.value;
+            return (
+              <button
+                key={option.value}
+                onClick={() => onSelect(option.value)}
+                style={{
+                  width: "100%",
+                  border: `1px solid ${active ? option.tone : t.line}`,
+                  background: active ? option.bg : t.surface,
+                  color: active ? option.tone : t.ink2,
+                  borderRadius: 4,
+                  padding: "12px 14px",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  fontSize: 13,
+                  fontWeight: active ? 700 : 600,
+                  textAlign: "left",
+                }}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ padding: "0 18px 18px", display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button
+            onClick={onClose}
+            style={{
+              border: `1px solid ${t.line}`,
+              background: t.surface,
+              color: t.ink2,
+              borderRadius: 3,
+              padding: "9px 12px",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={!overallDecision || isSubmitting}
+            style={{
+              border: "none",
+              background: overallDecision && !isSubmitting ? t.accent : t.line,
+              color: overallDecision && !isSubmitting ? "#fff" : t.ink4,
+              borderRadius: 3,
+              padding: "9px 14px",
+              cursor: overallDecision && !isSubmitting ? "pointer" : "not-allowed",
+              fontFamily: "inherit",
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            {isSubmitting ? "Submitting..." : "Confirm submission"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -260,12 +398,14 @@ function TranscriptPageViewer({
 }
 
 // --- Queue row (sidebar) ---
-function QueueRow({ app, active, onClick }: { app: Application; active: boolean; onClick: () => void }) {
+function QueueRow({ app, active, onClick, shaded }: { app: Application; active: boolean; onClick: () => void; shaded?: boolean }) {
   const t = useT();
   const dotColor = app.highestSeverity === "High" ? t.high
     : app.highestSeverity === "Medium" ? t.med
     : app.highestSeverity === "Low" ? t.low
     : t.ink4;
+  const rowBackground = active ? t.accentBg : shaded ? "#eef4fb" : t.surface;
+  const rowBorder = active ? "rgba(0, 94, 162, 0.28)" : shaded ? "#dbe7f4" : "transparent";
 
   return (
     <div onClick={onClick} style={{
@@ -274,13 +414,14 @@ function QueueRow({ app, active, onClick }: { app: Application; active: boolean;
       gap: 10,
       alignItems: "start",
       padding: "9px 10px",
-      margin: "0 10px 2px",
+      margin: "0 10px 6px",
       borderRadius: 6,
-      border: "none",
-      background: active ? t.accentBg : "transparent",
+      border: `1px solid ${rowBorder}`,
+      background: rowBackground,
       cursor: "pointer",
       fontSize: 13,
       color: active ? t.primary : t.ink2,
+      boxShadow: active ? "0 8px 18px rgba(0,94,162,0.11)" : "none",
     }}>
       <div style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, marginTop: 7 }} />
       <div style={{ minWidth: 0 }}>
@@ -551,6 +692,7 @@ export function ReviewPage() {
   const user = getCurrentUser();
 
   const [app, setApp] = useState<Application | null>(null);
+  const [isAppLoading, setIsAppLoading] = useState(true);
   const [queueApps, setQueueApps] = useState<Application[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
   const [extraction, setExtraction] = useState<ExtractionData>({ physical: [], content: [], program: [] });
@@ -559,11 +701,15 @@ export function ReviewPage() {
   const [decisions, setDecisions] = useState<Decisions>({});
   const [currentPage, setCurrentPage] = useState(1);
   const [overallDecision, setOverallDecision] = useState<OverallDecision>(null);
+  const [flagSort, setFlagSort] = useState<"priority" | "rule" | "page">("priority");
+  const [submitModalOpen, setSubmitModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [drawerFlag, setDrawerFlag] = useState<Flag | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [queueOpen, setQueueOpen] = useState(true);
+  const [queueSort, setQueueSort] = useState<QueueSort>("age");
   const [isTranscriptFullscreen, setIsTranscriptFullscreen] = useState(false);
   const [transcriptZoom, setTranscriptZoom] = useState(DEFAULT_TRANSCRIPT_ZOOM);
   const transcriptPaneRef = useRef<HTMLDivElement>(null);
@@ -576,20 +722,22 @@ export function ReviewPage() {
   const groupedFlags = useMemo(() => {
     const indexed = flags
       .map((flag, originalIndex) => ({ flag, originalIndex }))
-      .sort((a, b) =>
-        a.flag.ruleCode.localeCompare(b.flag.ruleCode)
-        || a.flag.sourceLocation.page - b.flag.sourceLocation.page
-        || a.originalIndex - b.originalIndex
-      );
+      .sort((a, b) => a.originalIndex - b.originalIndex);
 
     return indexed.reduce<Array<{
       ruleCode: string;
       items: Array<{ flag: Flag; originalIndex: number }>;
       groupIndex: number;
+      highestSeverity: Flag["severity"];
+      firstPage: number;
     }>>((groups, item) => {
       const lastGroup = groups[groups.length - 1];
       if (lastGroup && lastGroup.ruleCode === item.flag.ruleCode) {
         lastGroup.items.push(item);
+        if (severityRank(item.flag.severity) < severityRank(lastGroup.highestSeverity)) {
+          lastGroup.highestSeverity = item.flag.severity;
+        }
+        lastGroup.firstPage = Math.min(lastGroup.firstPage, item.flag.sourceLocation.page);
         return groups;
       }
 
@@ -597,13 +745,36 @@ export function ReviewPage() {
         ruleCode: item.flag.ruleCode,
         items: [item],
         groupIndex: groups.length,
+        highestSeverity: item.flag.severity,
+        firstPage: item.flag.sourceLocation.page,
       });
       return groups;
     }, []);
   }, [flags]);
+  const sortedFlagGroups = useMemo(() => {
+    const groups = [...groupedFlags];
+    groups.sort((a, b) => {
+      if (flagSort === "page") {
+        return a.firstPage - b.firstPage || a.ruleCode.localeCompare(b.ruleCode);
+      }
+      if (flagSort === "rule") {
+        return a.ruleCode.localeCompare(b.ruleCode) || a.firstPage - b.firstPage;
+      }
+      return severityRank(a.highestSeverity) - severityRank(b.highestSeverity)
+        || a.firstPage - b.firstPage
+        || a.ruleCode.localeCompare(b.ruleCode);
+    });
+    return groups.map((group, index) => ({ ...group, groupIndex: index }));
+  }, [groupedFlags, flagSort]);
   const displayFlags = useMemo(
-    () => groupedFlags.flatMap((group) => group.items),
-    [groupedFlags]
+    () => sortedFlagGroups.flatMap((group) =>
+      [...group.items].sort((a, b) =>
+        severityRank(a.flag.severity) - severityRank(b.flag.severity)
+        || a.flag.sourceLocation.page - b.flag.sourceLocation.page
+        || a.originalIndex - b.originalIndex
+      )
+    ),
+    [sortedFlagGroups]
   );
 
   useEffect(() => {
@@ -725,7 +896,28 @@ export function ReviewPage() {
   }, [handleKeyDown]);
 
   useEffect(() => {
+    let cancelled = false;
+    const loadQueue = () => {
+      listApplications({ statuses: ["READY_FOR_REVIEW"] })
+        .then((items) => {
+          if (!cancelled) setQueueApps(items);
+        })
+        .catch(() => {
+          if (!cancelled) setQueueApps([]);
+        });
+    };
+    loadQueue();
+    const interval = window.setInterval(loadQueue, 8000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!id) return;
+    let cancelled = false;
+    setIsAppLoading(true);
     setApp(null);
     setFlags([]);
     setExtraction({ physical: [], content: [], program: [] });
@@ -736,21 +928,28 @@ export function ReviewPage() {
     transcriptZoomRef.current = DEFAULT_TRANSCRIPT_ZOOM;
     setTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM);
     setOverallDecision(null);
+    setSubmitModalOpen(false);
     setDrawerOpen(false);
     getApplication(id)
       .then((data) => {
+        if (cancelled) return;
         setApp(data.application);
         setFlags(data.flags);
         const ext = data.extraction;
         const hasData = ext.physical.length > 0 || ext.content.length > 0 || ext.program.length > 0;
         setExtraction(hasData ? ext : buildFallbackExtraction(data.application));
+        setIsAppLoading(false);
       })
       .catch((err: Error) => {
+        if (cancelled) return;
         setError(err.message);
         setApp(null);
         setFlags([]);
+        setIsAppLoading(false);
       });
-    listApplications({ statuses: ["READY_FOR_REVIEW"] }).then(setQueueApps).catch(() => setQueueApps([]));
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   if (error) {
@@ -763,50 +962,26 @@ export function ReviewPage() {
     );
   }
 
-  if (!app) return (
-    <div style={{
-      width: "100vw", height: "100vh", background: t.bg,
-      fontFamily: "'Open Sans', system-ui, sans-serif",
-      display: "grid", gridTemplateColumns: "240px 1fr 320px", gridTemplateRows: "44px 1fr",
-      overflow: "hidden",
-    }}>
-      <div style={{ gridColumn: "1 / -1", background: t.primary, borderBottom: `3px solid ${t.accent}` }} />
-      <div style={{ background: t.primary, borderRight: `1px solid ${t.line}`, padding: 14 }}>
-        {[1,2,3].map(i => (
-          <div key={i} style={{
-            height: 52, marginBottom: 8, borderRadius: 2,
-            background: `linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.16) 50%, rgba(255,255,255,0.08) 75%)`,
-            backgroundSize: "200% 100%",
-            animation: "shimmer 1.5s infinite",
-          }} />
-        ))}
-      </div>
-      <div style={{ background: t.surfaceAlt, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{
-          width: 560, height: 720, borderRadius: 2,
-          background: `linear-gradient(90deg, ${t.line2} 25%, ${t.line} 50%, ${t.line2} 75%)`,
-          backgroundSize: "200% 100%",
-          animation: "shimmer 1.5s infinite",
-        }} />
-      </div>
-      <div style={{ background: t.bg, borderLeft: `1px solid ${t.line}`, padding: 14 }}>
-        {[1,2,3].map(i => (
-          <div key={i} style={{
-            height: 120, marginBottom: 8, borderRadius: 2,
-            background: `linear-gradient(90deg, ${t.line2} 25%, ${t.line} 50%, ${t.line2} 75%)`,
-            backgroundSize: "200% 100%",
-            animation: "shimmer 1.5s infinite",
-          }} />
-        ))}
-      </div>
-    </div>
-  );
-
-  const reviewableQueueApps = queueApps
+  const reviewableQueueApps = [...queueApps
     .filter((a) => a.status === "READY_FOR_REVIEW")
-    .filter(hasExtractedSummary);
+    .filter(hasExtractedSummary)]
+    .sort((a, b) => {
+      if (queueSort === "flags") {
+        return b.flagCount - a.flagCount || b.ageHours - a.ageHours;
+      }
+      if (queueSort === "severity") {
+        return appSeverityRank(a.highestSeverity) - appSeverityRank(b.highestSeverity)
+          || b.flagCount - a.flagCount
+          || b.ageHours - a.ageHours;
+      }
+      if (queueSort === "name") {
+        return (a.applicantName || a.originalFilename).localeCompare(b.applicantName || b.originalFilename)
+          || b.ageHours - a.ageHours;
+      }
+      return b.ageHours - a.ageHours || b.flagCount - a.flagCount;
+    });
 
-  if (flags.length === 0 && app.flagCount > 0) {
+  if (!isAppLoading && app && flags.length === 0 && app.flagCount > 0) {
     return (
       <ReviewStateScreen
         title="Flag details are not available"
@@ -824,12 +999,13 @@ export function ReviewPage() {
     if (d.decision !== "OVERRIDE") return true;
     return (d.notes ?? "").trim().length > 0;
   });
-  const canSubmit = allDecided && allOverridesNoted && !!overallDecision;
+  const canSubmit = allDecided && allOverridesNoted && !isAppLoading && !!app;
   const jumpTo = (flag: Flag) => setCurrentPage(flag.sourceLocation.page);
   const openDrawer = (flag: Flag | null) => { setDrawerFlag(flag); setDrawerOpen(true); };
 
   const handleSubmit = async () => {
-    if (!canSubmit || !id) return;
+    if (!canSubmit || !id || !overallDecision) return;
+    setIsSubmitting(true);
     const flagDecisions = flags
       .filter((f) => decisions[f.ruleCode]?.decision)
       .map((f) => ({
@@ -842,10 +1018,14 @@ export function ReviewPage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Submit failed";
       setToast(`Submit error: ${msg}. Navigating anyway for review.`);
+      setIsSubmitting(false);
+      setSubmitModalOpen(false);
       setTimeout(() => navigate(`/reviewed/${id}`), 2200);
       return;
     }
-    setToast(`Decision recorded for ${app.applicantName || app.applicationId}.`);
+    setIsSubmitting(false);
+    setSubmitModalOpen(false);
+    setToast(`Decision recorded for ${app?.applicantName || app?.applicationId || id}.`);
     setTimeout(() => navigate(`/reviewed/${id}`), 1800);
   };
 
@@ -957,7 +1137,7 @@ export function ReviewPage() {
         gridColumn: 1,
         gridRow: 2,
         borderRight: queueOpen ? `1px solid ${t.line}` : "none",
-        background: t.surface,
+        background: `linear-gradient(180deg, ${t.surface} 0%, ${t.surfaceAlt} 100%)`,
         overflow: "hidden",
         display: queueOpen ? "flex" : "none",
         flexDirection: "column",
@@ -974,13 +1154,50 @@ export function ReviewPage() {
           }}>
             Review queue
           </div>
-          <div style={{ fontSize: 13, color: t.ink2 }}>
-            <span style={{ fontWeight: 600 }}>{reviewableQueueApps.length}</span> pending · sorted by age
+          <div style={{ fontSize: 13, color: t.ink2, marginBottom: 10 }}>
+            <span style={{ fontWeight: 600 }}>{reviewableQueueApps.length}</span> pending · sorted by {QUEUE_SORT_LABELS[queueSort]}
           </div>
+          <label
+            htmlFor="queue-sort"
+            style={{
+              display: "block",
+              fontSize: 10,
+              color: t.ink4,
+              fontFamily: t.mono,
+              letterSpacing: 0.5,
+              textTransform: "uppercase",
+              marginBottom: 4,
+            }}
+          >
+            Sort queue
+          </label>
+          <select
+            id="queue-sort"
+            value={queueSort}
+            onChange={(event) => setQueueSort(event.target.value as QueueSort)}
+            style={{
+              width: "100%",
+              height: 30,
+              border: `1px solid ${t.line}`,
+              background: t.surface,
+              color: t.ink2,
+              borderRadius: 4,
+              padding: "0 8px",
+              fontSize: 11,
+              fontFamily: t.mono,
+              cursor: "pointer",
+              outlineColor: t.accent,
+            }}
+          >
+            <option value="age">Oldest first</option>
+            <option value="flags">Most flags</option>
+            <option value="severity">Highest severity</option>
+            <option value="name">Name</option>
+          </select>
         </div>
         <div style={{ flex: 1, overflow: "auto" }}>
-          {reviewableQueueApps.map((a) => (
-            <QueueRow key={a.applicationId} app={a} active={a.applicationId === id}
+          {reviewableQueueApps.map((a, index) => (
+            <QueueRow key={a.applicationId} app={a} active={a.applicationId === id} shaded={index % 2 === 1}
               onClick={() => navigate(`/review/${a.applicationId}`)} />
           ))}
         </div>
@@ -1025,7 +1242,7 @@ export function ReviewPage() {
           flexShrink: 0,
           display: isTranscriptFullscreen ? "none" : "flex",
         }}>
-          <div>{app.applicantName} · {app.applicationId}</div>
+          <div>{app ? `${app.applicantName} · ${app.applicationId}` : id}</div>
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
             {pages.map((p) => (
               <button key={p} onClick={() => setCurrentPage(p)} style={{
@@ -1055,12 +1272,24 @@ export function ReviewPage() {
           height: isTranscriptFullscreen ? "100%" : "auto",
         }}>
           <div style={{ flexShrink: 0 }}>
-            <TranscriptPageViewer
-              appId={id!}
-              page={currentPage}
-              flags={flags}
-              pdfScale={(isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom}
-            />
+            {isAppLoading || !app ? (
+              <div style={{
+                width: Math.round(560 * ((isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom)),
+                minHeight: Math.round(720 * ((isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom)),
+                borderRadius: 2,
+                background: `linear-gradient(90deg, ${t.line2} 25%, ${t.line} 50%, ${t.line2} 75%)`,
+                backgroundSize: "200% 100%",
+                animation: "shimmer 1.5s infinite",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+              }} />
+            ) : (
+              <TranscriptPageViewer
+                appId={id!}
+                page={currentPage}
+                flags={flags}
+                pdfScale={(isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom}
+              />
+            )}
           </div>
         </div>
         {!isTranscriptFullscreen && <div style={{
@@ -1110,7 +1339,7 @@ export function ReviewPage() {
             boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
             fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           }}>
-            <div title={`${app.applicantName} · ${app.applicationId}`} style={{
+            <div title={app ? `${app.applicantName} · ${app.applicationId}` : id} style={{
               writingMode: "vertical-rl",
               transform: "rotate(180deg)",
               maxHeight: 220,
@@ -1121,7 +1350,7 @@ export function ReviewPage() {
               color: t.ink3,
               lineHeight: 1.1,
             }}>
-              {app.applicantName} · {app.applicationId}
+              {app ? `${app.applicantName} · ${app.applicationId}` : id}
             </div>
             <div style={{ width: 18, height: 1, background: t.line }} />
             {pages.map((p) => (
@@ -1182,72 +1411,99 @@ export function ReviewPage() {
       </div>
 
       {/* Flag list */}
-      <div style={{ gridColumn: 3, gridRow: 2, background: t.bg, borderLeft: `1px solid ${t.line}`, overflow: "auto", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "14px 16px", borderBottom: `1px solid ${t.line}`, background: t.surface }}>
+      <div style={{ gridColumn: 3, gridRow: 2, background: t.surfaceAlt, borderLeft: `1px solid ${t.line}`, overflow: "auto", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "16px 16px 14px", borderBottom: `1px solid ${t.line}`, background: `linear-gradient(180deg, ${t.surface} 0%, ${t.surfaceAlt} 100%)`, boxShadow: "0 8px 24px rgba(15,23,42,0.06)" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, fontFamily: "'Montserrat', system-ui, sans-serif" }}>{app.applicantName}</div>
-            <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>#{app.applicationId}</div>
+            <div style={{ fontSize: 15, fontWeight: 600, fontFamily: "'Montserrat', system-ui, sans-serif" }}>{app?.applicantName || "Loading application"}</div>
+            <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>#{app?.applicationId || id}</div>
           </div>
           <div style={{ fontSize: 12, color: TOKENS.ink3, marginTop: 3 }}>
-            {app.institution} · license {app.licenseNumber}
+            {app ? `${app.institution} · license ${app.licenseNumber}` : "Loading application details"}
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
             <Stat label="flags" value={`${flags.length}`} />
             <Stat label="high" value={`${flags.filter((f) => f.severity === "High").length}`} />
-            <Stat label="pages" value={`${app.pageCount}`} />
-            <Stat label="uploaded" value={app.submittedAt ? new Date(app.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Not available"} />
+            <Stat label="pages" value={`${app?.pageCount ?? 0}`} />
+            <Stat label="uploaded" value={app?.submittedAt ? new Date(app.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Not available"} />
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
-            <label htmlFor="overall-decision" style={{
-              fontSize: 10,
-              color: TOKENS.ink4,
-              fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
-              letterSpacing: 0.4,
-              textTransform: "uppercase",
-              whiteSpace: "nowrap",
-            }}>
-              Decision
-            </label>
-            <select
-              id="overall-decision"
-              value={overallDecision ?? ""}
-              onChange={(e) =>
-                setOverallDecision(e.target.value ? (e.target.value as OverallDecision) : null)
-              }
-              disabled={!allDecided}
-              style={{
-                minWidth: 0,
-                flex: 1,
-                height: 30,
-                border: `1px solid ${t.line}`,
-                background: allDecided ? t.surface : t.surfaceAlt,
-                color: allDecided ? t.ink2 : t.ink4,
-                borderRadius: 3,
-                padding: "0 8px",
-                fontSize: 11,
-                fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
-                cursor: allDecided ? "pointer" : "not-allowed",
-                outlineColor: t.accent,
-              }}
-            >
-              <option value="">select decision</option>
-              <option value="READY_FOR_LICENSING_REVIEW">ready for licensing review</option>
-              <option value="RETURN_TO_APPLICANT">return to applicant</option>
-              <option value="DEFERRED">deferred</option>
-              <option value="DENIED">denied</option>
-            </select>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 14, paddingTop: 12, borderTop: `1px solid ${t.line2}` }}>
+            <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, letterSpacing: 0.5, textTransform: "uppercase" }}>
+              Review controls
+            </div>
+            <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono }}>
+              {allDecided ? "ready to submit" : `${flags.length - resolvedCount} remaining`}
+            </div>
           </div>
         </div>
 
-        <div style={{ flex: 1, overflow: "auto", padding: "12px 14px" }}>
-          <div style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>
-            Flags raised — {resolvedCount} / {flags.length} resolved
+        <div style={{ flex: 1, overflow: "auto", padding: "14px 14px 84px" }}>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+              <div style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase" }}>
+                Flags raised — {resolvedCount} / {flags.length} resolved
+              </div>
+              <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                Sort
+              </div>
+            </div>
+            <div
+              role="group"
+              aria-label="Sort flags"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: 6,
+              }}
+            >
+              {([
+                ["priority", "Priority"],
+                ["rule", "Rule"],
+                ["page", "Page"],
+              ] as const).map(([value, label]) => {
+                const active = flagSort === value;
+                return (
+                  <button
+                    key={value}
+                    onClick={() => setFlagSort(value)}
+                    style={{
+                      height: 30,
+                      border: `1px solid ${active ? t.accent : t.line}`,
+                      background: active ? t.accentBg : t.surface,
+                      color: active ? t.accent : t.ink3,
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      fontFamily: t.mono,
+                      fontSize: 10,
+                      fontWeight: 800,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.3,
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          {groupedFlags.map((group) => (
+          {isAppLoading && Array.from({ length: 3 }, (_, index) => (
+            <div key={index} style={{
+              height: 136,
+              marginBottom: 10,
+              borderRadius: 3,
+              background: `linear-gradient(90deg, ${t.line2} 25%, ${t.line} 50%, ${t.line2} 75%)`,
+              backgroundSize: "200% 100%",
+              animation: "shimmer 1.5s infinite",
+            }} />
+          ))}
+          {!isAppLoading && sortedFlagGroups.map((group) => (
             <div
               key={group.ruleCode}
               style={{
                 marginBottom: 12,
+                background: group.groupIndex % 2 === 1 ? "#eaf2fb" : "transparent",
+                border: `1px solid ${group.groupIndex % 2 === 1 ? "#d9e7f5" : "transparent"}`,
+                borderRadius: 6,
+                padding: group.groupIndex % 2 === 1 ? "8px 7px 2px" : "0",
               }}
             >
               <div style={{
@@ -1307,7 +1563,9 @@ export function ReviewPage() {
 
       <button
         disabled={!canSubmit}
-        onClick={handleSubmit}
+        onClick={() => {
+          if (canSubmit) setSubmitModalOpen(true);
+        }}
         aria-label="Submit decision"
         title="Submit decision"
         style={{
@@ -1339,6 +1597,16 @@ export function ReviewPage() {
       {/* Extracted data drawer */}
       {drawerOpen && (
         <ExtractedDataDrawer flag={drawerFlag} extraction={extraction} onClose={() => setDrawerOpen(false)} />
+      )}
+
+      {submitModalOpen && (
+        <SubmitDecisionModal
+          overallDecision={overallDecision}
+          onSelect={setOverallDecision}
+          onClose={() => setSubmitModalOpen(false)}
+          onSubmit={handleSubmit}
+          isSubmitting={isSubmitting}
+        />
       )}
 
       {/* Keyboard shortcut legend */}

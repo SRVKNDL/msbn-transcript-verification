@@ -3,6 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader, Card } from "../components/Shell";
 import { getAuditTrail, listApplications } from "../api";
+import {
+  auditStageForEvent,
+  auditStageStyle,
+  formatAuditTimestamp,
+  humanizeAuditEvent,
+} from "../auditUi";
 import type { Application, AuditEvent } from "../types";
 
 function SeverityDot({ severity }: { severity: string }) {
@@ -25,8 +31,9 @@ function SeverityDot({ severity }: { severity: string }) {
 
 function EventRow({ event }: { event: AuditEvent }) {
   const t = useT();
-  const isFlag = event.event === "FLAG_RAISED";
-  const dotColor = isFlag ? t.high : t.low;
+  const stage = auditStageForEvent(event);
+  const stageStyle = auditStageStyle(stage, t);
+  const timestamp = formatAuditTimestamp(event.ts);
 
   return (
     <div
@@ -34,7 +41,7 @@ function EventRow({ event }: { event: AuditEvent }) {
         display: "flex",
         alignItems: "baseline",
         gap: 10,
-        padding: "6px 0",
+        padding: "7px 0",
         fontSize: 12,
       }}
     >
@@ -43,7 +50,7 @@ function EventRow({ event }: { event: AuditEvent }) {
           width: 8,
           height: 8,
           borderRadius: 4,
-          background: dotColor,
+          background: stageStyle.color,
           flexShrink: 0,
           alignSelf: "center",
         }}
@@ -57,19 +64,31 @@ function EventRow({ event }: { event: AuditEvent }) {
           flexShrink: 0,
         }}
       >
-        {new Date(event.ts).toISOString().slice(0, 19).replace("T", " ")}
+        {timestamp.compact}
       </span>
       <span
         style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
           fontFamily: t.mono,
-          fontSize: 11,
-          fontWeight: 600,
-          color: t.ink2,
+          fontSize: 10,
+          fontWeight: 800,
+          color: stageStyle.color,
+          background: stageStyle.background,
+          border: `1px solid ${stageStyle.border}`,
+          borderRadius: 999,
+          padding: "3px 8px",
           minWidth: 120,
           flexShrink: 0,
+          textTransform: "uppercase",
+          letterSpacing: 0.4,
         }}
       >
-        {event.event}
+        {stageStyle.label}
+      </span>
+      <span style={{ color: stageStyle.color, fontFamily: t.mono, fontSize: 11, fontWeight: 800 }}>
+        {humanizeAuditEvent(event.event)}
       </span>
       <span style={{ color: t.ink3, fontSize: 12 }}>{event.detail}</span>
     </div>

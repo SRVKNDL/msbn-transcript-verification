@@ -110,10 +110,7 @@ def _upload_metadata_from_body(body: dict) -> tuple[dict, dict]:
         "program": _clean_text(details.get("program")),
     }
     metadata = {key: value for key, value in fields.items() if value}
-    headers = {
-        f"x-amz-meta-{key.replace('_', '-')}": value
-        for key, value in metadata.items()
-    }
+    headers = {f"x-amz-meta-{key}": value for key, value in metadata.items()}
     return metadata, headers
 
 

@@ -321,3 +321,50 @@ export async function uploadTranscriptWithDetails(
   }
   return { s3Key: data.s3Key };
 }
+
+export interface PrefillFields {
+  applicantName: string;
+  institution: string;
+  country: string;
+}
+
+export async function extractTranscriptPrefill(
+  file: File
+): Promise<{ fields: PrefillFields; missingFields: (keyof PrefillFields)[] }> {
+  requireApiBase();
+  const headers = await authHeaders();
+  const prefillUploadRes = await fetch(`${API_BASE}/prefill-uploads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({
+      filename: file.name,
+      contentType: "application/pdf",
+      size: file.size,
+    }),
+  });
+  if (!prefillUploadRes.ok) {
+    throw new Error(`API ${prefillUploadRes.status}: prefill upload URL request failed`);
+  }
+
+  const uploadData = (await prefillUploadRes.json()) as {
+    uploadUrl: string;
+    s3Key: string;
+  };
+  const uploadRes = await fetch(uploadData.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "application/pdf" },
+    body: file,
+  });
+  if (!uploadRes.ok) {
+    throw new Error(`S3 ${uploadRes.status}: prefill upload failed`);
+  }
+
+  const extractRes = await fetch(`${API_BASE}/prefill`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ s3Key: uploadData.s3Key }),
+  });
+  if (!extractRes.ok) throw new Error(`API ${extractRes.status}: prefill failed`);
+
+  return extractRes.json();
+}

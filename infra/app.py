@@ -40,6 +40,7 @@ api_stack = MsbnApiStack(
     "MsbnApiStack",
     env=env,
     dashboard_api_lambda=compute_stack.dashboard_api_lambda,
+    prefill_lambda=compute_stack.prefill_lambda,
     user_pool=auth_stack.user_pool,
     user_pool_client=auth_stack.user_pool_client,
 )

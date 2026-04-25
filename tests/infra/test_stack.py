@@ -47,6 +47,7 @@ def stacks():
         "TestApiStack",
         env=env,
         dashboard_api_lambda=compute.dashboard_api_lambda,
+        prefill_lambda=compute.prefill_lambda,
         user_pool=auth.user_pool,
         user_pool_client=auth.user_pool_client,
     )
@@ -165,6 +166,22 @@ class TestS3LifecycleRules:
             }),
         )
 
+    def test_preview_uploads_expire(self, storage_template):
+        storage_template.has_resource_properties(
+            "AWS::S3::Bucket",
+            Match.object_like({
+                "LifecycleConfiguration": {
+                    "Rules": Match.array_with([
+                        Match.object_like({
+                            "Prefix": "preview/",
+                            "ExpirationInDays": 1,
+                            "Status": "Enabled",
+                        }),
+                    ]),
+                },
+            }),
+        )
+
 
 # ── 4. Bedrock IAM: explicit model ARNs ──────────────────────────────────────
 
@@ -187,20 +204,41 @@ class TestBedrockIamScope:
                 if "bedrock:InvokeModel" in actions:
                     bedrock_statements.append(stmt)
 
-        assert len(bedrock_statements) == 1, (
-            f"Expected exactly 1 bedrock:InvokeModel statement, found {len(bedrock_statements)}"
+        assert len(bedrock_statements) == 2, (
+            f"Expected exactly 2 bedrock:InvokeModel statements, found {len(bedrock_statements)}"
         )
 
-        resources = bedrock_statements[0]["Resource"]
-        if isinstance(resources, str):
-            resources = [resources]
+        resource_sets = []
+        for stmt in bedrock_statements:
+            resources = stmt["Resource"]
+            if isinstance(resources, str):
+                resources = [resources]
+            resource_sets.append(set(resources))
 
-        expected = {
+        expected_extract = {
             "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0",
             "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
         }
-        assert set(resources) == expected, (
-            f"Bedrock IAM resources should be exactly {expected}, got {set(resources)}"
+        expected_prefill = {
+            "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0",
+        }
+        assert expected_extract in resource_sets
+        assert expected_prefill in resource_sets
+
+
+class TestPrefillLambda:
+    def test_uses_nova_lite(self, compute_template):
+        compute_template.has_resource_properties(
+            "AWS::Lambda::Function",
+            Match.object_like({
+                "FunctionName": "msbn-prefill",
+                "Timeout": 25,
+                "Environment": {
+                    "Variables": Match.object_like({
+                        "BEDROCK_MODEL_ID": "amazon.nova-lite-v1:0",
+                    })
+                },
+            }),
         )
 
 

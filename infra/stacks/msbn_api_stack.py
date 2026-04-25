@@ -19,6 +19,7 @@ class MsbnApiStack(cdk.Stack):
         construct_id: str,
         *,
         dashboard_api_lambda: lambda_.IFunction,
+        prefill_lambda: lambda_.IFunction,
         user_pool: cognito.IUserPool,
         user_pool_client: cognito.IUserPoolClient,
         **kwargs,
@@ -29,6 +30,7 @@ class MsbnApiStack(cdk.Stack):
             self,
             "Api",
             dashboard_api_lambda=dashboard_api_lambda,
+            prefill_lambda=prefill_lambda,
             user_pool=user_pool,
             user_pool_client=user_pool_client,
         )

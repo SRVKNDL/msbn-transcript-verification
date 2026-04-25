@@ -20,6 +20,7 @@ class ApiConstruct(Construct):
         construct_id: str,
         *,
         dashboard_api_lambda: lambda_.IFunction,
+        prefill_lambda: lambda_.IFunction,
         user_pool: cognito.IUserPool,
         user_pool_client: cognito.IUserPoolClient,
         **kwargs,
@@ -58,6 +59,10 @@ class ApiConstruct(Construct):
             "DashboardApiIntegration",
             handler=dashboard_api_lambda,
         )
+        prefill_integration = apigwv2_int.HttpLambdaIntegration(
+            "PrefillApiIntegration",
+            handler=prefill_lambda,
+        )
 
         routes = [
             ("GET", "/applications"),
@@ -77,6 +82,18 @@ class ApiConstruct(Construct):
                 path=path,
                 methods=[method_map[method]],
                 integration=integration,
+                authorizer=authorizer,
+            )
+
+        prefill_routes = [
+            ("POST", "/prefill-uploads"),
+            ("POST", "/prefill"),
+        ]
+        for method, path in prefill_routes:
+            self.http_api.add_routes(
+                path=path,
+                methods=[method_map[method]],
+                integration=prefill_integration,
                 authorizer=authorizer,
             )
 

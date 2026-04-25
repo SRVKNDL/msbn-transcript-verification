@@ -100,6 +100,40 @@ class ComputeConstruct(Construct):
             )
         )
 
+        # PrefillLambda: fast, non-authoritative extraction for upload forms.
+        # It uses preview/* objects so S3 intake notifications do not start the
+        # full Step Functions workflow.
+        self.prefill_lambda = lambda_.DockerImageFunction(
+            self,
+            "PrefillLambda",
+            function_name="msbn-prefill",
+            code=lambda_.DockerImageCode.from_image_asset(
+                os.path.normpath(
+                    os.path.join(
+                        os.path.dirname(__file__), "../../services/prefill"
+                    )
+                )
+            ),
+            memory_size=1536,
+            timeout=Duration.seconds(25),
+            log_retention=logs.RetentionDays.ONE_WEEK,
+            environment={
+                "BUCKET_NAME": storage.bucket.bucket_name,
+                "BEDROCK_MODEL_ID": "amazon.nova-lite-v1:0",
+            },
+        )
+
+        storage.bucket.grant_put(self.prefill_lambda, "preview/*")
+        storage.bucket.grant_read(self.prefill_lambda, "preview/*")
+        self.prefill_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeModel"],
+                resources=[
+                    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0",
+                ],
+            )
+        )
+
         # Extract only writes the transcript document record.
         storage.table.grant(self.extract_lambda, "dynamodb:PutItem")
 

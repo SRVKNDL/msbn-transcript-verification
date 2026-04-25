@@ -145,8 +145,9 @@ class MsbnComputeStack(cdk.Stack):
         )
         # S3 validates the Lambda permission when the notification is configured.
         s3_bucket_notification.node.add_dependency(intake_invoke_permission)
-        # The API stack needs this Lambda for route integration.
+        # The API stack needs these Lambdas for route integration.
         self.dashboard_api_lambda = compute.dashboard_api_lambda
+        self.prefill_lambda = compute.prefill_lambda
 
 
 class _StorageRef:

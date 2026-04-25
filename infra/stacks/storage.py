@@ -38,6 +38,10 @@ class StorageConstruct(Construct):
                     noncurrent_version_expiration=Duration.days(30),
                     abort_incomplete_multipart_upload_after=Duration.days(7),
                 ),
+                s3.LifecycleRule(
+                    prefix="preview/",
+                    expiration=Duration.days(1),
+                ),
             ],
         )
 

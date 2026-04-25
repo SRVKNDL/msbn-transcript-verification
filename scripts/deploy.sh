@@ -119,6 +119,17 @@ ensure_tools() {
   [[ -d "$FRONTEND_DIR/node_modules" ]] || die "frontend/node_modules is missing. Run: make install"
 }
 
+ensure_docker_for_compute() {
+  local stack
+  for stack in "$@"; do
+    if [[ "$stack" == "MsbnComputeStack" ]]; then
+      have_cmd docker || die "Docker is required to deploy MsbnComputeStack Lambda container assets"
+      docker info >/dev/null 2>&1 || die "Docker is installed but not reachable. Start Docker before deploying MsbnComputeStack."
+      return
+    fi
+  done
+}
+
 stack_name() {
   case "$1" in
     storage|MsbnStorageStack) echo "MsbnStorageStack" ;;
@@ -380,6 +391,7 @@ main() {
 
   if [[ "$BACKEND_REQUESTED" -eq 1 ]]; then
     mapfile -t DEPLOY_STACKS < <(ordered_unique_stacks "${REQUESTED_STACKS[@]}")
+    ensure_docker_for_compute "${DEPLOY_STACKS[@]}"
     validate_backend
     deploy_backend "${DEPLOY_STACKS[@]}"
   fi

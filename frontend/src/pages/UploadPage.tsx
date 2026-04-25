@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
-import { uploadTranscriptWithDetails } from "../api";
+import { extractTranscriptPrefill, uploadTranscriptWithDetails } from "../api";
 
 interface FileEntry {
   id: string;
@@ -29,43 +29,7 @@ const emptyDraft: ApplicationDraft = {
 
 const applicationIdPattern = /^[A-Za-z0-9._-]+$/;
 
-function cleanExtractedValue(value: string | undefined) {
-  return (value ?? "")
-    .replace(/[\u0000-\u001f]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120);
-}
-
-function extractAfterLabel(text: string, labels: string[]) {
-  for (const label of labels) {
-    const match = text.match(
-      new RegExp(`${label}\\s*[:\\-]?\\s*([^\\n\\r]{2,120})`, "i")
-    );
-    const value = cleanExtractedValue(match?.[1]);
-    if (value) return value;
-  }
-  return "";
-}
-
-async function extractDraftFromPdf(file: File): Promise<Partial<ApplicationDraft>> {
-  const buffer = await file.arrayBuffer();
-  const text = new TextDecoder("latin1").decode(buffer);
-  const filenameBase = file.name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ");
-
-  return {
-    applicantName:
-      extractAfterLabel(text, ["student name", "applicant name", "name"]) ||
-      cleanExtractedValue(filenameBase.match(/^([a-z ,.'-]{4,80})/i)?.[1]),
-    institution: extractAfterLabel(text, [
-      "institution",
-      "school",
-      "college",
-      "university",
-    ]),
-    country: extractAfterLabel(text, ["country"]),
-  };
-}
+const prefillKeys = ["applicantName", "institution", "country"] as const;
 
 export function UploadPage() {
   const t = useT();
@@ -75,6 +39,8 @@ export function UploadPage() {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [draft, setDraft] = useState<ApplicationDraft>(emptyDraft);
   const [draftExtractionAttempted, setDraftExtractionAttempted] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [prefillError, setPrefillError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -103,20 +69,37 @@ export function UploadPage() {
     }));
     setFiles((prev) => [...prev, ...newEntries]);
     setDraftExtractionAttempted(false);
-    void extractDraftFromPdf(pdfFiles[0])
-      .then((extracted) => {
-        setDraft((current) => ({
-          applicationId: current.applicationId,
-          applicantName: current.applicantName || extracted.applicantName || "",
-          institution: current.institution || extracted.institution || "",
-          country: current.country || extracted.country || "",
-        }));
-      })
-      .finally(() => setDraftExtractionAttempted(true));
+    setPrefillError(null);
     newEntries.forEach((entry, index) => {
       const file = pdfFiles[index];
       if (file) selectedFilesRef.current[entry.id] = file;
     });
+  };
+
+  const extractDraft = async () => {
+    const firstPending = files.find((entry) => entry.status !== "uploaded");
+    const file = firstPending ? selectedFilesRef.current[firstPending.id] : undefined;
+    if (!file) return;
+
+    setExtracting(true);
+    setPrefillError(null);
+    try {
+      const result = await extractTranscriptPrefill(file);
+      setDraft((current) => ({
+        ...current,
+        applicantName: current.applicantName || result.fields.applicantName || "",
+        institution: current.institution || result.fields.institution || "",
+        country: current.country || result.fields.country || "",
+      }));
+      setDraftExtractionAttempted(true);
+    } catch (err) {
+      setDraftExtractionAttempted(true);
+      setPrefillError(
+        err instanceof Error ? err.message : "Preview extraction failed"
+      );
+    } finally {
+      setExtracting(false);
+    }
   };
 
   const uploadOne = async (file: File, id: string, details: ApplicationDraft) => {
@@ -167,6 +150,9 @@ export function UploadPage() {
   const applicationIdMissing = draft.applicationId.trim().length === 0;
   const applicationIdInvalid =
     !applicationIdMissing && !applicationIdPattern.test(draft.applicationId.trim());
+  const requiredFieldsMissing = (
+    ["applicationId", ...prefillKeys] as const
+  ).some((key) => draft[key].trim().length === 0);
   const missingExtractedPlaceholder = draftExtractionAttempted
     ? "Needs manual entry"
     : "";
@@ -211,6 +197,40 @@ export function UploadPage() {
         >
           <div
             style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              gap: 12,
+              marginBottom: 14,
+            }}
+          >
+            <Btn
+              variant="ghost"
+              disabled={files.length === 0 || extracting}
+              onClick={() => void extractDraft()}
+            >
+              {extracting ? "Extracting..." : "Extract"}
+            </Btn>
+          </div>
+          {prefillError && (
+            <div
+              role="status"
+              style={{
+                marginBottom: 12,
+                border: `1px solid ${t.high}`,
+                borderRadius: 3,
+                color: t.high,
+                background: t.surfaceAlt,
+                padding: "8px 10px",
+                fontSize: 12,
+                lineHeight: 1.4,
+              }}
+            >
+              {prefillError}
+            </div>
+          )}
+          <div
+            style={{
               display: "grid",
               gridTemplateColumns: "1fr 1fr",
               gap: 12,
@@ -223,64 +243,83 @@ export function UploadPage() {
                 ["country", "Country"],
                 ["applicationId", "Application ID"],
               ] as const
-            ).map(([key, label]) => (
-              <label
-                key={key}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 5,
-                }}
-              >
-                <span
+            ).map(([key, label]) => {
+              const missingPrefillField =
+                key !== "applicationId" &&
+                draftExtractionAttempted &&
+                draft[key].trim().length === 0;
+              const invalidApplicationId =
+                key === "applicationId" && applicationIdInvalid;
+              return (
+                <label
+                  key={key}
                   style={{
-                    fontSize: 10,
-                    color: t.ink3,
-                    letterSpacing: 0.5,
-                    textTransform: "uppercase",
-                    fontFamily: t.mono,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 5,
                   }}
                 >
-                  {label}
-                </span>
-                <input
-                  value={draft[key]}
-                  placeholder={
-                    key === "applicationId" ? "" : missingExtractedPlaceholder
-                  }
-                  required={key === "applicationId"}
-                  maxLength={key === "applicationId" ? 80 : undefined}
-                  pattern={
-                    key === "applicationId" ? applicationIdPattern.source : undefined
-                  }
-                  title={
-                    key === "applicationId"
-                      ? "Use letters, numbers, dots, underscores, or hyphens."
-                      : undefined
-                  }
-                  onChange={(e) =>
-                    setDraft((current) => ({
-                      ...current,
-                      [key]: e.target.value,
-                    }))
-                  }
-                  style={{
-                    border: `1px solid ${
-                      key === "applicationId" && applicationIdInvalid
-                        ? t.high
-                        : t.line
-                    }`,
-                    background: t.surfaceAlt,
-                    color: t.ink,
-                    padding: "9px 10px",
-                    borderRadius: 3,
-                    fontSize: 13,
-                    fontFamily: "inherit",
-                    outlineColor: t.accent,
-                  }}
-                />
-              </label>
-            ))}
+                  <span
+                    style={{
+                      fontSize: 10,
+                      color: t.ink3,
+                      letterSpacing: 0.5,
+                      textTransform: "uppercase",
+                      fontFamily: t.mono,
+                    }}
+                  >
+                    {label}
+                  </span>
+                  <input
+                    value={draft[key]}
+                    placeholder={
+                      key === "applicationId" ? "" : missingExtractedPlaceholder
+                    }
+                    required={key === "applicationId"}
+                    maxLength={key === "applicationId" ? 80 : undefined}
+                    pattern={
+                      key === "applicationId" ? applicationIdPattern.source : undefined
+                    }
+                    title={
+                      key === "applicationId"
+                        ? "Use letters, numbers, dots, underscores, or hyphens."
+                        : undefined
+                    }
+                    onChange={(e) =>
+                      setDraft((current) => ({
+                        ...current,
+                        [key]: e.target.value,
+                      }))
+                    }
+                    style={{
+                      border: `1px solid ${
+                        invalidApplicationId || missingPrefillField
+                          ? t.high
+                          : t.line
+                      }`,
+                      background: t.surfaceAlt,
+                      color: t.ink,
+                      padding: "9px 10px",
+                      borderRadius: 3,
+                      fontSize: 13,
+                      fontFamily: "inherit",
+                      outlineColor: t.accent,
+                    }}
+                  />
+                  {missingPrefillField && (
+                    <span
+                      style={{
+                        color: t.high,
+                        fontSize: 11,
+                        lineHeight: 1.3,
+                      }}
+                    >
+                      Needs manual entry
+                    </span>
+                  )}
+                </label>
+              );
+            })}
           </div>
         </Card>
 
@@ -479,8 +518,9 @@ export function UploadPage() {
             variant="primary"
             disabled={
               files.length === 0 ||
-              applicationIdMissing ||
+              requiredFieldsMissing ||
               applicationIdInvalid ||
+              extracting ||
               files.some((f) => f.status === "uploading") ||
               files.every((f) => f.status === "uploaded")
             }

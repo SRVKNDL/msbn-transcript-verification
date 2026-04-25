@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { TOKENS, LAYOUT } from "../tokens";
 import { SeverityChip } from "../components/SeverityChip";
@@ -38,6 +38,7 @@ function ShortcutLegend({ onClose }: { onClose: () => void }) {
     ["C", "Confirm current flag"],
     ["O", "Override current flag"],
     ["1\u20139", "Jump to page"],
+    ["F", "Toggle transcript fullscreen"],
     ["?", "Toggle this legend"],
     ["Esc", "Close overlay"],
   ];
@@ -486,11 +487,30 @@ export function ReviewPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [pdfScale, setPdfScale] = useState(1);
+  const [isTranscriptFullscreen, setIsTranscriptFullscreen] = useState(false);
+  const transcriptPaneRef = useRef<HTMLDivElement>(null);
 
   const pageCount = Math.max(1, app?.pageCount || 1);
   const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
   const totalFields = extraction.physical.length + extraction.content.length + extraction.program.length;
+
+  const toggleTranscriptFullscreen = useCallback(() => {
+    const pane = transcriptPaneRef.current;
+    if (!pane) return;
+    if (document.fullscreenElement === pane) {
+      void document.exitFullscreen();
+      return;
+    }
+    void pane.requestFullscreen();
+  }, []);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsTranscriptFullscreen(document.fullscreenElement === transcriptPaneRef.current);
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -518,6 +538,9 @@ export function ReviewPage() {
       case "?":
         setShowShortcuts((v) => !v);
         break;
+      case "f":
+        toggleTranscriptFullscreen();
+        break;
       case "escape":
         setDrawerOpen(false);
         setShowShortcuts(false);
@@ -528,7 +551,7 @@ export function ReviewPage() {
         break;
       }
     }
-  }, [flags, activeFlagIdx, pageCount]);
+  }, [flags, activeFlagIdx, pageCount, toggleTranscriptFullscreen]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
@@ -557,7 +580,7 @@ export function ReviewPage() {
         setApp(null);
         setFlags([]);
       });
-    listApplications().then(setQueueApps).catch(() => setQueueApps([]));
+    listApplications({ statuses: ["READY_FOR_REVIEW"] }).then(setQueueApps).catch(() => setQueueApps([]));
   }, [id]);
 
   if (error) {
@@ -713,12 +736,14 @@ export function ReviewPage() {
       </div>
 
       {/* PDF pane — TranscriptPageViewer */}
-      <div style={{
+      <div ref={transcriptPaneRef} style={{
         background: LAYOUT.pdfBg, overflow: "auto",
-        display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 24px 40px", gap: 14,
+        display: "flex", flexDirection: "column", alignItems: "center",
+        padding: isTranscriptFullscreen ? "28px 32px 44px" : "24px 24px 40px",
+        gap: 14,
       }}>
         <div style={{
-          width: "100%", maxWidth: 560, display: "flex", alignItems: "center", justifyContent: "space-between",
+          width: "100%", maxWidth: isTranscriptFullscreen ? 760 : 560, display: "flex", alignItems: "center", justifyContent: "space-between",
           fontSize: 11, color: TOKENS.ink3, fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
         }}>
           <div>{app.applicantName} · {app.applicationId}</div>
@@ -737,7 +762,7 @@ export function ReviewPage() {
           appId={id!}
           page={currentPage}
           flags={flags}
-          pdfScale={pdfScale}
+          pdfScale={isTranscriptFullscreen ? 1.35 : 1}
         />
         <div style={{
           display: "flex", alignItems: "center", gap: 8,
@@ -745,17 +770,13 @@ export function ReviewPage() {
         }}>
           <span>source: uploaded transcript · nova-pro-v1:0</span>
           <div style={{ height: 12, width: 1, background: TOKENS.line }} />
-          <button onClick={() => setPdfScale((s) => Math.max(0.6, s - 0.1))} style={{
+          <button onClick={toggleTranscriptFullscreen} style={{
             border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
-            width: 22, height: 20, fontSize: 13, cursor: "pointer", borderRadius: 2,
-            color: TOKENS.ink3, fontFamily: "inherit", padding: 0,
-          }}>&minus;</button>
-          <span>{Math.round(pdfScale * 100)}%</span>
-          <button onClick={() => setPdfScale((s) => Math.min(1.5, s + 0.1))} style={{
-            border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
-            width: 22, height: 20, fontSize: 13, cursor: "pointer", borderRadius: 2,
-            color: TOKENS.ink3, fontFamily: "inherit", padding: 0,
-          }}>+</button>
+            height: 22, fontSize: 10, cursor: "pointer", borderRadius: 2,
+            color: TOKENS.ink3, fontFamily: "inherit", padding: "0 9px",
+          }} title="Toggle transcript fullscreen (F)">
+            {isTranscriptFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          </button>
         </div>
       </div>
 

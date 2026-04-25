@@ -129,7 +129,8 @@ def test_dynamodb_item_written(dynamodb_table, uploads_s3_event, lambda_context)
     item = scan["Items"][0]
     assert item["SK"] == "METADATA"
     assert item["entity_type"] == "METADATA"
-    assert item["status"] == "INTAKE_COMPLETE"
+    assert item["status"] == "PROCESSING"
+    assert item["submission_ts"] == item["uploadedAt"]
     assert item["originalFilename"] == "TRANSCRIPT_sample.pdf"
     assert item["s3_key"] == "uploads/TRANSCRIPT_sample.pdf"
     assert int(item["size_bytes"]) == 204800
@@ -298,7 +299,7 @@ def test_log_includes_application_id(
 
     entry = entries[0]
     assert entry["applicationId"]
-    assert entry["status"] == "INTAKE_COMPLETE"
+    assert entry["status"] == "PROCESSING"
     assert "s3_key" in entry
 
 

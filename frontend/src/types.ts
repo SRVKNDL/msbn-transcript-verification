@@ -10,6 +10,7 @@ export interface Application {
   status: string;
   caseRef: string | null;
   licenseNumber: string;
+  originalFilename: string;
   programYear: string;
   pageCount: number;
 }

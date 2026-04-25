@@ -19,7 +19,7 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
   const darkMode = mode === "dark";
 
   useEffect(() => {
-    listApplications()
+    listApplications({ statuses: ["READY_FOR_REVIEW"] })
       .then((apps) =>
         setPendingCount(
           apps.filter(

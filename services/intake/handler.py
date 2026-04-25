@@ -88,7 +88,8 @@ def _process_record(record: dict) -> dict:
         "SK": "METADATA",
         "entity_type": "METADATA",
         "applicationId": application_id,
-        "status": "INTAKE_COMPLETE",
+        "status": "PROCESSING",
+        "submission_ts": uploaded_at,
         "uploadedAt": uploaded_at,
         "s3_key": s3_key,
         "originalFilename": original_filename,
@@ -105,7 +106,7 @@ def _process_record(record: dict) -> dict:
                 "s3_key": s3_key,
                 "originalFilename": original_filename,
                 "size_bytes": size_bytes,
-                "status": "INTAKE_COMPLETE",
+                "status": "PROCESSING",
             }
         )
     )

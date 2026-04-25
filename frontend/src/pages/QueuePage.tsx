@@ -29,7 +29,7 @@ export function QueuePage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    listApplications()
+    listApplications({ statuses: ["READY_FOR_REVIEW"] })
       .then((items) => {
         setApps(items);
         setError(null);

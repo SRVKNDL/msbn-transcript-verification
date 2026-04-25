@@ -280,6 +280,35 @@ def test_list_applications_happy_path(dynamo_table, lambda_context):
     assert body["items"][1]["applicationId"] == "APP-002"
 
 
+def test_list_applications_can_include_processing_uploads(dynamo_table, lambda_context):
+    """Dashboard list can include newly uploaded processing applications."""
+    _seed_application(
+        dynamo_table,
+        "APP-PROCESSING",
+        status="PROCESSING",
+        applicant_name="",
+        institution="",
+        flag_count=0,
+        high_severity_count=0,
+        originalFilename="new_upload.pdf",
+    )
+    _seed_application(dynamo_table, "APP-READY")
+
+    event = _make_event(
+        "GET /applications",
+        query_params={"status": "PROCESSING,READY_FOR_REVIEW"},
+    )
+    body = _parse_response(handler(event, lambda_context))
+
+    ids = {item["applicationId"] for item in body["items"]}
+    processing = next(
+        item for item in body["items"] if item["applicationId"] == "APP-PROCESSING"
+    )
+    assert ids == {"APP-PROCESSING", "APP-READY"}
+    assert processing["status"] == "PROCESSING"
+    assert processing["originalFilename"] == "new_upload.pdf"
+
+
 def test_list_applications_response_shape(dynamo_table, lambda_context):
     """Each item must have the expected fields."""
     _seed_application(dynamo_table, "APP-010")

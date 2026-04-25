@@ -22,7 +22,8 @@ Written to `msbn-applications` with `PK = APP#{applicationId}`, `SK = METADATA`.
   "SK": "METADATA",
   "entity_type": "METADATA",
   "applicationId": "a7f3b2c1-...",
-  "status": "INTAKE_COMPLETE",
+  "status": "PROCESSING",
+  "submission_ts": "2026-04-14T18:32:01.123456+00:00",
   "uploadedAt": "2026-04-14T18:32:01.123456+00:00",
   "s3_key": "uploads/transcript_smith_jane.pdf",
   "originalFilename": "transcript_smith_jane.pdf",
@@ -30,8 +31,8 @@ Written to `msbn-applications` with `PK = APP#{applicationId}`, `SK = METADATA`.
 }
 ```
 
-Status is set to `INTAKE_COMPLETE` at write time. The Step Functions pipeline updates it to
-`EXTRACTING`, `EVALUATING`, `READY_FOR_REVIEW`, or `FAILED` as it progresses.
+Status is set to `PROCESSING` at write time so dashboard users can see the upload immediately.
+The Step Functions pipeline updates it to `READY_FOR_REVIEW` or `FAILED` when it finishes.
 
 ## Step Functions execution input
 

@@ -25,6 +25,15 @@ _ARRAY_FIELDS = frozenset({
     "required_nursing_domains_present",
 })
 
+# Object-array fields that are merged across pages by appending (not deduplicating).
+_OBJECT_ARRAY_FIELDS = frozenset({
+    "courses",
+    "semesters",
+    "programs",
+    "registrar_signature_instances",
+    "leave_of_absence_markers",
+})
+
 # Per-page bookkeeping, not extraction fields.
 _PAGE_META_KEYS = frozenset({"page_number", "image_dimensions"})
 
@@ -90,9 +99,12 @@ def _flatten_pages(pages: list[dict]) -> dict:
     for field in sorted(field_names):
         if field in _ARRAY_FIELDS:
             _merge_array_field(field, pages, out)
+        elif field in _OBJECT_ARRAY_FIELDS:
+            _merge_object_array_field(field, pages, out)
         else:
             _pick_highest_confidence(field, pages, out)
 
+    _apply_field_aliases(out)
     return out
 
 
@@ -164,3 +176,41 @@ def _merge_array_field(field: str, pages: list[dict], out: dict) -> None:
             "page_number": first_source_page,
             "text_spans": merged_spans,
         }
+
+
+def _merge_object_array_field(field: str, pages: list[dict], out: dict) -> None:
+    """Merge object-array fields (courses, semesters, etc.) across pages."""
+    merged: list = []
+    for page in pages:
+        value = page.get(field)
+        if not isinstance(value, list):
+            continue
+        page_number = page.get("page_number")
+        for item in value:
+            if isinstance(item, dict):
+                # Tag each object with the page it came from for source tracing.
+                entry = dict(item)
+                if page_number is not None:
+                    entry.setdefault("source_location", {
+                        "page_number": page_number,
+                        "text_spans": [],
+                    })
+                merged.append(entry)
+    out[field] = merged
+
+
+def _apply_field_aliases(out: dict) -> None:
+    """Map extraction field names to the names downstream rules expect."""
+    # courses: normalize course_code → code for PROG_004–007
+    courses = out.get("courses")
+    if isinstance(courses, list):
+        for course in courses:
+            if not isinstance(course, dict):
+                continue
+            # Prefer "code" if Nova provided it; fall back to "course_code".
+            if "code" not in course and "course_code" in course:
+                course["code"] = course["course_code"]
+
+    # total_credit_hours_stated → total_credit_hours for PROG_006
+    if "total_credit_hours" not in out and "total_credit_hours_stated" in out:
+        out["total_credit_hours"] = out["total_credit_hours_stated"]

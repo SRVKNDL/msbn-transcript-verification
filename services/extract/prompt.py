@@ -62,6 +62,8 @@ VOCABULARY: dict[str, set] = {
         "adult_med_surg", "obstetrics", "pediatrics",
         "psychiatric", "gerontology", "community_health",
     },
+    # MS-specific program classification.
+    "program_type": {"ms_practical_nursing", "other", "unclear"},
     # Confidence appears beside every extracted field.
     "_confidence": {"high", "medium", "low"},
 }
@@ -317,13 +319,25 @@ programs
 
 courses
   Value: JSON array of objects, each with:
-         { "name": <string>, "course_code": <string or null>, "course_title": <string or null>,
-           "credit_hours": <number or null>, "grade_points": <number or null>,
+         { "name": <string>, "code": <string or null>, "course_code": <string or null>,
+           "course_title": <string or null>,
+           "credit_hours": <number or null>, "grade": <string or null>,
+           "grade_points": <number or null>,
+           "semester": <integer or null>,
            "start_date": <YYYY-MM-DD or null>, "end_date": <YYYY-MM-DD or null>,
            "retake_marker": <boolean — true if course is marked as a repeat/retake>,
            "transfer_marker": <boolean — true if marked TR, TRANSFER, or CREDIT AWARDED> }
-  Description: Every course entry on this page. grade_points is the numeric GPA equivalent
-               (e.g., A=4.0, B+=3.3). Use null for Pass/Fail or non-numeric grades.
+  Description: Every course entry on this page.
+               "code" is the course code exactly as printed (e.g. "PNV 1116", "BIO 2514").
+               "course_code" is an alias — populate both with the same value.
+               "grade" is the letter or pass/fail grade as printed (e.g. "A", "B+", "Pass").
+               "grade_points" is the numeric GPA equivalent (e.g., A=4.0, B+=3.3).
+               Use null for Pass/Fail or non-numeric grades.
+               "semester" is the sequential semester number (1, 2, 3, etc.) this course
+               appears in, derived from the transcript's semester/term grouping. If the
+               transcript groups courses under "Semester 1", "Semester 2", etc., use those
+               numbers. If it uses "Fall 2023", "Spring 2024", assign ordinals by date order
+               starting from 1. Use null if semester cannot be determined.
                Use [] if no courses are found on this page.
 
 semesters
@@ -439,6 +453,24 @@ suspicious_course_names
 program_duration_consistency
   Allowed: consistent_with_degree | unusually_short | unusually_long | unclear
   Description: The total elapsed time of the academic program relative to its degree type.
+
+=== SECTION 3b: MS Practical Nursing Fields (PROG_004 – PROG_007) ===
+
+program_type
+  Allowed: ms_practical_nursing | other | unclear
+  Description: Whether this transcript belongs to a Mississippi Practical Nursing (PN)
+               program. Return "ms_practical_nursing" when the transcript shows PNV course
+               codes (e.g. PNV 1116, PNV 1213), mentions the Mississippi Community College
+               Board, or explicitly identifies a Practical Nursing or Licensed Practical Nurse
+               (LPN) program at a Mississippi institution. Return "other" for all non-PN
+               programs. Return "unclear" when insufficient evidence exists.
+
+total_credit_hours
+  Value: integer (sum of all credit hours across all courses on the transcript), or null
+  Description: The total semester credit hours for the full program, either as printed on
+               the transcript (e.g., "Total Credits: 44") or computed by summing all
+               individual course credit hours. For MS Practical Nursing, the expected
+               total is 44 semester hours.
 """
 
 

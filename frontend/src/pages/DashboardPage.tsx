@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
-import { listApplications } from "../api";
+import { listApplications, deleteApplication } from "../api";
 import type { Application } from "../types";
 
 function timeAgo(hrs: number) {
@@ -112,11 +112,14 @@ interface EnabledGroups {
   reviewed: boolean;
 }
 
+// Always fetch the four default statuses so stats cards are never affected by
+// the filter toggles. REVIEWED is only added when that toggle is on.
 function resolveStatuses(groups: EnabledGroups): string[] {
   return [
-    ...(groups.processing ? ["PROCESSING", "INTAKE_COMPLETE"] : []),
-    ...(groups.failed ? ["FAILED"] : []),
-    ...(groups.ready ? ["READY_FOR_REVIEW"] : []),
+    "PROCESSING",
+    "INTAKE_COMPLETE",
+    "FAILED",
+    "READY_FOR_REVIEW",
     ...(groups.reviewed ? ["REVIEWED"] : []),
   ];
 }
@@ -141,6 +144,8 @@ export function DashboardPage({
   const [dateTo, setDateTo] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("date_desc");
   const [pageSize, setPageSize] = useState(10);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   // Keep a stable ref to enabledGroups for the polling interval.
   const groupsRef = useRef(enabledGroups);
@@ -169,8 +174,14 @@ export function DashboardPage({
   // Re-mount the effect (and refetch immediately) when the status filter changes.
   }, [enabledGroups]);
 
-  // Client-side pipeline: date filter → sort → paginate.
-  let displayed = [...apps];
+  // Client-side pipeline: status filter → date filter → sort → paginate.
+  const activeStatuses = new Set<string>([
+    ...(enabledGroups.processing ? ["PROCESSING", "INTAKE_COMPLETE"] : []),
+    ...(enabledGroups.failed ? ["FAILED"] : []),
+    ...(enabledGroups.ready ? ["READY_FOR_REVIEW"] : []),
+    ...(enabledGroups.reviewed ? ["REVIEWED"] : []),
+  ]);
+  let displayed = apps.filter((a) => activeStatuses.has(a.status));
   if (dateFrom) {
     displayed = displayed.filter((a) => a.submittedAt >= dateFrom);
   }
@@ -234,11 +245,29 @@ export function DashboardPage({
     setEnabledGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
+  async function handleDelete() {
+    if (selected.size === 0) return;
+    const ids = Array.from(selected);
+    const noun = ids.length === 1 ? "1 entry" : `${ids.length} entries`;
+    if (!window.confirm(`Permanently delete ${noun}? This removes all records and files and cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await Promise.all(ids.map((id) => deleteApplication(id)));
+      setApps((prev) => prev.filter((a) => !selected.has(a.applicationId)));
+      setSelected(new Set());
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Delete failed";
+      setError(msg);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const statusToggles: { key: keyof EnabledGroups; label: string }[] = [
     { key: "processing", label: "Processing" },
     { key: "failed",     label: "Failed" },
     { key: "ready",      label: "Ready" },
-    { key: "reviewed",   label: "Already Reviewed" },
+    { key: "reviewed",   label: "Reviewed" },
   ];
 
   // Shared select style.
@@ -504,6 +533,33 @@ export function DashboardPage({
                   <option value={50}>50</option>
                 </select>
               </div>
+
+              {/* Delete selected — only visible when rows are checked */}
+              {selected.size > 0 && (
+                <>
+                  <div style={{ width: 1, height: 20, background: t.line, margin: "0 2px" }} />
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    style={{
+                      fontSize: 11,
+                      fontFamily: t.mono,
+                      fontWeight: 700,
+                      letterSpacing: 0.3,
+                      textTransform: "uppercase",
+                      padding: "4px 12px",
+                      borderRadius: 2,
+                      cursor: deleting ? "default" : "pointer",
+                      border: `1px solid ${t.high}`,
+                      background: t.high,
+                      color: "#fff",
+                      opacity: deleting ? 0.6 : 1,
+                    }}
+                  >
+                    {deleting ? "Deleting…" : `Delete ${selected.size} selected`}
+                  </button>
+                </>
+              )}
             </div>
 
             {/* Table */}
@@ -516,6 +572,27 @@ export function DashboardPage({
             >
               <thead>
                 <tr style={{ background: t.surfaceAlt }}>
+                  {/* Select-all checkbox */}
+                  <th
+                    style={{
+                      padding: "9px 10px 9px 14px",
+                      borderBottom: `1px solid ${t.line}`,
+                      width: 32,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={queue.length > 0 && queue.every((r) => selected.has(r.applicationId))}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelected(new Set(queue.map((r) => r.applicationId)));
+                        } else {
+                          setSelected(new Set());
+                        }
+                      }}
+                      style={{ cursor: "pointer" }}
+                    />
+                  </th>
                   {[
                     "Application",
                     "Applicant",
@@ -548,7 +625,7 @@ export function DashboardPage({
                 {queue.length === 0 && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       style={{
                         padding: "34px 18px",
                         textAlign: "center",
@@ -568,6 +645,15 @@ export function DashboardPage({
                       app={r}
                       target={target}
                       isLast={i === queue.length - 1}
+                      isSelected={selected.has(r.applicationId)}
+                      onSelect={(id, checked) => {
+                        setSelected((prev) => {
+                          const next = new Set(prev);
+                          if (checked) next.add(id);
+                          else next.delete(id);
+                          return next;
+                        });
+                      }}
                       onNavigate={navigate}
                     />
                   );
@@ -694,11 +780,15 @@ function ActivityRow({
   app: r,
   target,
   isLast,
+  isSelected,
+  onSelect,
   onNavigate,
 }: {
   app: Application;
   target: string | null;
   isLast: boolean;
+  isSelected: boolean;
+  onSelect: (id: string, checked: boolean) => void;
   onNavigate: (path: string) => void;
 }) {
   const t = useT();
@@ -721,10 +811,22 @@ function ActivityRow({
       style={{
         borderBottom: isLast ? "none" : `1px solid ${t.line2}`,
         cursor: target ? "pointer" : "default",
-        background: hovered && target ? t.surfaceAlt : "transparent",
+        background: isSelected ? t.accentBg : hovered && target ? t.surfaceAlt : "transparent",
         transition: "background 0.1s",
       }}
     >
+      {/* Row checkbox */}
+      <td
+        style={{ padding: "11px 10px 11px 14px", width: 32 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={(e) => onSelect(r.applicationId, e.target.checked)}
+          style={{ cursor: "pointer" }}
+        />
+      </td>
       <td
         style={{
           padding: "11px 14px",

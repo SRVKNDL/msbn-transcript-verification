@@ -272,6 +272,16 @@ export async function submitDecision(
   if (!res.ok) throw new Error(`API ${res.status}: decision submit failed`);
 }
 
+export async function deleteApplication(id: string): Promise<void> {
+  requireApiBase();
+  const headers = await authHeaders();
+  const res = await fetch(
+    `${API_BASE}/applications/${encodeURIComponent(id)}`,
+    { method: "DELETE", headers: { ...headers } }
+  );
+  if (!res.ok) throw new Error(`API ${res.status}: delete failed`);
+}
+
 export async function getPageImage(id: string, page: number): Promise<{ url: string }> {
   return fetchJson(`/applications/${id}/pages/${page}`);
 }

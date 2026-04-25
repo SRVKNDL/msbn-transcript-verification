@@ -25,7 +25,7 @@ _CORS_HEADERS = {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": _CORS_ORIGIN,
     "Access-Control-Allow-Headers": "Content-Type,Authorization",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
 }
 
 _VALID_OVERALL_DECISIONS = {
@@ -252,6 +252,9 @@ def handler(event: dict, context) -> dict:
 
         if route_key == "GET /applications/{id}/audit":
             return _get_audit(path_params.get("id"), table)
+
+        if route_key == "DELETE /applications/{id}":
+            return _delete_application(path_params.get("id"), table)
 
         return _response(404, {"error": f"Not found: {route_key}"})
 
@@ -691,3 +694,80 @@ def _get_audit(app_id: str | None, table) -> dict:
         )
 
     return _response(200, {"items": items})
+
+
+# DELETE /applications/{id}.
+
+
+def _delete_application(app_id: str | None, table) -> dict:
+    """Delete all DynamoDB records and S3 objects for an application."""
+    if not app_id:
+        return _response(400, {"error": "Missing application ID"})
+
+    pk = f"APP#{app_id}"
+
+    # Verify the application exists and grab metadata for the S3 key.
+    meta_resp = table.get_item(Key={"PK": pk, "SK": "METADATA"})
+    if "Item" not in meta_resp:
+        return _response(404, {"error": f"Application {app_id} not found"})
+
+    s3_key = meta_resp["Item"].get("s3_key")
+
+    # Collect every item under this PK (METADATA, DOCUMENT#TRANSCRIPT,
+    # FLAG#*, AUDIT#*, etc.) with pagination.
+    all_items = []
+    last_evaluated_key = None
+    while True:
+        query_kwargs: dict = {
+            "KeyConditionExpression": Key("PK").eq(pk),
+        }
+        if last_evaluated_key:
+            query_kwargs["ExclusiveStartKey"] = last_evaluated_key
+        result = table.query(**query_kwargs)
+        all_items.extend(result.get("Items", []))
+        last_evaluated_key = result.get("LastEvaluatedKey")
+        if not last_evaluated_key:
+            break
+
+    # Batch-delete all DynamoDB items. batch_writer handles the 25-item limit.
+    with table.batch_writer() as batch:
+        for item in all_items:
+            batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+
+    # Delete S3 objects when a bucket is configured.
+    if _BUCKET_NAME:
+        # Original uploaded transcript.
+        if s3_key:
+            try:
+                _s3.delete_object(Bucket=_BUCKET_NAME, Key=s3_key)
+            except ClientError:
+                logger.warning(
+                    json.dumps(
+                        {"action": "s3_delete_failed", "key": s3_key}
+                    )
+                )
+
+        # All processed objects (page images, extraction JSON, aggregation).
+        prefix = f"processed/{app_id}/"
+        paginator = _s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=_BUCKET_NAME, Prefix=prefix):
+            objects = page.get("Contents") or []
+            if objects:
+                _s3.delete_objects(
+                    Bucket=_BUCKET_NAME,
+                    Delete={
+                        "Objects": [{"Key": obj["Key"]} for obj in objects]
+                    },
+                )
+
+    logger.info(
+        json.dumps(
+            {
+                "action": "application_deleted",
+                "applicationId": app_id,
+                "dynamoItemsDeleted": len(all_items),
+            }
+        )
+    )
+
+    return _response(200, {"applicationId": app_id, "deleted": True})

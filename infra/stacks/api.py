@@ -36,6 +36,7 @@ class ApiConstruct(Construct):
                 allow_methods=[
                     apigwv2.CorsHttpMethod.GET,
                     apigwv2.CorsHttpMethod.POST,
+                    apigwv2.CorsHttpMethod.DELETE,
                     apigwv2.CorsHttpMethod.OPTIONS,
                 ],
                 allow_headers=["Content-Type", "Authorization"],
@@ -68,6 +69,7 @@ class ApiConstruct(Construct):
             ("GET", "/applications"),
             ("POST", "/uploads"),
             ("GET", "/applications/{id}"),
+            ("DELETE", "/applications/{id}"),
             ("GET", "/applications/{id}/pages/{page}"),
             ("POST", "/applications/{id}/decision"),
             ("GET", "/applications/{id}/audit"),
@@ -75,6 +77,7 @@ class ApiConstruct(Construct):
         method_map = {
             "GET": apigwv2.HttpMethod.GET,
             "POST": apigwv2.HttpMethod.POST,
+            "DELETE": apigwv2.HttpMethod.DELETE,
         }
 
         for method, path in routes:

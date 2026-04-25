@@ -30,6 +30,16 @@ CLEAN_BASELINE: dict = {
     "security_features_present": ["watermark", "serial_number"],
     "security_features_present_source": {"page_number": 1, "text_spans": []},
     "security_features_assessable": "yes",
+    "registrar_block": {
+        "detected": "yes",
+        "location": "footer",
+        "page_number": 3,
+        "name_text": "Maria Santos",
+        "title_text": "Registrar",
+        "signature_present": "yes",
+        "signature_type": "handwritten",
+        "contact_info_text": "123 University Ave, Manila, Philippines",
+    },
     # Content section
     "grading_scale_format": "letter_grade_us",
     "grading_scale_format_source": {"page_number": 2, "text_spans": ["A, B+, B, A-"]},
@@ -103,14 +113,11 @@ CLEAN_BASELINE: dict = {
 # ── Fraud-laden fixture (Case B + diploma mill signals) ───────────────────────
 # Inspired by MSBN Case B (fabricated non-nursing courses, duplicate entry)
 # combined with Case D/E diploma mill signals and cross-document mismatches.
-# Expected to fire (new rules):
+# Expected to fire (current rules):
 #   PHYS_001 (x2): pixelated seal, no security features
-#   PHYS_002 (x4): registrar name/signature/title/contact absent
+#   PHYS_002 (x1): no registrar attestation detected
 #   PHYS_004 (x1): misaligned text
 #   CONT_003 (x1): ADN program duration too short (5 months vs 18-month minimum)
-#   PROG_001 (x2): diploma mill language + unknown accreditor
-#   PROG_002 (x1): no graduation confirmation
-#   PROG_003 (x4): missing all required nursing domains
 #   CROSS_001–003 deferred to Phase 4
 FRAUD_CASE_B: dict = {
     "applicationId": "APP-FRAUD-002",
@@ -136,10 +143,17 @@ FRAUD_CASE_B: dict = {
     "security_features_present": [],                # PHYS_001 Check 4 fires
     "security_features_present_source": {"page_number": 1, "text_spans": []},
     "security_features_assessable": "yes",
-    # PHYS_002: missing registrar information — all three checks fire
-    "registrar_name_present": False,
-    "registrar_signature_present": False,
-    "registrar_title_present": False,
+    # PHYS_002: no registrar attestation detected anywhere
+    "registrar_block": {
+        "detected": "no",
+        "location": "none",
+        "page_number": None,
+        "name_text": None,
+        "title_text": None,
+        "signature_present": "no",
+        "signature_type": "none",
+        "contact_info_text": None,
+    },
     # Content section — suspicious courses kept for future rule coverage
     "grading_scale_format": "letter_grade_us",
     "grading_scale_format_source": {"page_number": 2, "text_spans": ["A, B, C"]},

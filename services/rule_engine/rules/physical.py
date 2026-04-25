@@ -127,74 +127,50 @@ def check_phys_001(agg: dict) -> list:
 
 
 def check_phys_002(agg: dict) -> list:
-    """Registrar information — presence of name, signature, title, contact info, and signature consistency."""
+    """Registrar attestation — structured block detection and completeness check."""
     flags = []
 
-    # Check 1 — registrar name present (HIGH)
-    if agg.get("registrar_name_present") is False:
+    registrar_block = agg.get("registrar_block") or {}
+    detected = registrar_block.get("detected")
+
+    # Check 1 — no registrar block detected anywhere (MEDIUM)
+    if detected == "no":
         flags.append(Flag(
             rule_code="PHYS_002",
-            rule_description="Registrar name absent",
-            severity="high",
+            rule_description="No registrar attestation found",
+            severity="medium",
             category="SP-4",
             rationale=(
-                "No printed registrar name was found on the transcript. "
-                "Authentic official transcripts are issued by and identify the registrar."
+                "No registrar block (name, signature, or title) was detected anywhere on the "
+                "document after scanning headers, footers, and margins. Authentic official "
+                "transcripts are attested by the institution's registrar."
             ),
-            source_location=_src(agg, "registrar_name_present"),
+            source_location=_src(agg, "registrar_block"),
         ))
+        return flags
 
-    # Check 2 — registrar signature present (HIGH)
-    if agg.get("registrar_signature_present") is False:
+    # Check 2 — block detected but entirely uninformative (MEDIUM)
+    # Only fires when all three identifiers are simultaneously absent.
+    if (
+        detected == "yes"
+        and registrar_block.get("signature_present") == "no"
+        and registrar_block.get("name_text") is None
+        and registrar_block.get("title_text") is None
+    ):
         flags.append(Flag(
             rule_code="PHYS_002",
-            rule_description="Registrar signature absent",
-            severity="high",
+            rule_description="Registrar block present but lacks identifying information",
+            severity="medium",
             category="SP-4",
             rationale=(
-                "No registrar signature (handwritten, stamped, or digital) was found. "
-                "A signature is a required authenticity indicator on official transcripts."
+                "A registrar section was detected but provides no signature, no printed name, "
+                "and no official title. A block with none of these identifiers does not satisfy "
+                "the attestation requirement for an official transcript."
             ),
-            source_location=_src(agg, "registrar_signature_present"),
+            source_location=_src(agg, "registrar_block"),
         ))
 
-    # Check 3 — registrar title present (HIGH)
-    if agg.get("registrar_title_present") is False:
-        flags.append(Flag(
-            rule_code="PHYS_002",
-            rule_description="Registrar title absent",
-            severity="high",
-            category="SP-4",
-            rationale=(
-                "No registrar title (e.g., 'Registrar', 'University Registrar', "
-                "'Director of Admissions and Records') was found. "
-                "Official transcripts identify the signing official by title."
-            ),
-            source_location=_src(agg, "registrar_title_present"),
-        ))
-
-    # Check 4 — signature consistency across pages (LOW)
-    # Skip if only one instance or all instances are stamped/digital (identical by design)
-    instances = agg.get("registrar_signature_instances") or []
-    if len(instances) > 1:
-        types = {inst.get("type") for inst in instances}
-        all_identical_by_design = types.issubset({"stamped", "digital"})
-        if not all_identical_by_design:
-            inconsistent = any(inst.get("appears_consistent") is False for inst in instances)
-            if inconsistent:
-                flags.append(Flag(
-                    rule_code="PHYS_002",
-                    rule_description="Registrar signature variations suggest different signatories",
-                    severity="low",
-                    category="SP-4",
-                    rationale=(
-                        "Multiple registrar signature instances were found and at least one "
-                        "appears inconsistent with the others. Natural variation in handwriting "
-                        "is expected, but suspicious differences may indicate a composite document."
-                    ),
-                    source_location=_src(agg, "registrar_signature_instances"),
-                ))
-
+    # detected == "unclear" → defer to reviewer; no flag.
     return flags
 
 

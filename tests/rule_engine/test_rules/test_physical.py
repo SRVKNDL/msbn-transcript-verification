@@ -164,91 +164,116 @@ def test_phys_001_multiple_checks_fire():
 
 # ── PHYS_002 — Registrar Information ─────────────────────────────────────────
 
-# Check 1: registrar name
+_VERIFIED_REGISTRAR_BLOCK = {
+    "detected": "yes",
+    "location": "footer",
+    "page_number": 3,
+    "name_text": "Jane Smith",
+    "title_text": "University Registrar",
+    "signature_present": "yes",
+    "signature_type": "handwritten",
+    "contact_info_text": "100 Main St, Oxford, MS 38655",
+}
 
-def test_phys_002_check1_fires_no_registrar_name():
-    flags = check_phys_002({"registrar_name_present": False})
-    assert any(f.rule_code == "PHYS_002" and f.severity == "high"
-               and "name" in f.rule_description.lower() for f in flags)
+
+def test_phys_002_no_fire_verified_transcript():
+    """Verified Mississippi transcript: footer block with handwritten sig, name, title → no flags."""
+    assert check_phys_002({"registrar_block": _VERIFIED_REGISTRAR_BLOCK}) == []
 
 
-def test_phys_002_check1_no_fire_name_present():
-    assert check_phys_002({"registrar_name_present": True}) == []
-
-
-def test_phys_002_check1_no_fire_missing_field():
+def test_phys_002_no_fire_missing_registrar_block():
+    """Fallback: registrar_block absent from aggregation → no flag."""
     assert check_phys_002({}) == []
 
 
-# Check 2: registrar signature
-
-def test_phys_002_check2_fires_no_signature():
-    flags = check_phys_002({"registrar_signature_present": False})
-    assert any(f.rule_code == "PHYS_002" and f.severity == "high"
-               and "signature" in f.rule_description.lower() for f in flags)
+def test_phys_002_no_fire_unclear():
+    """detected='unclear' → defer to reviewer, no flag."""
+    assert check_phys_002({"registrar_block": {"detected": "unclear"}}) == []
 
 
-def test_phys_002_check2_no_fire_signature_present():
-    assert check_phys_002({"registrar_signature_present": True}) == []
+# Check 1: no attestation detected
+
+def test_phys_002_check1_fires_detected_no():
+    """detected='no' → MEDIUM 'No registrar attestation found'."""
+    agg = {"registrar_block": {"detected": "no", "location": "none"}}
+    flags = check_phys_002(agg)
+    assert len(flags) == 1
+    assert flags[0].rule_code == "PHYS_002"
+    assert flags[0].severity == "medium"
+    assert "attestation" in flags[0].rule_description.lower()
 
 
-# Check 3: registrar title
-
-def test_phys_002_check3_fires_no_title():
-    flags = check_phys_002({"registrar_title_present": False})
-    assert any(f.rule_code == "PHYS_002" and f.severity == "high"
-               and "title" in f.rule_description.lower() for f in flags)
-
-
-def test_phys_002_check3_no_fire_title_present():
-    assert check_phys_002({"registrar_title_present": True}) == []
-
-
-# Check 4: signature consistency
-
-def test_phys_002_check4_fires_inconsistent_signature():
-    instances = [
-        {"page": 1, "type": "handwritten", "appears_consistent": True},
-        {"page": 2, "type": "handwritten", "appears_consistent": False},
-    ]
-    flags = check_phys_002({"registrar_signature_instances": instances})
-    assert any(f.rule_code == "PHYS_002" and f.severity == "low" for f in flags)
-
-
-def test_phys_002_check4_skip_single_instance():
-    """Fallback: only one signature instance → skip Check 4."""
-    instances = [{"page": 1, "type": "handwritten", "appears_consistent": True}]
-    assert check_phys_002({"registrar_signature_instances": instances}) == []
-
-
-def test_phys_002_check4_skip_all_stamped_digital():
-    """Fallback: stamped/digital signatures are identical by design → skip Check 4."""
-    instances = [
-        {"page": 1, "type": "stamped", "appears_consistent": False},
-        {"page": 2, "type": "digital", "appears_consistent": False},
-    ]
-    assert check_phys_002({"registrar_signature_instances": instances}) == []
-
-
-def test_phys_002_check4_no_fire_when_all_consistent():
-    instances = [
-        {"page": 1, "type": "handwritten", "appears_consistent": True},
-        {"page": 2, "type": "handwritten", "appears_consistent": True},
-    ]
-    assert check_phys_002({"registrar_signature_instances": instances}) == []
-
-
-# All three primary checks fire simultaneously
-
-def test_phys_002_all_three_checks_fire():
+def test_phys_002_check1_returns_immediately():
+    """When check 1 fires, check 2 is skipped even if sub-fields would also trigger it."""
     agg = {
-        "registrar_name_present": False,
-        "registrar_signature_present": False,
-        "registrar_title_present": False,
+        "registrar_block": {
+            "detected": "no",
+            "signature_present": "no",
+            "name_text": None,
+            "title_text": None,
+        }
+    }
+    assert len(check_phys_002(agg)) == 1
+
+
+# Check 2: block present but lacks all identifiers
+
+def test_phys_002_check2_fires_block_present_but_empty():
+    """detected='yes', sig 'no', name null, title null → MEDIUM 'lacks identifying information'."""
+    agg = {
+        "registrar_block": {
+            "detected": "yes",
+            "location": "footer",
+            "signature_present": "no",
+            "name_text": None,
+            "title_text": None,
+        }
     }
     flags = check_phys_002(agg)
-    assert len(flags) == 3
-    assert all(f.rule_code == "PHYS_002" and f.severity == "high" for f in flags)
+    assert len(flags) == 1
+    assert flags[0].rule_code == "PHYS_002"
+    assert flags[0].severity == "medium"
+    assert "identifying" in flags[0].rule_description.lower()
+
+
+def test_phys_002_no_fire_sig_only():
+    """detected='yes', signature present but no name/title → no flag (sig alone sufficient)."""
+    agg = {
+        "registrar_block": {
+            "detected": "yes",
+            "signature_present": "yes",
+            "signature_type": "handwritten",
+            "name_text": None,
+            "title_text": None,
+        }
+    }
+    assert check_phys_002(agg) == []
+
+
+def test_phys_002_no_fire_name_only():
+    """detected='yes', name present but no sig/title → no flag (name alone sufficient)."""
+    agg = {
+        "registrar_block": {
+            "detected": "yes",
+            "signature_present": "no",
+            "name_text": "Jane Smith",
+            "title_text": None,
+        }
+    }
+    assert check_phys_002(agg) == []
+
+
+def test_phys_002_no_fire_title_only():
+    """detected='yes', title present but no sig/name → no flag (title alone sufficient)."""
+    agg = {
+        "registrar_block": {
+            "detected": "yes",
+            "signature_present": "no",
+            "name_text": None,
+            "title_text": "Registrar",
+        }
+    }
+    assert check_phys_002(agg) == []
 
 
 # ── PHYS_003 — Print Technology Anachronism ───────────────────────────────────

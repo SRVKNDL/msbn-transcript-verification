@@ -30,7 +30,6 @@ _OBJECT_ARRAY_FIELDS = frozenset({
     "courses",
     "semesters",
     "programs",
-    "registrar_signature_instances",
     "leave_of_absence_markers",
 })
 

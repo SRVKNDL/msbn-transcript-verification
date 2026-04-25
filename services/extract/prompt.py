@@ -85,7 +85,7 @@ Rules:
 seal_present_on_pages, print_technology_per_page, suspected_alteration_fields), \
 "value" MUST be a JSON array. \
 Use an empty array [] if nothing is found. Do not use null.
-- For object-array fields (courses, semesters, programs, registrar_signature_instances, \
+- For object-array fields (courses, semesters, programs, \
 leave_of_absence_markers), "value" MUST be a JSON array of objects. Use [] if none found.
 - For boolean fields, "value" must be true or false (JSON boolean, not a string).
 - For fields derived from the overall page with no single locatable text span \
@@ -173,31 +173,37 @@ security_features_assessable
 
 --- PHYS_002: Registrar Information ---
 
-registrar_name_present
-  Value: boolean (true if a printed registrar name appears, false if absent)
-  Description: Whether a registrar name is printed on this page.
+EXTRACTION GUIDANCE FOR REGISTRAR BLOCK:
+The registrar block is most often in the FOOTER of the last page. It may also appear
+in the header, near the institutional seal, or on a separate certification page.
+Look for:
+- Handwritten signatures (cursive scrawl, often in blue or black ink)
+- Printed or typed names below or above a signature line
+- Titles such as: "Registrar", "University Registrar", "Director of Admissions and
+  Records", "Director of Records", "Registrar of Academic Records"
+- Institution contact information (address, phone) near the signature block
+A signature without a printed name is still a signature — extract what you see.
+If you see ANY of: a name, a signature, a title, or institution contact info →
+set detected="yes" and fill in the sub-fields you can determine.
+Only set detected="no" if you have actively scanned the header, footer, and margins
+of every page and found nothing resembling an official registrar attestation.
+When uncertain, prefer detected="unclear" over detected="no".
 
-registrar_signature_present
-  Value: boolean (true if a registrar signature is present — handwritten, stamped, or digital)
-  Description: Whether a registrar signature of any type appears on this page.
-
-registrar_title_present
-  Value: boolean (true if a registrar title appears — e.g., "Registrar", "University Registrar",
-         "Director of Admissions and Records")
-  Description: Whether an official registrar title is printed on this page.
-
-institution_contact_info_present
-  Value: boolean (true if institution address OR phone number appears)
-  Description: Whether any institution contact information (street address or phone) is present.
-
-registrar_signature_instances
-  Value: JSON array of objects, each with:
-         { "page": <integer>, "type": "handwritten" | "stamped" | "digital",
-           "appears_consistent": <boolean — true if this instance looks the same as others> }
-  Description: One entry per distinct registrar signature instance found on this page.
-               "appears_consistent" should be false only when the signature looks meaningfully
-               different from other instances (suggesting different hands). Use [] if no
-               signature is present.
+registrar_block
+  Value: a JSON object with the following sub-fields:
+         {
+           "detected": "yes" | "no" | "unclear",
+           "location": "header" | "footer" | "margin" | "separate_page" | "embedded_in_seal" | "none",
+           "page_number": <integer or null — page where the registrar block appears>,
+           "name_text": <string or null — the actual printed registrar name, verbatim>,
+           "title_text": <string or null — the actual printed registrar title, verbatim>,
+           "signature_present": "yes" | "no" | "unclear",
+           "signature_type": "handwritten" | "stamped" | "digital" | "facsimile" | "none" | "unclear",
+           "contact_info_text": <string or null — institution address or phone near the block>
+         }
+  Description: Structured detection of the official registrar attestation block.
+               If detected="no", set location="none" and all text fields to null.
+               If detected="unclear", fill in sub-fields for anything partially visible.
 
 --- PHYS_003: Print Technology ---
 

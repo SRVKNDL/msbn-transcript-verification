@@ -135,7 +135,7 @@ def test_fraud_case_b_produces_multiple_flags(aws_resources, lambda_context):
 
     result = handler(event, lambda_context)
 
-    assert result["flag_count"] > 5
+    assert result["flag_count"] >= 5
     rule_codes = {f["rule_code"] for f in result["flags"]}
     # Check that representative rules across all single-document categories fired.
     # CROSS_001/002/003 are deferred to Phase 4 (transcript-only POC scope).

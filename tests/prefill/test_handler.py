@@ -1,8 +1,10 @@
 """Tests for PrefillLambda."""
 
 import importlib.util
+from io import BytesIO
 import json
 import os
+from unittest.mock import MagicMock
 
 import boto3
 import pytest
@@ -140,3 +142,27 @@ def test_prefill_rejects_uploads_prefix(lambda_context):
         lambda_context,
     )
     assert resp["statusCode"] == 400
+
+
+def test_prefill_bedrock_recovers_markdown_wrapped_json(monkeypatch):
+    raw_text = """```json
+{"applicantName":"Jane Smith","institution":"Test College","country":"Canada"}
+```"""
+    mock_client = MagicMock()
+    body = json.dumps({
+        "output": {
+            "message": {
+                "content": [{"text": raw_text}],
+            }
+        }
+    }).encode("utf-8")
+    mock_client.invoke_model.return_value = {"body": BytesIO(body)}
+    monkeypatch.setattr(_mod, "_bedrock", mock_client)
+
+    parsed = _mod._call_bedrock_for_page(b"fake-image", 1)
+
+    assert parsed == {
+        "applicantName": "Jane Smith",
+        "institution": "Test College",
+        "country": "Canada",
+    }

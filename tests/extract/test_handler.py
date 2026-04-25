@@ -6,8 +6,10 @@ Strategy
 - bedrock-runtime is NOT contacted.  ``_mod._bedrock`` is replaced with a
   ``MagicMock`` whose ``invoke_model`` side_effect returns a fresh ``BytesIO``
   wrapping the canned Nova fixture on every call.
-- ``convert_from_path`` is NOT patched for happy-path tests; the real Copiah-
-  Lincoln single-page PDF is used so image dimensions are realistic.
+- ``convert_from_path`` is patched for the default unit-test path so tests do
+  not depend on an external Poppler installation.  The fake converter returns
+  a deterministic single-page image for valid PDFs and raises for corrupt
+  inputs.
 - Multi-page behaviour is tested by patching ``convert_from_path`` to return
   two synthetic PIL images, keeping the test self-contained.
 
@@ -195,6 +197,14 @@ def _make_bedrock_mock(page_data: dict | None = None) -> MagicMock:
     return mock_client
 
 
+def _fake_convert_from_path(pdf_path: str):
+    """Return a deterministic image for valid PDFs without requiring Poppler."""
+    pdf_bytes = Path(pdf_path).read_bytes()
+    if not pdf_bytes.startswith(b"%PDF-"):
+        raise ValueError("Unable to get page count. Is poppler installed and in PATH?")
+    return [Image.new("RGB", (850, 1100), color="white")]
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 
@@ -234,6 +244,13 @@ def bedrock_mock():
     mock_client = _make_bedrock_mock()
     with patch.object(_mod, "_bedrock", mock_client):
         yield mock_client
+
+
+@pytest.fixture(autouse=True)
+def patched_pdf_conversion():
+    """Keep extract unit tests independent of the host Poppler toolchain."""
+    with patch.object(_mod, "convert_from_path", side_effect=_fake_convert_from_path):
+        yield
 
 
 # ── (a) invoke_model called once per page ─────────────────────────────────────
@@ -463,6 +480,14 @@ def test_invalid_array_enum_element_warns_not_crashes(
     assert result["applicationId"] == _APP_ID
     warning_texts = " ".join(r.message for r in caplog.records)
     assert "UNKNOWN_DOMAIN" in warning_texts
+
+
+def test_markdown_wrapped_nova_json_is_recovered():
+    raw_text = f"```json\n{json.dumps(_CANNED_NOVA_PAGE, indent=2)}\n```"
+
+    parsed = _mod._parse_nova_json_object(raw_text)
+
+    assert parsed == _CANNED_NOVA_PAGE
 
 
 # ── (e) merged extraction document has the right page_count ──────────────────

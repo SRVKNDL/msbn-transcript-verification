@@ -404,7 +404,7 @@ Rules:
     response_body = json.loads(response["body"].read())
     raw_text = response_body["output"]["message"]["content"][0]["text"]
     try:
-        parsed = json.loads(raw_text)
+        parsed = _parse_nova_json_object(raw_text)
     except json.JSONDecodeError:
         logger.warning(
             json.dumps({
@@ -418,3 +418,40 @@ Rules:
     if not isinstance(parsed, dict):
         return _empty_fields()
     return {field: _clean_field(parsed.get(field)) for field in _FIELDS}
+
+
+def _parse_nova_json_object(raw_text: str) -> dict:
+    """Recover the first JSON object from common model wrappers."""
+    decoder = json.JSONDecoder()
+    text = str(raw_text or "").lstrip("\ufeff").strip()
+    candidates: list[str] = [text]
+
+    fenced_match = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fenced_match:
+        candidates.append(fenced_match.group(1).strip())
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        for match in re.finditer(r"{", candidate):
+            try:
+                parsed, _ = decoder.raw_decode(candidate[match.start():])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                logger.warning(
+                    json.dumps({
+                        "event": "prefill_nova_json_recovered",
+                        "recovery": "embedded_object",
+                    })
+                )
+                return parsed
+
+    raise json.JSONDecodeError("No JSON object found", text, 0)

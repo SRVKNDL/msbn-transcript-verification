@@ -5,6 +5,7 @@ import datetime
 import json
 import logging
 import os
+import re
 import tempfile
 
 import boto3
@@ -153,7 +154,7 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
     raw_text = response_body["output"]["message"]["content"][0]["text"]
 
     try:
-        return json.loads(raw_text)
+        return _parse_nova_json_object(raw_text)
     except json.JSONDecodeError as exc:
         logger.error(
             json.dumps({
@@ -166,6 +167,43 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
         raise ValueError(
             f"Nova response for page {page_number} is not valid JSON"
         ) from exc
+
+
+def _parse_nova_json_object(raw_text: str) -> dict:
+    """Recover the first JSON object from common model wrappers."""
+    decoder = json.JSONDecoder()
+    text = str(raw_text or "").lstrip("\ufeff").strip()
+    candidates: list[str] = [text]
+
+    fenced_match = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fenced_match:
+        candidates.append(fenced_match.group(1).strip())
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        for match in re.finditer(r"{", candidate):
+            try:
+                parsed, _ = decoder.raw_decode(candidate[match.start():])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                logger.warning(
+                    json.dumps({
+                        "event": "nova_json_recovered",
+                        "recovery": "embedded_object",
+                    })
+                )
+                return parsed
+
+    raise json.JSONDecodeError("No JSON object found", text, 0)
 
 
 def handler(event, context):

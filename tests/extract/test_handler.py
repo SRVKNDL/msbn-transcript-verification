@@ -297,7 +297,7 @@ def test_invoke_model_body_contains_user_prompt_enums(
         # Section 1
         "embossed", "stamped_ink", "laser", "us_letter",
         # Section 2
-        "letter_grade_us", "nursing_standard", "enrollment_implausibly_early",
+        "letter_grade_us", "claimed_degree_type", "enrollment_implausibly_early",
         # Section 3
         "adult_med_surg", "obstetrics", "diploma_mill_language_detected",
     ]
@@ -522,7 +522,7 @@ def test_extraction_metadata_fields_present(
     )
 
     assert extraction["bedrock_model_id"] == _mod.BEDROCK_MODEL_ID
-    assert extraction["prompt_version"] == "1.0"
+    assert extraction["prompt_version"] == _mod.PROMPT_VERSION
     assert "extraction_ts" in extraction
     assert extraction["extraction_ts"].endswith("+00:00")
 

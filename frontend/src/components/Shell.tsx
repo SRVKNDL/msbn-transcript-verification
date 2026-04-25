@@ -14,6 +14,7 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
   const { mode, setMode } = useThemeMode();
   const [pendingCount, setPendingCount] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const user = getCurrentUser();
   const darkMode = mode === "dark";
@@ -59,7 +60,7 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
         color: t.ink,
         fontFamily: t.sans,
         display: "grid",
-        gridTemplateColumns: "220px 1fr",
+        gridTemplateColumns: sidebarOpen ? "220px 1fr" : "0 1fr",
         gridTemplateRows: "60px 1fr",
         overflow: "hidden",
       }}
@@ -77,6 +78,25 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
           borderBottom: `3px solid ${t.accent}`,
         }}
       >
+        <button
+          onClick={() => setSidebarOpen((open) => !open)}
+          title={sidebarOpen ? "Hide navigation" : "Show navigation"}
+          aria-label={sidebarOpen ? "Hide navigation" : "Show navigation"}
+          style={{
+            width: 32,
+            height: 32,
+            border: "1px solid rgba(255,255,255,0.2)",
+            background: "rgba(255,255,255,0.08)",
+            color: "inherit",
+            borderRadius: 4,
+            cursor: "pointer",
+            fontSize: 18,
+            lineHeight: 1,
+            fontFamily: t.mono,
+          }}
+        >
+          &#9776;
+        </button>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div
             style={{
@@ -277,12 +297,15 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
       {/* Sidebar */}
       <div
         style={{
+          gridColumn: 1,
+          gridRow: 2,
           background: t.surface,
-          borderRight: `1px solid ${t.line}`,
-          padding: "18px 0",
-          display: "flex",
+          borderRight: sidebarOpen ? `1px solid ${t.line}` : "none",
+          padding: sidebarOpen ? "18px 0" : 0,
+          display: sidebarOpen ? "flex" : "none",
           flexDirection: "column",
           gap: 2,
+          overflow: "hidden",
         }}
       >
         <div
@@ -363,7 +386,7 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
       </div>
 
       {/* Main content */}
-      <div style={{ overflow: "auto" }}>{children}</div>
+      <div style={{ gridColumn: 2, gridRow: 2, overflow: "auto" }}>{children}</div>
     </div>
   );
 }

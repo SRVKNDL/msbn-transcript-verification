@@ -57,7 +57,7 @@ def _put_extraction(s3_client, app_id: str, pages: list[dict]) -> str:
         "application_id": app_id,
         "document_type": "TRANSCRIPT",
         "page_count": len(pages),
-        "bedrock_model_id": "amazon.nova-lite-v1:0",
+        "bedrock_model_id": "anthropic.claude-haiku-4-5-v1:0",
         "prompt_version": "1.0",
         "extraction_ts": "2026-04-16T00:00:00Z",
         "pages": pages,

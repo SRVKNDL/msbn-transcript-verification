@@ -102,15 +102,15 @@ class TestExtractLambdaHardening:
             }),
         )
 
-    def test_default_model_is_nova_pro(self, compute_template):
+    def test_default_model_is_haiku(self, compute_template):
         compute_template.has_resource_properties(
             "AWS::Lambda::Function",
             Match.object_like({
                 "FunctionName": "msbn-extract",
                 "Environment": {
                     "Variables": Match.object_like({
-                        "BEDROCK_MODEL_ID": "amazon.nova-pro-v1:0",
-                        "BEDROCK_MAX_NEW_TOKENS": "5000",
+                        "BEDROCK_MODEL_ID": "anthropic.claude-haiku-4-5-v1:0",
+                        "BEDROCK_MAX_NEW_TOKENS": "8192",
                     })
                 },
             }),
@@ -225,19 +225,16 @@ class TestBedrockIamScope:
                 resources = [resources]
             resource_sets.append(set(resources))
 
-        expected_extract = {
-            "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0",
-            "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
+        expected_haiku = {
+            "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-v1:0",
         }
-        expected_prefill = {
-            "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0",
-        }
-        assert expected_extract in resource_sets
-        assert expected_prefill in resource_sets
+        # Both ExtractLambda and PrefillLambda are scoped to Claude Haiku 4.5.
+        for resource_set in resource_sets:
+            assert resource_set == expected_haiku
 
 
 class TestPrefillLambda:
-    def test_uses_nova_lite(self, compute_template):
+    def test_uses_haiku(self, compute_template):
         compute_template.has_resource_properties(
             "AWS::Lambda::Function",
             Match.object_like({
@@ -245,7 +242,7 @@ class TestPrefillLambda:
                 "Timeout": 25,
                 "Environment": {
                     "Variables": Match.object_like({
-                        "BEDROCK_MODEL_ID": "amazon.nova-lite-v1:0",
+                        "BEDROCK_MODEL_ID": "anthropic.claude-haiku-4-5-v1:0",
                     })
                 },
             }),

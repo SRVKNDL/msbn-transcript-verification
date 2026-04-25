@@ -2,8 +2,8 @@
 
 AI-assisted transcript review for the Mississippi State Board of Nursing proof
 of concept. The system ingests transcript PDFs, extracts structured facts with
-Amazon Bedrock Nova, evaluates deterministic fraud and eligibility rules, and
-queues the application for a human reviewer.
+Amazon Bedrock (Claude Haiku 4.5), evaluates deterministic fraud and eligibility
+rules, and queues the application for a human reviewer.
 
 This project is advisory only. The software raises review flags; it does not
 make licensing decisions.
@@ -27,8 +27,8 @@ Hub guidance:
 1. Staff upload a transcript PDF to S3 under `uploads/`.
 2. S3 invokes `IntakeLambda`, which creates the application metadata record and
    starts the Step Functions workflow.
-3. `ExtractLambda` renders PDF pages to PNG, calls Bedrock Nova per page, and
-   writes extraction JSON to S3.
+3. `ExtractLambda` renders PDF pages to PNG, calls Bedrock Claude Haiku 4.5 per
+   page, and writes extraction JSON to S3.
 4. `AggregationLambda` flattens per-page extraction into `aggregation.json`.
 5. `RuleEngineLambda` runs deterministic PHYS, CONT, and PROG rules and writes
    `FLAG` items to DynamoDB.
@@ -45,7 +45,7 @@ DynamoDB table layout.
 
 - Python 3.11
 - AWS CDK, Lambda, Step Functions, S3, DynamoDB, API Gateway, Cognito
-- Amazon Bedrock Nova Lite / Nova Pro
+- Amazon Bedrock Claude Haiku 4.5 (`anthropic.claude-haiku-4-5-v1:0`)
 - React, TypeScript, Vite
 - pytest, moto, ruff, TypeScript compiler
 

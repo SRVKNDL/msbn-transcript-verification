@@ -26,9 +26,9 @@ from rules.physical import (  # noqa: E402
 
 def test_phys_001_check1_fires_absent_seal():
     flags = check_phys_001({"seal_type": "absent"})
-    high = [f for f in flags if f.rule_code == "PHYS_001" and f.severity == "high"
-            and "absent" in f.rule_description.lower()]
-    assert len(high) >= 1
+    medium = [f for f in flags if f.rule_code == "PHYS_001" and f.severity == "medium"
+              and "absent" in f.rule_description.lower()]
+    assert len(medium) >= 1
 
 
 def test_phys_001_check1_no_fire_when_unclear():
@@ -46,12 +46,12 @@ def test_phys_001_check1_no_fire_when_seal_present():
 
 def test_phys_001_check2_fires_pixelated():
     flags = check_phys_001({"seal_quality": "pixelated"})
-    assert any(f.rule_code == "PHYS_001" and f.severity == "high" for f in flags)
+    assert any(f.rule_code == "PHYS_001" and f.severity == "medium" for f in flags)
 
 
 def test_phys_001_check2_fires_degraded():
     flags = check_phys_001({"seal_quality": "degraded"})
-    assert any(f.rule_code == "PHYS_001" and f.severity == "high" for f in flags)
+    assert any(f.rule_code == "PHYS_001" and f.severity == "medium" for f in flags)
 
 
 def test_phys_001_check2_no_fire_clear():

@@ -1,11 +1,11 @@
-"""Unit tests for ExtractLambda — Session 2: Bedrock Nova integration.
+"""Unit tests for ExtractLambda — Bedrock Claude Haiku 4.5 integration.
 
 Strategy
 --------
 - S3 is mocked via moto (mock_aws context).
 - bedrock-runtime is NOT contacted.  ``_mod._bedrock`` is replaced with a
   ``MagicMock`` whose ``invoke_model`` side_effect returns a fresh ``BytesIO``
-  wrapping the canned Nova fixture on every call.
+  wrapping the canned model fixture on every call.
 - ``convert_from_path`` is patched for the default unit-test path so tests do
   not depend on an external Poppler installation.  The fake converter returns
   a deterministic single-page image for valid PDFs and raises for corrupt
@@ -78,10 +78,10 @@ _TRANSCRIPT_PDF = (
     / "fixtures/real_transcripts/transcript-03-copiah-lincoln-cc.pdf"
 )
 
-# ── Canned Nova response ──────────────────────────────────────────────────────
-# Represents a clean Mississippi-domestic single-page transcript as Nova would
-# return it.  All enum values are from the extraction-vocabulary.md vocabulary.
-_CANNED_NOVA_PAGE: dict = {
+# ── Canned model response ─────────────────────────────────────────────────────
+# Represents a clean Mississippi-domestic single-page transcript as Claude Haiku
+# would return it.  All enum values are from the extraction-vocabulary.md vocabulary.
+_CANNED_PAGE: dict = {
     # Section 1 — Physical fields
     "seal_type": {
         "value": "embossed",
@@ -172,22 +172,17 @@ _CANNED_NOVA_PAGE: dict = {
 }
 
 
-def _nova_response_body(page_data: dict | None = None) -> bytes:
-    """Return a serialised Bedrock Nova invoke_model response body."""
-    return _nova_response_body_from_text(json.dumps(page_data or _CANNED_NOVA_PAGE))
+def _model_response_body(page_data: dict | None = None) -> bytes:
+    """Return a serialised Bedrock Claude invoke_model response body."""
+    return _model_response_body_from_text(json.dumps(page_data or _CANNED_PAGE))
 
 
-def _nova_response_body_from_text(text: str, stop_reason: str = "end_turn") -> bytes:
-    """Return a serialised Bedrock Nova response body with custom text."""
+def _model_response_body_from_text(text: str, stop_reason: str = "end_turn") -> bytes:
+    """Return a serialised Bedrock Claude response body with custom text."""
     return json.dumps({
-        "output": {
-            "message": {
-                "role": "assistant",
-                "content": [{"text": text}],
-            }
-        },
-        "stopReason": stop_reason,
-        "usage": {"inputTokens": 1234, "outputTokens": 567},
+        "content": [{"text": text}],
+        "stop_reason": stop_reason,
+        "usage": {"input_tokens": 1234, "output_tokens": 567},
     }).encode("utf-8")
 
 
@@ -195,7 +190,7 @@ def _make_bedrock_mock(page_data: dict | None = None) -> MagicMock:
     """Return a MagicMock bedrock client whose invoke_model returns fresh BytesIO
     on every call (a consumed BytesIO would give empty reads on call 2+)."""
     mock_client = MagicMock()
-    body_bytes = _nova_response_body(page_data)
+    body_bytes = _model_response_body(page_data)
     mock_client.invoke_model.side_effect = (
         lambda **kwargs: {"body": BytesIO(body_bytes)}
     )
@@ -213,7 +208,7 @@ def _fake_convert_from_path(pdf_path: str):
 def _make_bedrock_text_mock(text: str, stop_reason: str = "end_turn") -> MagicMock:
     """Return a MagicMock bedrock client whose text is controlled by the test."""
     mock_client = MagicMock()
-    body_bytes = _nova_response_body_from_text(text, stop_reason=stop_reason)
+    body_bytes = _model_response_body_from_text(text, stop_reason=stop_reason)
     mock_client.invoke_model.side_effect = (
         lambda **kwargs: {"body": BytesIO(body_bytes)}
     )
@@ -255,7 +250,7 @@ def extract_event():
 
 @pytest.fixture()
 def bedrock_mock():
-    """Replace _mod._bedrock with a mock that returns the canned Nova fixture."""
+    """Replace _mod._bedrock with a mock that returns the canned model fixture."""
     mock_client = _make_bedrock_mock()
     with patch.object(_mod, "_bedrock", mock_client):
         yield mock_client
@@ -307,7 +302,9 @@ def test_invoke_model_body_contains_system_prompt_enums(
     call_kwargs = bedrock_mock.invoke_model.call_args
     body = json.loads(call_kwargs.kwargs["body"])
 
-    system_text = body["system"][0]["text"]
+    # Claude format: system is a plain string, not an array.
+    system_text = body["system"]
+    assert isinstance(system_text, str)
     # A sample of enum values that must appear in the system prompt.
     for token in ("high", "medium", "low", "source_location", "text_spans"):
         assert token in system_text, (
@@ -323,6 +320,7 @@ def test_invoke_model_body_contains_user_prompt_enums(
 
     call_kwargs = bedrock_mock.invoke_model.call_args
     body = json.loads(call_kwargs.kwargs["body"])
+    # Claude format: content[1] is {"type": "text", "text": ...}
     user_text = body["messages"][0]["content"][1]["text"]
 
     expected_tokens = [
@@ -342,20 +340,20 @@ def test_invoke_model_body_contains_user_prompt_enums(
 def test_invoke_model_uses_configured_output_cap(
     s3_with_transcript, bedrock_mock, extract_event, lambda_context
 ):
-    """Extractor should request the Nova Pro 5K output budget."""
+    """Extractor should request the configured max_tokens budget."""
     handler(extract_event, lambda_context)
 
     call_kwargs = bedrock_mock.invoke_model.call_args
     body = json.loads(call_kwargs.kwargs["body"])
 
-    assert body["inferenceConfig"]["max_new_tokens"] == _mod.BEDROCK_MAX_NEW_TOKENS
+    assert body["max_tokens"] == _mod.BEDROCK_MAX_NEW_TOKENS
 
 
-def test_nova_json_parser_accepts_markdown_fence(
+def test_model_json_parser_accepts_markdown_fence(
     s3_with_transcript, extract_event, lambda_context
 ):
-    """Nova sometimes wraps valid JSON in markdown despite the prompt."""
-    text = "```json\n" + json.dumps(_CANNED_NOVA_PAGE) + "\n```"
+    """Model may occasionally wrap valid JSON in markdown despite the prompt."""
+    text = "```json\n" + json.dumps(_CANNED_PAGE) + "\n```"
     mock_client = _make_bedrock_text_mock(text)
 
     with patch.object(_mod, "_bedrock", mock_client):
@@ -364,11 +362,11 @@ def test_nova_json_parser_accepts_markdown_fence(
     assert result["applicationId"] == _APP_ID
 
 
-def test_nova_json_parser_accepts_preamble(
+def test_model_json_parser_accepts_preamble(
     s3_with_transcript, extract_event, lambda_context
 ):
-    """Nova sometimes prefixes valid JSON with a short acknowledgement."""
-    text = "Here is the JSON:\n" + json.dumps(_CANNED_NOVA_PAGE)
+    """Model may occasionally prefix valid JSON with a short acknowledgement."""
+    text = "Here is the JSON:\n" + json.dumps(_CANNED_PAGE)
     mock_client = _make_bedrock_text_mock(text)
 
     with patch.object(_mod, "_bedrock", mock_client):
@@ -485,8 +483,8 @@ def test_accreditation_claim_location_mirrored_as_source(
 def test_invalid_enum_value_warns_not_crashes(
     s3_with_transcript, extract_event, lambda_context, caplog
 ):
-    """An unexpected enum value from Nova must log a WARNING and not raise."""
-    bad_page = dict(_CANNED_NOVA_PAGE)
+    """An unexpected enum value from the model must log a WARNING and not raise."""
+    bad_page = dict(_CANNED_PAGE)
     bad_page["seal_type"] = {"value": "NOT_A_REAL_ENUM", "confidence": "high"}
 
     mock_client = _make_bedrock_mock(page_data=bad_page)
@@ -505,7 +503,7 @@ def test_invalid_array_enum_element_warns_not_crashes(
     s3_with_transcript, extract_event, lambda_context, caplog
 ):
     """An unexpected element in an array field must log a WARNING and not raise."""
-    bad_page = dict(_CANNED_NOVA_PAGE)
+    bad_page = dict(_CANNED_PAGE)
     bad_page["security_features_present"] = {
         "value": ["watermark", "UNKNOWN_SECURITY_FEATURE"],
         "confidence": "medium",
@@ -521,12 +519,12 @@ def test_invalid_array_enum_element_warns_not_crashes(
     assert "UNKNOWN_SECURITY_FEATURE" in warning_texts
 
 
-def test_markdown_wrapped_nova_json_is_recovered():
-    raw_text = f"```json\n{json.dumps(_CANNED_NOVA_PAGE, indent=2)}\n```"
+def test_markdown_wrapped_model_json_is_recovered():
+    raw_text = f"```json\n{json.dumps(_CANNED_PAGE, indent=2)}\n```"
 
-    parsed = _mod._parse_nova_json_object(raw_text)
+    parsed = _mod._parse_model_json_object(raw_text)
 
-    assert parsed == _CANNED_NOVA_PAGE
+    assert parsed == _CANNED_PAGE
 
 
 # ── (e) merged extraction document has the right page_count ──────────────────
@@ -621,7 +619,7 @@ def test_source_location_page_number_multi_page(
         Image.new("RGB", (850, 1100), color="white"),
         Image.new("RGB", (850, 1100), color="white"),
     ]
-    # Nova might return page_number=1 in the raw JSON for both pages; the handler
+    # The model might return page_number=1 in the raw JSON for both pages; the handler
     # must overwrite it with the actual index (1-based).
     mock_client = _make_bedrock_mock()
     with patch.object(_mod, "_bedrock", mock_client), \

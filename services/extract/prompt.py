@@ -1,8 +1,8 @@
 """Prompt text and enum vocabulary for transcript extraction."""
 
-PROMPT_VERSION = "2.0"
+PROMPT_VERSION = "3.0"
 
-# Enum values the handler accepts from Nova.
+# Enum values the handler accepts from the extraction model.
 # Only scalar enum fields appear here; boolean, free-text, array-of-objects,
 # and numeric fields are validated structurally by the model, not via this dict.
 
@@ -75,13 +75,8 @@ and list the affected areas in suspected_alteration_fields. Do NOT treat orphan 
 text fragments (numbers, names, or dates floating outside a table row) as \
 course data, credit hours, or grades.
 
-CRITICAL OUTPUT RULES:
-- Return valid JSON only.
-- No markdown fences.
-- No preamble.
-- No explanation.
-- The entire response must be a single JSON object starting with "{" and ending \
-with "}".
+OUTPUT FORMAT:
+Return a single valid JSON object. No markdown fences, preamble, or explanation.
 
 FIELD FORMAT:
 Return every requested field in this structure:
@@ -111,6 +106,8 @@ determine a value from this page, use "unclear". Do not invent values outside th
 allowed set.
 - confidence reflects your certainty: "high" when the text is unambiguous, \
 "medium" when inferred, "low" when the page quality or content is poor.
+
+Your response must begin with "{".
 """
 
 # User prompt: extraction fields and allowed values.
@@ -120,7 +117,6 @@ Extract all fields below from the attached transcript page image.
 Return a single JSON object with exactly the keys listed. Use only the allowed \
 enum values. If a value cannot be determined from this page, use "unclear" for \
 enum fields, null for free-text/date/number fields, and [] for array fields.
-Return valid JSON only — no markdown fences, no preamble, no explanation.
 
 === SECTION 0: Transcript Identity Fields ===
 

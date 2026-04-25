@@ -12,7 +12,7 @@ What's mocked / what's real:
 - Step Functions: moto (Intake uses it only for ``start_execution``; we do not
   run the actual state machine).
 - Bedrock: unittest.mock — ``extract_handler._bedrock`` is replaced with a
-  MagicMock returning a canned Nova response so Extract writes a realistic
+  MagicMock returning a canned Claude response so Extract writes a realistic
   per-page JSON to S3.
 - ``convert_from_path`` is patched to return synthetic images so the test
   does not depend on poppler or any fixture PDF.
@@ -79,11 +79,11 @@ rule_engine_mod = _load(
 notify_mod = _load("notify_handler_int", "services/notify/handler.py")
 
 
-# ── Canned Nova response (one clean page) ─────────────────────────────────────
+# ── Canned model response (one clean page) ────────────────────────────────────
 # Every field in the vocabulary at "high" confidence so the rule engine has
 # zero flags on the happy-path test and we can assert end-to-end success.
 
-_CANNED_NOVA_PAGE: dict = {
+_CANNED_PAGE: dict = {
     "seal_type": {
         "value": "embossed",
         "confidence": "high",
@@ -131,13 +131,9 @@ _CANNED_NOVA_PAGE: dict = {
 def _bedrock_mock() -> MagicMock:
     mock = MagicMock()
     body = json.dumps({
-        "output": {
-            "message": {
-                "role": "assistant",
-                "content": [{"text": json.dumps(_CANNED_NOVA_PAGE)}],
-            }
-        },
-        "stopReason": "end_turn",
+        "content": [{"text": json.dumps(_CANNED_PAGE)}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 1234, "output_tokens": 567},
     }).encode("utf-8")
     mock.invoke_model.side_effect = lambda **kw: {"body": BytesIO(body)}
     return mock

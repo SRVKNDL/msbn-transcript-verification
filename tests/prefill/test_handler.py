@@ -1,10 +1,8 @@
 """Tests for PrefillLambda."""
 
 import importlib.util
-from io import BytesIO
 import json
 import os
-from unittest.mock import MagicMock
 
 import boto3
 import pytest
@@ -101,9 +99,31 @@ def test_text_extraction_finds_identity_fields():
     }
 
 
-def test_prefill_uses_embedded_text_before_bedrock(
-    s3_client, monkeypatch, lambda_context
-):
+def test_text_extraction_ignores_signer_name_and_prefers_header_institution():
+    fields = _mod._extract_fields_from_text_pages(
+        [
+            """
+            Official Transcript
+            Name:
+            Student ID: 123456
+            University Name: University of Southern Mississippi
+            Transfer credits from University of Houston
+            Country: USA
+
+            Gregory W. Pierce
+            University Registrar
+            """
+        ]
+    )
+
+    assert fields == {
+        "applicantName": "",
+        "institution": "University of Southern Mississippi",
+        "country": "USA",
+    }
+
+
+def test_prefill_uses_embedded_text_only(s3_client, monkeypatch, lambda_context):
     s3_client.put_object(
         Bucket=_BUCKET_NAME,
         Key="preview/test/transcript.pdf",
@@ -117,11 +137,6 @@ def test_prefill_uses_embedded_text_before_bedrock(
             "Student Name: Jane Smith\nInstitution: Test College\nCountry: Canada"
         ],
     )
-
-    def fail_bedrock(*_args, **_kwargs):
-        raise AssertionError("Bedrock should not run when embedded text has all fields")
-
-    monkeypatch.setattr(_mod, "_call_bedrock_for_page", fail_bedrock)
 
     resp = handler(
         _make_event("POST /prefill", body={"s3Key": "preview/test/transcript.pdf"}),
@@ -142,27 +157,3 @@ def test_prefill_rejects_uploads_prefix(lambda_context):
         lambda_context,
     )
     assert resp["statusCode"] == 400
-
-
-def test_prefill_bedrock_recovers_markdown_wrapped_json(monkeypatch):
-    raw_text = """```json
-{"applicantName":"Jane Smith","institution":"Test College","country":"Canada"}
-```"""
-    mock_client = MagicMock()
-    body = json.dumps({
-        "output": {
-            "message": {
-                "content": [{"text": raw_text}],
-            }
-        }
-    }).encode("utf-8")
-    mock_client.invoke_model.return_value = {"body": BytesIO(body)}
-    monkeypatch.setattr(_mod, "_bedrock", mock_client)
-
-    parsed = _mod._call_bedrock_for_page(b"fake-image", 1)
-
-    assert parsed == {
-        "applicantName": "Jane Smith",
-        "institution": "Test College",
-        "country": "Canada",
-    }

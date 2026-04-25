@@ -1,12 +1,11 @@
 """Fast transcript identity prefill API.
 
 This Lambda is intentionally separate from the authoritative extraction
-workflow. It reads temporary preview PDFs from preview/*, tries embedded text
-first, and only falls back to Nova Lite for the first one or two pages.
+workflow. It reads temporary preview PDFs from preview/* and uses only
+conservative embedded-text heuristics so it does not invent applicant data.
 """
 
 import base64
-import io
 import json
 import logging
 import os
@@ -15,17 +14,13 @@ import tempfile
 import uuid
 
 import boto3
-from pdf2image import convert_from_path
-from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 _s3 = boto3.client("s3", region_name="us-east-1")
-_bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
 
 _BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
-_BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
 _CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "*")
 _MAX_BYTES = 25 * 1024 * 1024
 
@@ -36,13 +31,12 @@ _FIELD_LABELS = {
         "applicant name",
         "candidate name",
         "name of student",
-        "name",
     ),
     "institution": (
         "institution",
-        "school",
-        "college",
-        "university",
+        "university name",
+        "school name",
+        "college name",
         "issuing institution",
     ),
     "country": ("country", "country of issue", "country of study"),
@@ -65,6 +59,7 @@ _COUNTRIES = {
     "South Africa",
     "United Kingdom",
     "United States",
+    "USA",
 }
 
 _CORS_HEADERS = {
@@ -254,36 +249,13 @@ def _extract_prefill(event: dict) -> dict:
 
 def _extract_fields_from_pdf(local_pdf: str) -> dict:
     fields = _extract_fields_from_text_pages(_extract_embedded_text_by_page(local_pdf))
-    if not _missing_fields(fields):
-        return fields
-
-    for page_number in (1, 2):
-        try:
-            image_bytes = _render_pdf_page(local_pdf, page_number)
-        except IndexError:
-            break
-        except Exception as exc:
-            logger.warning(
-                json.dumps({
-                    "event": "preview_render_failed",
-                    "page_number": page_number,
-                    "error": str(exc),
-                })
-            )
-            break
-
-        nova_fields = _call_bedrock_for_page(image_bytes, page_number)
-        for field, value in nova_fields.items():
-            if not fields.get(field):
-                fields[field] = _clean_field(value)
-        if not _missing_fields(fields):
-            break
-
     return {field: _clean_field(fields.get(field)) for field in _FIELDS}
 
 
 def _extract_embedded_text_by_page(local_pdf: str) -> list[str]:
     try:
+        from pypdf import PdfReader
+
         reader = PdfReader(local_pdf)
     except Exception as exc:
         logger.info(json.dumps({"event": "embedded_text_open_failed", "error": str(exc)}))
@@ -302,35 +274,46 @@ def _extract_embedded_text_by_page(local_pdf: str) -> list[str]:
 
 
 def _extract_fields_from_text_pages(pages: list[str]) -> dict:
+    first_page_lines = _nonempty_lines(pages[0]) if pages else []
     text = "\n".join(page for page in pages if page)
     fields = _empty_fields()
     if not text.strip():
         return fields
 
-    for field, labels in _FIELD_LABELS.items():
-        fields[field] = _extract_after_label(text, labels)
-
+    fields["applicantName"] = _extract_after_label_from_lines(
+        first_page_lines,
+        _FIELD_LABELS["applicantName"],
+    )
+    fields["institution"] = _extract_after_label_from_lines(
+        first_page_lines,
+        _FIELD_LABELS["institution"],
+    )
     if not fields["institution"]:
-        fields["institution"] = _extract_institution_from_lines(text)
-    if not fields["country"]:
-        fields["country"] = _extract_country(text)
+        fields["institution"] = _extract_institution_from_lines(first_page_lines)
+    fields["country"] = _extract_country(text)
 
     return fields
 
 
-def _extract_after_label(text: str, labels: tuple[str, ...]) -> str:
+def _nonempty_lines(text: str) -> list[str]:
+    return [_clean_field(line) for line in str(text or "").splitlines() if _clean_field(line)]
+
+
+def _extract_after_label_from_lines(lines: list[str], labels: tuple[str, ...]) -> str:
     for label in labels:
-        pattern = rf"\b{re.escape(label)}\b\s*[:\-]?\s*([^\n\r]{{2,120}})"
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        value = _clean_field(match.group(1) if match else "")
-        if value:
-            return value
+        for line in lines[:20]:
+            pattern = rf"\b{re.escape(label)}\b\s*[:\-]?\s*([^\n\r]{{0,120}})"
+            match = re.search(pattern, line, flags=re.IGNORECASE)
+            value = _clean_field(match.group(1) if match else "")
+            if value:
+                return value
     return ""
 
 
-def _extract_institution_from_lines(text: str) -> str:
-    for raw_line in text.splitlines()[:20]:
-        line = _clean_field(raw_line)
+def _extract_institution_from_lines(lines: list[str]) -> str:
+    for line in lines[:18]:
+        if re.search(r"\b(registrar|president|dean|signature|signed)\b", line, re.I):
+            continue
         if re.search(r"\b(university|college|school|institute|academy)\b", line, re.I):
             return line
     return ""
@@ -341,117 +324,3 @@ def _extract_country(text: str) -> str:
         if re.search(rf"\b{re.escape(country)}\b", text, flags=re.IGNORECASE):
             return country
     return ""
-
-
-def _render_pdf_page(local_pdf: str, page_number: int) -> bytes:
-    images = convert_from_path(
-        local_pdf,
-        first_page=page_number,
-        last_page=page_number,
-        dpi=150,
-        fmt="png",
-        single_file=True,
-    )
-    if not images:
-        raise IndexError(f"PDF has no page {page_number}")
-    buffer = io.BytesIO()
-    images[0].save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
-def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
-    prompt = """Extract only these transcript identity fields from this page image:
-applicantName, institution, country.
-
-Rules:
-- Use explicit visible text only.
-- Do not infer country from an institution name alone.
-- If a field is absent, use an empty string.
-- Return valid JSON only with exactly these keys:
-  {"applicantName": "", "institution": "", "country": ""}
-"""
-    body = json.dumps({
-        "schemaVersion": "messages-v1",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "image": {
-                            "format": "png",
-                            "source": {
-                                "bytes": base64.b64encode(image_bytes).decode("utf-8")
-                            },
-                        }
-                    },
-                    {"text": prompt},
-                ],
-            }
-        ],
-        "inferenceConfig": {
-            "max_new_tokens": 300,
-            "temperature": 0.0,
-            "topP": 1.0,
-        },
-    })
-
-    response = _bedrock.invoke_model(
-        modelId=_BEDROCK_MODEL_ID,
-        contentType="application/json",
-        accept="application/json",
-        body=body,
-    )
-    response_body = json.loads(response["body"].read())
-    raw_text = response_body["output"]["message"]["content"][0]["text"]
-    try:
-        parsed = _parse_nova_json_object(raw_text)
-    except json.JSONDecodeError:
-        logger.warning(
-            json.dumps({
-                "event": "prefill_nova_json_parse_error",
-                "page_number": page_number,
-                "raw_text_preview": raw_text[:300],
-            })
-        )
-        return _empty_fields()
-
-    if not isinstance(parsed, dict):
-        return _empty_fields()
-    return {field: _clean_field(parsed.get(field)) for field in _FIELDS}
-
-
-def _parse_nova_json_object(raw_text: str) -> dict:
-    """Recover the first JSON object from common model wrappers."""
-    decoder = json.JSONDecoder()
-    text = str(raw_text or "").lstrip("\ufeff").strip()
-    candidates: list[str] = [text]
-
-    fenced_match = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
-    if fenced_match:
-        candidates.append(fenced_match.group(1).strip())
-
-    for candidate in candidates:
-        if not candidate:
-            continue
-        try:
-            parsed = json.loads(candidate)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-        for match in re.finditer(r"{", candidate):
-            try:
-                parsed, _ = decoder.raw_decode(candidate[match.start():])
-            except json.JSONDecodeError:
-                continue
-            if isinstance(parsed, dict):
-                logger.warning(
-                    json.dumps({
-                        "event": "prefill_nova_json_recovered",
-                        "recovery": "embedded_object",
-                    })
-                )
-                return parsed
-
-    raise json.JSONDecodeError("No JSON object found", text, 0)

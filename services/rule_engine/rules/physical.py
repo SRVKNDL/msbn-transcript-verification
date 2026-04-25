@@ -173,21 +173,7 @@ def check_phys_002(agg: dict) -> list:
             source_location=_src(agg, "registrar_title_present"),
         ))
 
-    # Check 4 — institution contact info present (HIGH)
-    if agg.get("institution_contact_info_present") is False:
-        flags.append(Flag(
-            rule_code="PHYS_002",
-            rule_description="Institution contact information absent",
-            severity="high",
-            category="SP-4",
-            rationale=(
-                "Neither institution address nor phone number was found on the transcript. "
-                "Absence of verifiable contact information is a fabrication indicator."
-            ),
-            source_location=_src(agg, "institution_contact_info_present"),
-        ))
-
-    # Check 5 — signature consistency across pages (LOW)
+    # Check 4 — signature consistency across pages (LOW)
     # Skip if only one instance or all instances are stamped/digital (identical by design)
     instances = agg.get("registrar_signature_instances") or []
     if len(instances) > 1:

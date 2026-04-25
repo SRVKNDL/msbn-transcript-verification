@@ -201,7 +201,7 @@ def _merge_object_array_field(field: str, pages: list[dict], out: dict) -> None:
 
 def _apply_field_aliases(out: dict) -> None:
     """Map extraction field names to the names downstream rules expect."""
-    # courses: normalize course_code → code for PROG_004–007
+    # courses: normalize course_code → code for PROG_001–004
     courses = out.get("courses")
     if isinstance(courses, list):
         for course in courses:
@@ -211,6 +211,6 @@ def _apply_field_aliases(out: dict) -> None:
             if "code" not in course and "course_code" in course:
                 course["code"] = course["course_code"]
 
-    # total_credit_hours_stated → total_credit_hours for PROG_006
+    # total_credit_hours_stated → total_credit_hours for PROG_003
     if "total_credit_hours" not in out and "total_credit_hours_stated" in out:
         out["total_credit_hours"] = out["total_credit_hours_stated"]

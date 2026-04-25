@@ -331,7 +331,7 @@ def test_invoke_model_body_contains_user_prompt_enums(
         # Section 2
         "letter_grade_us", "claimed_degree_type", "enrollment_implausibly_early",
         # Section 3
-        "adult_med_surg", "obstetrics", "diploma_mill_language_detected",
+        "ms_practical_nursing", "program_type",
     ]
     for token in expected_tokens:
         assert token in user_text, (
@@ -376,20 +376,6 @@ def test_nova_json_parser_accepts_preamble(
 
     assert result["applicationId"] == _APP_ID
 
-
-def test_invoke_model_body_treats_grad_date_as_completion_indicator(
-    s3_with_transcript, bedrock_mock, extract_event, lambda_context
-):
-    """Prompt should explicitly count Grad Date / Degrees Earned as graduation evidence."""
-    handler(extract_event, lambda_context)
-
-    call_kwargs = bedrock_mock.invoke_model.call_args
-    body = json.loads(call_kwargs.kwargs["body"])
-    user_text = body["messages"][0]["content"][1]["text"]
-
-    assert "Grad Date" in user_text
-    assert "Degrees Earned" in user_text
-    assert 'If any such indicator appears, return "yes".' in user_text
 
 
 def test_invoke_model_body_guides_conservative_watermark_detection(
@@ -520,8 +506,8 @@ def test_invalid_array_enum_element_warns_not_crashes(
 ):
     """An unexpected element in an array field must log a WARNING and not raise."""
     bad_page = dict(_CANNED_NOVA_PAGE)
-    bad_page["required_nursing_domains_present"] = {
-        "value": ["adult_med_surg", "UNKNOWN_DOMAIN"],
+    bad_page["security_features_present"] = {
+        "value": ["watermark", "UNKNOWN_SECURITY_FEATURE"],
         "confidence": "medium",
     }
 
@@ -532,7 +518,7 @@ def test_invalid_array_enum_element_warns_not_crashes(
 
     assert result["applicationId"] == _APP_ID
     warning_texts = " ".join(r.message for r in caplog.records)
-    assert "UNKNOWN_DOMAIN" in warning_texts
+    assert "UNKNOWN_SECURITY_FEATURE" in warning_texts
 
 
 def test_markdown_wrapped_nova_json_is_recovered():

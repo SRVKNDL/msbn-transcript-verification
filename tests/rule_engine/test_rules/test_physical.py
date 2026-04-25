@@ -204,21 +204,9 @@ def test_phys_002_check3_no_fire_title_present():
     assert check_phys_002({"registrar_title_present": True}) == []
 
 
-# Check 4: institution contact info
+# Check 4: signature consistency
 
-def test_phys_002_check4_fires_no_contact_info():
-    flags = check_phys_002({"institution_contact_info_present": False})
-    assert any(f.rule_code == "PHYS_002" and f.severity == "high"
-               and "contact" in f.rule_description.lower() for f in flags)
-
-
-def test_phys_002_check4_no_fire_contact_present():
-    assert check_phys_002({"institution_contact_info_present": True}) == []
-
-
-# Check 5: signature consistency
-
-def test_phys_002_check5_fires_inconsistent_signature():
+def test_phys_002_check4_fires_inconsistent_signature():
     instances = [
         {"page": 1, "type": "handwritten", "appears_consistent": True},
         {"page": 2, "type": "handwritten", "appears_consistent": False},
@@ -227,14 +215,14 @@ def test_phys_002_check5_fires_inconsistent_signature():
     assert any(f.rule_code == "PHYS_002" and f.severity == "low" for f in flags)
 
 
-def test_phys_002_check5_skip_single_instance():
-    """Fallback: only one signature instance → skip Check 5."""
+def test_phys_002_check4_skip_single_instance():
+    """Fallback: only one signature instance → skip Check 4."""
     instances = [{"page": 1, "type": "handwritten", "appears_consistent": True}]
     assert check_phys_002({"registrar_signature_instances": instances}) == []
 
 
-def test_phys_002_check5_skip_all_stamped_digital():
-    """Fallback: stamped/digital signatures are identical by design → skip Check 5."""
+def test_phys_002_check4_skip_all_stamped_digital():
+    """Fallback: stamped/digital signatures are identical by design → skip Check 4."""
     instances = [
         {"page": 1, "type": "stamped", "appears_consistent": False},
         {"page": 2, "type": "digital", "appears_consistent": False},
@@ -242,7 +230,7 @@ def test_phys_002_check5_skip_all_stamped_digital():
     assert check_phys_002({"registrar_signature_instances": instances}) == []
 
 
-def test_phys_002_check5_no_fire_when_all_consistent():
+def test_phys_002_check4_no_fire_when_all_consistent():
     instances = [
         {"page": 1, "type": "handwritten", "appears_consistent": True},
         {"page": 2, "type": "handwritten", "appears_consistent": True},
@@ -250,17 +238,16 @@ def test_phys_002_check5_no_fire_when_all_consistent():
     assert check_phys_002({"registrar_signature_instances": instances}) == []
 
 
-# All four primary checks fire simultaneously
+# All three primary checks fire simultaneously
 
-def test_phys_002_all_four_checks_fire():
+def test_phys_002_all_three_checks_fire():
     agg = {
         "registrar_name_present": False,
         "registrar_signature_present": False,
         "registrar_title_present": False,
-        "institution_contact_info_present": False,
     }
     flags = check_phys_002(agg)
-    assert len(flags) == 4
+    assert len(flags) == 3
     assert all(f.rule_code == "PHYS_002" and f.severity == "high" for f in flags)
 
 

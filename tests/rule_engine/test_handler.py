@@ -142,9 +142,6 @@ def test_fraud_case_b_produces_multiple_flags(aws_resources, lambda_context):
     assert "PHYS_001" in rule_codes
     assert "PHYS_002" in rule_codes
     assert "CONT_003" in rule_codes
-    assert "PROG_001" in rule_codes
-    assert "PROG_002" in rule_codes
-    assert "PROG_003" in rule_codes
 
 
 # ── DynamoDB persistence ───────────────────────────────────────────────────────

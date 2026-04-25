@@ -26,26 +26,17 @@ VOCABULARY: dict[str, set] = {
     },
     "security_features_assessable": {"yes", "no"},
     "printer_quality_consistency": {"consistent", "inconsistent", "unclear"},
-    # Academic content fields — kept for PROG_002 corroboration signal and
-    # aggregate handler _ARRAY_FIELDS (suspicious_course_names) and
-    # PROG_002 (program_duration_consistency, dates_chronology_ok).
+    # Academic content fields.
     "grading_scale_format": {
         "letter_grade_us", "percentage", "20_point_french",
         "5_point_russian", "pass_fail", "mixed", "unclear",
     },
     "language_of_issue": {"english", "french", "spanish", "other", "unclear"},
-    # suspicious_course_names is still merged by services/aggregate/handler.py
-    # _ARRAY_FIELDS — do NOT remove until that handler is updated.
     "suspicious_course_names": set(),   # free-text strings; no controlled vocab
     "dates_chronology_ok": {"yes", "no", "unclear"},
     "dates_chronology_issue": {
         "none", "overlap", "gap",
         "enrollment_implausibly_early", "enrollment_implausibly_late", "other",
-    },
-    # program_duration_consistency is still consumed by check_prog_002 in program.py
-    # — do NOT remove until that rule is updated.
-    "program_duration_consistency": {
-        "consistent_with_degree", "unusually_short", "unusually_long", "unclear",
     },
     # New content control vocab for CONT_003.
     "claimed_degree_type": {
@@ -53,15 +44,9 @@ VOCABULARY: dict[str, set] = {
         "MSN", "DNP", "CRNA", "unclear",
     },
     # Program and institution fields.
-    "diploma_mill_language_detected": {"yes", "no", "possible"},
     "institution_address_present": {"yes", "no", "unclear"},
     "institution_phone_present": {"yes", "no", "unclear"},
     "institution_website_present": {"yes", "no", "unclear"},
-    "graduation_confirmation_present": {"yes", "no", "unclear"},
-    "required_nursing_domains_present": {
-        "adult_med_surg", "obstetrics", "pediatrics",
-        "psychiatric", "gerontology", "community_health",
-    },
     # MS-specific program classification.
     "program_type": {"ms_practical_nursing", "other", "unclear"},
     # Confidence appears beside every extracted field.
@@ -97,8 +82,8 @@ Return every requested field in this structure:
 
 Rules:
 - For array-valued fields (security_features_present, suspicious_course_names, \
-diploma_mill_phrases_found, required_nursing_domains_present, seal_present_on_pages, \
-print_technology_per_page, suspected_alteration_fields), "value" MUST be a JSON array. \
+seal_present_on_pages, print_technology_per_page, suspected_alteration_fields), \
+"value" MUST be a JSON array. \
 Use an empty array [] if nothing is found. Do not use null.
 - For object-array fields (courses, semesters, programs, registrar_signature_instances, \
 leave_of_absence_markers), "value" MUST be a JSON array of objects. Use [] if none found.
@@ -106,13 +91,6 @@ leave_of_absence_markers), "value" MUST be a JSON array of objects. Use [] if no
 - For fields derived from the overall page with no single locatable text span \
 (e.g., text_alignment, document_provenance_appearance, print_technology), \
 "source_location" may be omitted.
-- For "accreditation_claim_location", the value is an object, not a string. \
-Return it as:
-    "accreditation_claim_location": {
-      "value": {"page_number": 1, "text_spans": ["..."]},
-      "confidence": "high"
-    }
-  If accreditation_claim is null/absent, set accreditation_claim_location value to null.
 - Use ONLY the allowed enum values listed in the extraction request. If you cannot \
 determine a value from this page, use "unclear". Do not invent values outside the \
 allowed set.
@@ -400,26 +378,6 @@ language_of_issue
   Allowed: english | french | spanish | other | unclear
   Description: The primary language the document is written in.
 
-accreditation_claim
-  Value: free text string extracted verbatim, or null if absent
-  Description: The claimed accrediting body as printed (e.g., "ACEN", "CCNE", "BOUA").
-               The downstream rule engine compares this against an approved accreditor list.
-
-accreditation_claim_location
-  Value: object {"page_number": 1, "text_spans": ["..."]} or null if absent
-  Description: Where on the page the accreditation claim appears. Null if accreditation_claim is null.
-               Return as: {"value": {"page_number": 1, "text_spans": ["..."]}, "confidence": "high"}
-
-diploma_mill_language_detected
-  Allowed: yes | no | possible
-  Description: Whether marketing language indicative of degree mills is present
-               (e.g., "life experience credit", "no need to take exams", "all credits accepted").
-
-diploma_mill_phrases_found
-  Value: JSON array of strings (verbatim phrases)
-  Description: Specific phrases found if diploma_mill_language_detected is "yes" or "possible".
-               Use [] otherwise.
-
 institution_address_present
   Allowed: yes | no | unclear
   Description: Whether a physical street address is listed for the institution.
@@ -432,29 +390,11 @@ institution_website_present
   Allowed: yes | no | unclear
   Description: Whether a website URL is listed for the institution.
 
-graduation_confirmation_present
-  Allowed: yes | no | unclear
-  Description: Whether this page contains a completion indicator such as a graduation date,
-               "Grad Date", "Graduation Date", "Degrees Earned", degree/certificate awarded,
-               diploma/certificate title, graduation term, or an explicit degree conferral
-               statement. If any such indicator appears, return "yes".
-
-required_nursing_domains_present
-  Value: JSON array containing zero or more of:
-         adult_med_surg, obstetrics, pediatrics, psychiatric, gerontology, community_health
-  Description: The fundamental nursing domains visible in courses on this page.
-               Include a domain only if courses on this page clearly belong to it.
-               Use [] if no domains can be identified on this page.
-
 suspicious_course_names
   Value: JSON array of strings (verbatim course names)
   Description: Specific course names that appear non-nursing or suspicious. Use [] if none.
 
-program_duration_consistency
-  Allowed: consistent_with_degree | unusually_short | unusually_long | unclear
-  Description: The total elapsed time of the academic program relative to its degree type.
-
-=== SECTION 3b: MS Practical Nursing Fields (PROG_004 – PROG_007) ===
+=== SECTION 3b: MS Practical Nursing Fields (PROG_001 – PROG_004) ===
 
 program_type
   Allowed: ms_practical_nursing | other | unclear

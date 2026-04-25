@@ -136,11 +136,10 @@ FRAUD_CASE_B: dict = {
     "security_features_present": [],                # PHYS_001 Check 4 fires
     "security_features_present_source": {"page_number": 1, "text_spans": []},
     "security_features_assessable": "yes",
-    # PHYS_002: missing registrar information — all four checks fire
+    # PHYS_002: missing registrar information — all three checks fire
     "registrar_name_present": False,
     "registrar_signature_present": False,
     "registrar_title_present": False,
-    "institution_contact_info_present": False,
     # Content section — suspicious courses kept for future rule coverage
     "grading_scale_format": "letter_grade_us",
     "grading_scale_format_source": {"page_number": 2, "text_spans": ["A, B, C"]},

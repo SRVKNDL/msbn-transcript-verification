@@ -713,7 +713,7 @@ export function ReviewPage() {
           color: "rgba(255,255,255,0.5)", width: 24, height: 24, fontSize: 13, borderRadius: 2,
           cursor: "pointer", fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
-        }} title="Keyboard shortcuts (?)">&quest;</button>
+        }} title="Keyboard shortcuts (?)">?</button>
         <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
           {(user?.email || user?.displayName || "Signed in user")} · SoD enforced
         </div>
@@ -735,11 +735,37 @@ export function ReviewPage() {
         </div>
       </div>
 
+      <style>{`
+        #transcript-preview-pane::-webkit-scrollbar {
+          width: 12px;
+          height: 12px;
+        }
+        #transcript-preview-pane::-webkit-scrollbar-track {
+          background: ${LAYOUT.pdfBg};
+        }
+        #transcript-preview-pane::-webkit-scrollbar-thumb {
+          background: ${TOKENS.ink4};
+          border: 3px solid ${LAYOUT.pdfBg};
+          border-radius: 8px;
+        }
+        #transcript-preview-pane::-webkit-scrollbar-thumb:hover {
+          background: ${TOKENS.ink3};
+        }
+      `}</style>
+
       {/* PDF pane — TranscriptPageViewer */}
-      <div ref={transcriptPaneRef} style={{
-        background: LAYOUT.pdfBg, overflow: "auto",
+      <div id="transcript-preview-pane" ref={transcriptPaneRef} style={{
+        background: LAYOUT.pdfBg,
+        overflowY: "scroll",
+        overflowX: "auto",
+        minHeight: 0,
+        height: isTranscriptFullscreen ? "100vh" : "100%",
+        width: isTranscriptFullscreen ? "100vw" : "auto",
+        boxSizing: "border-box",
+        scrollbarGutter: "stable",
+        scrollbarColor: `${TOKENS.ink4} ${LAYOUT.pdfBg}`,
         display: "flex", flexDirection: "column", alignItems: "center",
-        padding: isTranscriptFullscreen ? "28px 32px 44px" : "24px 24px 40px",
+        padding: isTranscriptFullscreen ? "28px 32px 52px" : "24px 24px 48px",
         gap: 14,
       }}>
         <div style={{

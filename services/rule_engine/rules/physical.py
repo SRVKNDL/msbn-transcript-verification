@@ -35,32 +35,38 @@ def check_phys_001(agg: dict) -> list:
     seal_pages = agg.get("seal_present_on_pages")
     page_count = agg.get("document_page_count")
 
-    # Check 1 — seal absent (HIGH); skip if seal_type == "unclear"
+    # Check 1 — seal absent (MEDIUM); skip if seal_type == "unclear"
+    # Severity is MEDIUM (advisory) because watermark seals and faint logo-based
+    # seals are frequently missed by vision models extracting from scanned images.
     if seal_type not in (None, "unclear") and seal_type == "absent":
         flags.append(Flag(
             rule_code="PHYS_001",
             rule_description="Institution seal absent from document",
-            severity="high",
+            severity="medium",
             category="SP-4",
             rationale=(
                 "No institution seal is visible anywhere on the document. "
                 "Authentic transcripts from accredited nursing programs include "
-                "an institution seal."
+                "an institution seal. Note: watermark-style seals and faint logo "
+                "seals may not be detected from scanned images — verify manually."
             ),
             source_location=_src(agg, "seal_type"),
         ))
 
-    # Check 2 — seal degraded or pixelated (HIGH)
+    # Check 2 — seal degraded or pixelated (MEDIUM)
+    # Severity is MEDIUM (advisory) because scan quality can degrade seal
+    # appearance independently of document authenticity.
     if seal_quality in ("pixelated", "degraded"):
         flags.append(Flag(
             rule_code="PHYS_001",
             rule_description="Institution seal quality is degraded or pixelated",
-            severity="high",
+            severity="medium",
             category="SP-4",
             rationale=(
                 f"Institution seal quality is '{seal_quality}', consistent with a "
                 "copy-of-copy reproduction rather than an original document. "
-                "Authentic original transcripts should have a clear, sharp seal."
+                "However, scan quality can independently degrade seal appearance — "
+                "verify against the original document if possible."
             ),
             source_location=_src(agg, "seal_quality"),
         ))
@@ -368,6 +374,38 @@ def check_phys_004(agg: dict) -> list:
                 "on different equipment."
             ),
             source_location=_src(agg, "printer_quality_consistency"),
+        ))
+
+    # Check 9 — overlapping or layered text detected (HIGH)
+    if agg.get("overlapping_text_detected") is True:
+        flags.append(Flag(
+            rule_code="PHYS_004",
+            rule_description="Overlapping or layered text detected",
+            severity="high",
+            category="SP-4",
+            rationale=(
+                "Text fragments overlap, are layered on top of each other, or appear "
+                "duplicated at unexpected positions on the page. This pattern is a primary "
+                "indicator of Photoshop or PDF-editor tampering where content was copied "
+                "and pasted from another document."
+            ),
+            source_location=_src(agg, "overlapping_text_detected"),
+        ))
+
+    # Check 10 — suspected alteration fields reported by extractor (HIGH)
+    alteration_fields = agg.get("suspected_alteration_fields") or []
+    if isinstance(alteration_fields, list) and len(alteration_fields) > 0:
+        flags.append(Flag(
+            rule_code="PHYS_004",
+            rule_description="Extractor identified suspected content alterations",
+            severity="high",
+            category="SP-4",
+            rationale=(
+                "The document extractor identified suspected alterations in the following "
+                f"areas: {', '.join(str(f) for f in alteration_fields)}. "
+                "These observations indicate possible digital editing or document fabrication."
+            ),
+            source_location=_src(agg, "suspected_alteration_fields"),
         ))
 
     return flags

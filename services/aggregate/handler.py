@@ -23,6 +23,7 @@ _ARRAY_FIELDS = frozenset({
     "suspicious_course_names",
     "diploma_mill_phrases_found",
     "required_nursing_domains_present",
+    "suspected_alteration_fields",
 })
 
 # Object-array fields that are merged across pages by appending (not deduplicating).

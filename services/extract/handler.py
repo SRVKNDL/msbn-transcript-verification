@@ -29,6 +29,7 @@ _ARRAY_FIELDS = {
     "suspicious_course_names",
     "diploma_mill_phrases_found",
     "required_nursing_domains_present",
+    "suspected_alteration_fields",
 }
 
 

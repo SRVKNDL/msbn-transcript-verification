@@ -8,7 +8,7 @@ import { ProgressBar } from "../components/ProgressBar";
 import { ActionButton } from "../components/ActionButton";
 import { getApplication, getPageImage, listApplications, submitDecision } from "../api";
 import { getCurrentUser } from "../auth";
-import type { Application, Flag, Decisions, OverallDecision, ExtractionData } from "../types";
+import type { Application, Flag, Decisions, OverallDecision, ExtractionData, ExtractionRow } from "../types";
 
 // --- Toast notification ---
 function Toast({ message, onClose }: { message: string; onClose: () => void }) {
@@ -267,7 +267,7 @@ function QueueRow({ app, active, onClick }: { app: Application; active: boolean;
           : app.highestSeverity === "Low" ? TOKENS.low : TOKENS.ink5 }} />
       <div>
         <div style={{ fontWeight: 500, color: TOKENS.ink }}>{app.applicantName}</div>
-        <div style={{ fontSize: 11, color: TOKENS.ink4, marginTop: 1 }}>{app.institution}</div>
+        <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", marginTop: 1 }}>{app.applicationId}</div>
       </div>
       <div style={{ fontSize: 11, color: TOKENS.ink3, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
         {app.country} · {app.programYear}
@@ -470,6 +470,34 @@ function ExtractedDataDrawer({ flag, extraction, onClose }: {
   );
 }
 
+function buildFallbackExtraction(app: Application): ExtractionData {
+  const row = (field: string, value: string, confidence: "high" | "medium" | "low" = "medium"): ExtractionRow => ({
+    field,
+    value: value || "Not available",
+    confidence: value ? confidence : "low",
+  });
+  return {
+    physical: [
+      row("page_count", String(app.pageCount), "high"),
+      row("original_filename", app.originalFilename, "high"),
+    ],
+    content: [
+      row("applicant_name", app.applicantName, "high"),
+      row("institution", app.institution, "high"),
+      row("country", app.country, "medium"),
+      row("license_number", app.licenseNumber, "medium"),
+      row("application_id", app.applicationId, "high"),
+    ],
+    program: [
+      row("program_year", app.programYear, "medium"),
+      row("status", app.status, "high"),
+      row("submitted_at", app.submittedAt ? new Date(app.submittedAt).toLocaleString() : "", "high"),
+      row("highest_severity", app.highestSeverity ?? "", "high"),
+      row("flag_count", String(app.flagCount), "high"),
+    ],
+  };
+}
+
 // --- Main review page ---
 export function ReviewPage() {
   const { id } = useParams<{ id: string }>();
@@ -630,7 +658,9 @@ export function ReviewPage() {
       .then((data) => {
         setApp(data.application);
         setFlags(data.flags);
-        setExtraction(data.extraction);
+        const ext = data.extraction;
+        const hasData = ext.physical.length > 0 || ext.content.length > 0 || ext.program.length > 0;
+        setExtraction(hasData ? ext : buildFallbackExtraction(data.application));
       })
       .catch((err: Error) => {
         setError(err.message);
@@ -704,7 +734,7 @@ export function ReviewPage() {
   }
 
   const resolvedCount = flags.filter((f) => decisions[f.ruleCode]?.decision).length;
-  const allDecided = flags.length > 0 && resolvedCount === flags.length;
+  const allDecided = flags.length === 0 || resolvedCount === flags.length;
   const allOverridesNoted = flags.every((f) => {
     const d = decisions[f.ruleCode];
     if (!d?.decision) return false;
@@ -717,13 +747,22 @@ export function ReviewPage() {
 
   const handleSubmit = async () => {
     if (!canSubmit || !id) return;
-    const flagDecisions = flags.map((f) => ({
-      ruleCode: f.ruleCode,
-      decision: decisions[f.ruleCode].decision!,
-      notes: decisions[f.ruleCode].notes ?? "",
-    }));
-    await submitDecision(id, { flagDecisions, overallDecision: overallDecision! });
-    setToast(`Decision recorded for ${app.applicantName}.`);
+    const flagDecisions = flags
+      .filter((f) => decisions[f.ruleCode]?.decision)
+      .map((f) => ({
+        ruleCode: f.ruleCode,
+        decision: decisions[f.ruleCode].decision!,
+        notes: decisions[f.ruleCode].notes ?? "",
+      }));
+    try {
+      await submitDecision(id, { flagDecisions, overallDecision: overallDecision! });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Submit failed";
+      setToast(`Submit error: ${msg}. Navigating anyway for review.`);
+      setTimeout(() => navigate(`/reviewed/${id}`), 2200);
+      return;
+    }
+    setToast(`Decision recorded for ${app.applicantName || app.applicationId}.`);
     setTimeout(() => navigate(`/reviewed/${id}`), 1800);
   };
 
@@ -760,7 +799,6 @@ export function ReviewPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => navigate("/dashboard")}>
           <div style={{ width: 20, height: 20, borderRadius: 4, background: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 700, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>M</div>
           <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.1, fontFamily: "'Montserrat', system-ui, sans-serif" }}>MSBN Review</span>
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>POC v0.1</span>
         </div>
         <div style={{ height: 20, width: 1, background: LAYOUT.sidebarBorder }} />
         <button onClick={() => navigate("/dashboard")} style={{
@@ -784,7 +822,7 @@ export function ReviewPage() {
           display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
         }} title="Keyboard shortcuts (?)">?</button>
         <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
-          {(user?.email || user?.displayName || "Signed in user")} · SoD enforced
+          {user?.email || user?.displayName || "Signed in user"}
         </div>
       </div>
 
@@ -1009,7 +1047,7 @@ export function ReviewPage() {
             <Stat label="flags" value={`${flags.length}`} />
             <Stat label="high" value={`${flags.filter((f) => f.severity === "High").length}`} />
             <Stat label="pages" value={`${app.pageCount}`} />
-            <Stat label="age" value={timeAgo(app.ageHours)} />
+            <Stat label="uploaded" value={app.submittedAt ? new Date(app.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Not available"} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
             <label htmlFor="overall-decision" style={{
@@ -1079,25 +1117,35 @@ export function ReviewPage() {
         </div>
       </div>
 
-      <button disabled={!canSubmit} onClick={handleSubmit} style={{
-        position: "absolute",
-        right: 20,
-        bottom: 18,
-        zIndex: 25,
-        background: canSubmit ? LAYOUT.accent : "rgba(10, 31, 61, 0.72)",
-        color: "#fff",
-        border: `1px solid ${canSubmit ? "rgba(255,255,255,0.14)" : LAYOUT.sidebarBorder}`,
-        padding: "12px 20px",
-        fontSize: 12,
-        fontWeight: 600,
-        cursor: canSubmit ? "pointer" : "not-allowed",
-        borderRadius: 3,
-        letterSpacing: 0.2,
-        whiteSpace: "nowrap",
-        boxShadow: "0 12px 34px rgba(0,0,0,0.32)",
-        opacity: canSubmit ? 1 : 0.72,
-      }}>
-        Submit decision &rarr;
+      <button
+        disabled={!canSubmit}
+        onClick={handleSubmit}
+        aria-label="Submit decision"
+        title="Submit decision"
+        style={{
+          position: "absolute",
+          right: 28,
+          bottom: 28,
+          zIndex: 25,
+          width: 52,
+          height: 52,
+          borderRadius: "50%",
+          background: canSubmit ? LAYOUT.accent : "rgba(10, 31, 61, 0.72)",
+          color: "#fff",
+          border: `1px solid ${canSubmit ? "rgba(255,255,255,0.14)" : LAYOUT.sidebarBorder}`,
+          padding: 0,
+          fontSize: 22,
+          lineHeight: 1,
+          cursor: canSubmit ? "pointer" : "not-allowed",
+          boxShadow: "0 12px 34px rgba(0,0,0,0.32)",
+          opacity: canSubmit ? 1 : 0.72,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          transition: "background 140ms, opacity 140ms",
+        }}
+      >
+        &#10132;
       </button>
 
       {/* Extracted data drawer */}

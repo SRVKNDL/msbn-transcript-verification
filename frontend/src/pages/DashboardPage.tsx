@@ -90,42 +90,10 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-function ShortcutBtn({
-  label,
-  hint,
-  onClick,
-}: {
-  label: string;
-  hint: string;
-  onClick?: () => void;
-}) {
-  const t = useT();
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        background: t.surfaceAlt,
-        border: `1px solid ${t.line}`,
-        padding: "10px 12px",
-        borderRadius: 3,
-        textAlign: "left",
-        cursor: "pointer",
-        fontFamily: "inherit",
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-      }}
-    >
-      <span
-        style={{ flex: 1, fontSize: 12, fontWeight: 500, color: t.ink }}
-      >
-        {label}
-      </span>
-      <span style={{ fontFamily: t.mono, fontSize: 10, color: t.ink4 }}>
-        {hint}
-      </span>
-    </button>
-  );
+function applicationTarget(app: Application) {
+  if (isReadyForReview(app)) return `/review/${app.applicationId}`;
+  if (app.status === "FAILED") return `/audit/${app.applicationId}`;
+  return null;
 }
 
 export function DashboardPage({
@@ -339,16 +307,29 @@ export function DashboardPage({
                     </td>
                   </tr>
                 )}
-                {queue.map((r, i) => (
-                  <tr
-                    key={r.applicationId}
-                    style={{
-                      borderBottom:
-                        i < queue.length - 1
-                          ? `1px solid ${t.line2}`
-                          : "none",
-                    }}
-                  >
+                {queue.map((r, i) => {
+                  const target = applicationTarget(r);
+                  return (
+                    <tr
+                      key={r.applicationId}
+                      onClick={() => target && navigate(target)}
+                      onKeyDown={(e) => {
+                        if (!target) return;
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          navigate(target);
+                        }
+                      }}
+                      tabIndex={target ? 0 : undefined}
+                      aria-label={target ? `Open ${displayApplicant(r)}` : undefined}
+                      style={{
+                        borderBottom:
+                          i < queue.length - 1
+                            ? `1px solid ${t.line2}`
+                            : "none",
+                        cursor: target ? "pointer" : "default",
+                      }}
+                    >
                     <td
                       style={{
                         padding: "11px 14px",
@@ -416,27 +397,34 @@ export function DashboardPage({
                     <td
                       style={{ padding: "11px 14px", textAlign: "right" }}
                     >
-                      <span
-                        onClick={() =>
-                          isReadyForReview(r) && navigate(`/review/${r.applicationId}`)
-                        }
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (target) navigate(target);
+                        }}
+                        disabled={!target}
                         style={{
-                          color: isReadyForReview(r) ? t.primary : t.ink4,
+                          border: "none",
+                          background: "transparent",
+                          padding: 0,
+                          color: target ? t.primary : t.ink4,
                           fontSize: 12,
                           fontWeight: 600,
-                          cursor: isReadyForReview(r) ? "pointer" : "default",
+                          cursor: target ? "pointer" : "default",
+                          fontFamily: "inherit",
                         }}
                       >
-                        {isReadyForReview(r) ? "Review \u2192" : "Waiting"}
-                      </span>
+                        {isReadyForReview(r) ? "Review \u2192" : r.status === "FAILED" ? "Audit \u2192" : "Waiting"}
+                      </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </Card>
 
-          {/* Activity + Shortcuts */}
+          {/* Recent activity */}
           <div
             style={{
               display: "flex",
@@ -458,9 +446,21 @@ export function DashboardPage({
                     No recent activity.
                   </div>
                 )}
-                {queue.map((a, i) => (
+                {queue.map((a, i) => {
+                  const target = applicationTarget(a);
+                  return (
                   <div
                     key={a.applicationId}
+                    onClick={() => target && navigate(target)}
+                    onKeyDown={(e) => {
+                      if (!target) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        navigate(target);
+                      }
+                    }}
+                    tabIndex={target ? 0 : undefined}
+                    aria-label={target ? `Open ${displayApplicant(a)}` : undefined}
                     style={{
                       padding: "11px 18px",
                       borderBottom:
@@ -470,6 +470,7 @@ export function DashboardPage({
                       display: "flex",
                       gap: 10,
                       alignItems: "flex-start",
+                      cursor: target ? "pointer" : "default",
                     }}
                   >
                     <div
@@ -522,33 +523,8 @@ export function DashboardPage({
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            </Card>
-
-            <Card title="Shortcuts" pad={14}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 8,
-                }}
-              >
-                <ShortcutBtn
-                  label="Upload transcript"
-                  hint="\u2318U"
-                  onClick={() => onNavigate("upload")}
-                />
-                <ShortcutBtn
-                  label="Open queue"
-                  hint="\u2318Q"
-                  onClick={() => onNavigate("queue")}
-                />
-                <ShortcutBtn
-                  label="Audit log"
-                  hint="\u2318L"
-                  onClick={() => onNavigate("audit")}
-                />
+                  );
+                })}
               </div>
             </Card>
           </div>

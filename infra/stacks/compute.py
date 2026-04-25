@@ -81,6 +81,7 @@ class ComputeConstruct(Construct):
                 "BUCKET_NAME": storage.bucket.bucket_name,
                 # Nova Pro handles faint watermarks and seal details better.
                 "BEDROCK_MODEL_ID": "amazon.nova-pro-v1:0",
+                "BEDROCK_MAX_NEW_TOKENS": "5000",
             },
         )
 

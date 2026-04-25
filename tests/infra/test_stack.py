@@ -110,6 +110,7 @@ class TestExtractLambdaHardening:
                 "Environment": {
                     "Variables": Match.object_like({
                         "BEDROCK_MODEL_ID": "amazon.nova-pro-v1:0",
+                        "BEDROCK_MAX_NEW_TOKENS": "5000",
                     })
                 },
             }),

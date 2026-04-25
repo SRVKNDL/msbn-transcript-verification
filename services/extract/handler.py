@@ -22,6 +22,7 @@ _bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
 
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
+BEDROCK_MAX_NEW_TOKENS = int(os.environ.get("BEDROCK_MAX_NEW_TOKENS", "5000"))
 
 _ARRAY_FIELDS = {
     "security_features_present",
@@ -137,7 +138,7 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
         ],
         "system": [{"text": system_prompt}],
         "inferenceConfig": {
-            "max_new_tokens": 4096,
+            "max_new_tokens": BEDROCK_MAX_NEW_TOKENS,
             "temperature": 0.0,
             "topP": 1.0,
         },
@@ -152,15 +153,21 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
 
     response_body = json.loads(response["body"].read())
     raw_text = response_body["output"]["message"]["content"][0]["text"]
+    stop_reason = response_body.get("stopReason", "unknown")
+    usage = response_body.get("usage") or {}
 
     try:
-        return _parse_nova_json_object(raw_text)
+        return _parse_nova_json(raw_text)
     except json.JSONDecodeError as exc:
         logger.error(
             json.dumps({
                 "event": "nova_json_parse_error",
                 "page_number": page_number,
                 "error": str(exc),
+                "stop_reason": stop_reason,
+                "input_tokens": usage.get("inputTokens"),
+                "output_tokens": usage.get("outputTokens"),
+                "raw_text_length": len(raw_text),
                 "raw_text_preview": raw_text[:500],
             })
         )
@@ -169,41 +176,60 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
         ) from exc
 
 
-def _parse_nova_json_object(raw_text: str) -> dict:
-    """Recover the first JSON object from common model wrappers."""
-    decoder = json.JSONDecoder()
+def _parse_nova_json(raw_text: str) -> dict:
+    """Parse a Nova JSON object even when it is wrapped in prose/fences."""
     text = str(raw_text or "").lstrip("\ufeff").strip()
-    candidates: list[str] = [text]
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = _parse_json_from_wrapped_text(text)
 
-    fenced_match = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
-    if fenced_match:
-        candidates.append(fenced_match.group(1).strip())
+    if not isinstance(parsed, dict):
+        raise json.JSONDecodeError("Nova response JSON is not an object", text, 0)
+    return parsed
 
-    for candidate in candidates:
-        if not candidate:
+
+def _parse_json_from_wrapped_text(text: str) -> dict:
+    fenced = text
+    if fenced.startswith("```"):
+        fenced = fenced.removeprefix("```json").removeprefix("```").strip()
+        if fenced.endswith("```"):
+            fenced = fenced[:-3].strip()
+        return json.loads(fenced)
+
+    decoder = json.JSONDecoder()
+    for idx, char in enumerate(text):
+        if char != "{":
             continue
         try:
-            parsed = json.loads(candidate)
-            if isinstance(parsed, dict):
-                return parsed
+            parsed, _end_idx = decoder.raw_decode(text[idx:])
         except json.JSONDecodeError:
-            pass
+            continue
+        logger.warning(
+            json.dumps({
+                "event": "nova_json_recovered",
+                "recovery": "embedded_object",
+            })
+        )
+        return parsed
 
-        for match in re.finditer(r"{", candidate):
-            try:
-                parsed, _ = decoder.raw_decode(candidate[match.start():])
-            except json.JSONDecodeError:
-                continue
-            if isinstance(parsed, dict):
-                logger.warning(
-                    json.dumps({
-                        "event": "nova_json_recovered",
-                        "recovery": "embedded_object",
-                    })
-                )
-                return parsed
+    first = text.find("{")
+    last = text.rfind("}")
+    if first >= 0 and last > first:
+        logger.warning(
+            json.dumps({
+                "event": "nova_json_recovered",
+                "recovery": "brace_slice",
+            })
+        )
+        return json.loads(text[first : last + 1])
 
-    raise json.JSONDecodeError("No JSON object found", text, 0)
+    raise json.JSONDecodeError("No JSON object found in Nova response", text, 0)
+
+
+def _parse_nova_json_object(raw_text: str) -> dict:
+    """Backward-compatible alias for tests and callers using the old helper name."""
+    return _parse_nova_json(raw_text)
 
 
 def handler(event, context):

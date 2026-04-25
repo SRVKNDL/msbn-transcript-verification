@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import type { WheelEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { TOKENS, LAYOUT } from "../tokens";
 import { SeverityChip } from "../components/SeverityChip";
@@ -38,6 +39,7 @@ function ShortcutLegend({ onClose }: { onClose: () => void }) {
     ["C", "Confirm current flag"],
     ["O", "Override current flag"],
     ["1\u20139", "Jump to page"],
+    ["B", "Toggle review queue"],
     ["F", "Toggle transcript fullscreen"],
     ["?", "Toggle this legend"],
     ["Esc", "Close overlay"],
@@ -487,12 +489,63 @@ export function ReviewPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(true);
   const [isTranscriptFullscreen, setIsTranscriptFullscreen] = useState(false);
+  const [transcriptZoom, setTranscriptZoom] = useState(1);
   const transcriptPaneRef = useRef<HTMLDivElement>(null);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
+  const transcriptZoomRef = useRef(1);
 
   const pageCount = Math.max(1, app?.pageCount || 1);
   const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
   const totalFields = extraction.physical.length + extraction.content.length + extraction.program.length;
+
+  useEffect(() => {
+    transcriptZoomRef.current = transcriptZoom;
+  }, [transcriptZoom]);
+
+  const applyTranscriptZoom = useCallback((nextZoom: number, pointerX?: number, pointerY?: number) => {
+    const viewport = transcriptScrollRef.current;
+    if (!viewport) return;
+
+    const previousZoom = transcriptZoomRef.current;
+    const clampedZoom = Math.min(3, Math.max(0.75, nextZoom));
+
+    if (Math.abs(clampedZoom - previousZoom) < 0.001) return;
+
+    const anchorX = pointerX ?? viewport.clientWidth / 2;
+    const anchorY = pointerY ?? viewport.clientHeight / 2;
+    const contentX = (viewport.scrollLeft + anchorX) / previousZoom;
+    const contentY = (viewport.scrollTop + anchorY) / previousZoom;
+
+    transcriptZoomRef.current = clampedZoom;
+    setTranscriptZoom(clampedZoom);
+
+    window.requestAnimationFrame(() => {
+      viewport.scrollLeft = contentX * clampedZoom - anchorX;
+      viewport.scrollTop = contentY * clampedZoom - anchorY;
+    });
+  }, []);
+
+  const handleTranscriptWheel = useCallback((e: WheelEvent<HTMLDivElement>) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+
+    e.preventDefault();
+
+    const viewport = transcriptScrollRef.current;
+    if (!viewport) return;
+
+    const rect = viewport.getBoundingClientRect();
+    applyTranscriptZoom(
+      transcriptZoomRef.current * Math.exp(-e.deltaY * 0.01),
+      e.clientX - rect.left,
+      e.clientY - rect.top
+    );
+  }, [applyTranscriptZoom]);
+
+  const zoomTranscriptBy = useCallback((delta: number) => {
+    applyTranscriptZoom(transcriptZoomRef.current + delta);
+  }, [applyTranscriptZoom]);
 
   const toggleTranscriptFullscreen = useCallback(() => {
     const pane = transcriptPaneRef.current;
@@ -541,6 +594,9 @@ export function ReviewPage() {
       case "f":
         toggleTranscriptFullscreen();
         break;
+      case "b":
+        setQueueOpen((open) => !open);
+        break;
       case "escape":
         setDrawerOpen(false);
         setShowShortcuts(false);
@@ -567,6 +623,7 @@ export function ReviewPage() {
     setActiveFlagIdx(0);
     setDecisions({});
     setCurrentPage(1);
+    setTranscriptZoom(1);
     setOverallDecision(null);
     setDrawerOpen(false);
     getApplication(id)
@@ -670,16 +727,13 @@ export function ReviewPage() {
     setTimeout(() => navigate(`/reviewed/${id}`), 1800);
   };
 
-  // Severity summary for footer
-  const highPending = flags.filter((f) => f.severity === "High" && !decisions[f.ruleCode]?.decision).length;
-  const medPending = flags.filter((f) => f.severity === "Medium" && !decisions[f.ruleCode]?.decision).length;
-  const lowPending = flags.filter((f) => f.severity === "Low" && !decisions[f.ruleCode]?.decision).length;
-
   return (
     <div style={{
       width: "100vw", height: "100vh", position: "relative",
       background: LAYOUT.bg, fontFamily: "'Open Sans', system-ui, sans-serif", color: TOKENS.ink,
-      display: "grid", gridTemplateColumns: "260px 1fr 420px", gridTemplateRows: "44px 1fr 56px",
+      display: "grid",
+      gridTemplateColumns: queueOpen ? "260px 1fr 420px" : "0 1fr 420px",
+      gridTemplateRows: "44px 1fr",
       overflow: "hidden",
     }}>
       {/* Top bar */}
@@ -688,6 +742,21 @@ export function ReviewPage() {
         background: LAYOUT.sidebar, display: "flex", alignItems: "center", padding: "0 18px", gap: 18,
         color: "#fff",
       }}>
+        <button onClick={() => setQueueOpen((open) => !open)} style={{
+          border: `1px solid ${LAYOUT.sidebarBorder}`,
+          background: "rgba(255,255,255,0.08)",
+          color: "rgba(255,255,255,0.72)",
+          width: 26,
+          height: 26,
+          borderRadius: 3,
+          cursor: "pointer",
+          fontSize: 16,
+          lineHeight: 1,
+          fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+          padding: 0,
+        }} title={queueOpen ? "Hide review queue (B)" : "Show review queue (B)"} aria-label={queueOpen ? "Hide review queue" : "Show review queue"}>
+          &#9776;
+        </button>
         <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => navigate("/dashboard")}>
           <div style={{ width: 20, height: 20, borderRadius: 4, background: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 700, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>M</div>
           <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.1, fontFamily: "'Montserrat', system-ui, sans-serif" }}>MSBN Review</span>
@@ -720,7 +789,7 @@ export function ReviewPage() {
       </div>
 
       {/* Queue sidebar */}
-      <div style={{ borderRight: `1px solid ${LAYOUT.sidebarBorder}`, background: LAYOUT.sidebar, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div style={{ gridColumn: 1, gridRow: 2, borderRight: queueOpen ? `1px solid ${LAYOUT.sidebarBorder}` : "none", background: LAYOUT.sidebar, overflow: "hidden", display: queueOpen ? "flex" : "none", flexDirection: "column" }}>
         <div style={{ padding: "12px 14px 10px", borderBottom: `1px solid ${LAYOUT.sidebarBorder}` }}>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 }}>Review queue</div>
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.8)" }}>
@@ -736,41 +805,43 @@ export function ReviewPage() {
       </div>
 
       <style>{`
-        #transcript-preview-pane::-webkit-scrollbar {
+        #transcript-scroll-viewport::-webkit-scrollbar {
           width: 12px;
           height: 12px;
         }
-        #transcript-preview-pane::-webkit-scrollbar-track {
+        #transcript-scroll-viewport::-webkit-scrollbar-track {
           background: ${LAYOUT.pdfBg};
         }
-        #transcript-preview-pane::-webkit-scrollbar-thumb {
+        #transcript-scroll-viewport::-webkit-scrollbar-thumb {
           background: ${TOKENS.ink4};
           border: 3px solid ${LAYOUT.pdfBg};
           border-radius: 8px;
         }
-        #transcript-preview-pane::-webkit-scrollbar-thumb:hover {
+        #transcript-scroll-viewport::-webkit-scrollbar-thumb:hover {
           background: ${TOKENS.ink3};
         }
       `}</style>
 
       {/* PDF pane — TranscriptPageViewer */}
       <div id="transcript-preview-pane" ref={transcriptPaneRef} style={{
+        gridColumn: 2,
+        gridRow: 2,
         background: LAYOUT.pdfBg,
-        overflowY: "scroll",
-        overflowX: "auto",
+        overflow: "hidden",
         minHeight: 0,
         height: isTranscriptFullscreen ? "100vh" : "100%",
         width: isTranscriptFullscreen ? "100vw" : "auto",
         boxSizing: "border-box",
-        scrollbarGutter: "stable",
-        scrollbarColor: `${TOKENS.ink4} ${LAYOUT.pdfBg}`,
+        position: "relative",
         display: "flex", flexDirection: "column", alignItems: "center",
-        padding: isTranscriptFullscreen ? "28px 32px 52px" : "24px 24px 48px",
-        gap: 14,
       }}>
         <div style={{
-          width: "100%", maxWidth: isTranscriptFullscreen ? 760 : 560, display: "flex", alignItems: "center", justifyContent: "space-between",
+          width: "100%", maxWidth: isTranscriptFullscreen ? 760 : 560, alignItems: "center", justifyContent: "space-between",
           fontSize: 11, color: TOKENS.ink3, fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+          padding: "24px 24px 10px",
+          boxSizing: "border-box",
+          flexShrink: 0,
+          display: isTranscriptFullscreen ? "none" : "flex",
         }}>
           <div>{app.applicantName} · {app.applicationId}</div>
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
@@ -784,17 +855,58 @@ export function ReviewPage() {
             ))}
           </div>
         </div>
-        <TranscriptPageViewer
-          appId={id!}
-          page={currentPage}
-          flags={flags}
-          pdfScale={isTranscriptFullscreen ? 1.35 : 1}
-        />
-        <div style={{
+        <div id="transcript-scroll-viewport" ref={transcriptScrollRef} onWheel={handleTranscriptWheel} style={{
+          flex: isTranscriptFullscreen ? "none" : 1,
+          minHeight: 0,
+          width: "100%",
+          overflowY: "scroll",
+          overflowX: "auto",
+          scrollbarGutter: "stable",
+          scrollbarColor: `${TOKENS.ink4} ${LAYOUT.pdfBg}`,
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "flex-start",
+          padding: isTranscriptFullscreen ? "8px 64px 8px 12px" : "0 24px 18px",
+          boxSizing: "border-box",
+          position: isTranscriptFullscreen ? "absolute" : "relative",
+          inset: isTranscriptFullscreen ? 0 : "auto",
+          height: isTranscriptFullscreen ? "100%" : "auto",
+        }}>
+          <div style={{ flexShrink: 0 }}>
+            <TranscriptPageViewer
+              appId={id!}
+              page={currentPage}
+              flags={flags}
+              pdfScale={(isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom}
+            />
+          </div>
+        </div>
+        {!isTranscriptFullscreen && <div style={{
           display: "flex", alignItems: "center", gap: 8,
           fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+          padding: "10px 24px 24px",
+          boxSizing: "border-box",
+          flexShrink: 0,
         }}>
           <span>source: uploaded transcript · nova-pro-v1:0</span>
+          <div style={{ height: 12, width: 1, background: TOKENS.line }} />
+          <button onClick={() => zoomTranscriptBy(-0.1)} style={{
+            border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
+            width: 24, height: 22, fontSize: 13, cursor: "pointer", borderRadius: 2,
+            color: TOKENS.ink3, fontFamily: "inherit", padding: 0,
+          }} title="Zoom out">&minus;</button>
+          <button onClick={() => applyTranscriptZoom(1)} style={{
+            border: "none", background: "transparent",
+            minWidth: 42, height: 22, fontSize: 10, cursor: "pointer",
+            color: TOKENS.ink4, fontFamily: "inherit", padding: "0 4px",
+          }} title="Reset zoom">
+            {Math.round(transcriptZoom * 100)}%
+          </button>
+          <button onClick={() => zoomTranscriptBy(0.1)} style={{
+            border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
+            width: 24, height: 22, fontSize: 13, cursor: "pointer", borderRadius: 2,
+            color: TOKENS.ink3, fontFamily: "inherit", padding: 0,
+          }} title="Zoom in">+</button>
           <div style={{ height: 12, width: 1, background: TOKENS.line }} />
           <button onClick={toggleTranscriptFullscreen} style={{
             border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
@@ -803,11 +915,88 @@ export function ReviewPage() {
           }} title="Toggle transcript fullscreen (F)">
             {isTranscriptFullscreen ? "Exit fullscreen" : "Fullscreen"}
           </button>
-        </div>
+        </div>}
+        {isTranscriptFullscreen && (
+          <div style={{
+            position: "absolute",
+            top: 12,
+            right: 14,
+            bottom: 12,
+            width: 42,
+            zIndex: 3,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 5px",
+            boxSizing: "border-box",
+            background: "rgba(203, 213, 225, 0.82)",
+            border: `1px solid ${TOKENS.line}`,
+            borderRadius: 3,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+            fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+          }}>
+            <div title={`${app.applicantName} · ${app.applicationId}`} style={{
+              writingMode: "vertical-rl",
+              transform: "rotate(180deg)",
+              maxHeight: 220,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontSize: 10,
+              color: TOKENS.ink3,
+              lineHeight: 1.1,
+            }}>
+              {app.applicantName} · {app.applicationId}
+            </div>
+            <div style={{ width: 18, height: 1, background: TOKENS.line }} />
+            {pages.map((p) => (
+              <button key={p} onClick={() => setCurrentPage(p)} style={{
+                border: `1px solid ${currentPage === p ? TOKENS.ink2 : TOKENS.line}`,
+                background: currentPage === p ? TOKENS.ink : TOKENS.paper,
+                color: currentPage === p ? "#fff" : TOKENS.ink3,
+                width: 26, height: 24, fontSize: 11, cursor: "pointer", borderRadius: 2, fontFamily: "inherit",
+              }}>{p}</button>
+            ))}
+            <div style={{ width: 18, height: 1, background: TOKENS.line }} />
+            <button onClick={() => zoomTranscriptBy(-0.1)} style={{
+              border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
+              width: 26, height: 24, fontSize: 14, cursor: "pointer", borderRadius: 2,
+              color: TOKENS.ink3, fontFamily: "inherit", padding: 0,
+            }} title="Zoom out">&minus;</button>
+            <button onClick={() => applyTranscriptZoom(1)} style={{
+              border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
+              width: 34, minHeight: 28, fontSize: 9, cursor: "pointer", borderRadius: 2,
+              color: TOKENS.ink3, fontFamily: "inherit", padding: "2px 0",
+            }} title="Reset zoom">
+              {Math.round(transcriptZoom * 100)}%
+            </button>
+            <button onClick={() => zoomTranscriptBy(0.1)} style={{
+              border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
+              width: 26, height: 24, fontSize: 14, cursor: "pointer", borderRadius: 2,
+              color: TOKENS.ink3, fontFamily: "inherit", padding: 0,
+            }} title="Zoom in">+</button>
+            <div style={{ flex: 1 }} />
+            <button onClick={toggleTranscriptFullscreen} style={{
+              border: `1px solid ${TOKENS.line}`,
+              background: TOKENS.paper,
+              width: 30,
+              height: 30,
+              fontSize: 16,
+              cursor: "pointer",
+              borderRadius: 2,
+              color: TOKENS.ink3,
+              fontFamily: "inherit",
+              lineHeight: 1,
+            }} title="Exit fullscreen">
+              &times;
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Flag list */}
-      <div style={{ background: LAYOUT.bg, borderLeft: `1px solid ${LAYOUT.line}`, overflow: "auto", display: "flex", flexDirection: "column" }}>
+      <div style={{ gridColumn: 3, gridRow: 2, background: LAYOUT.bg, borderLeft: `1px solid ${LAYOUT.line}`, overflow: "auto", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "14px 16px", borderBottom: `1px solid ${LAYOUT.line}`, background: TOKENS.paper }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
             <div style={{ fontSize: 15, fontWeight: 600, fontFamily: "'Montserrat', system-ui, sans-serif" }}>{app.applicantName}</div>
@@ -821,6 +1010,46 @@ export function ReviewPage() {
             <Stat label="high" value={`${flags.filter((f) => f.severity === "High").length}`} />
             <Stat label="pages" value={`${app.pageCount}`} />
             <Stat label="age" value={timeAgo(app.ageHours)} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+            <label htmlFor="overall-decision" style={{
+              fontSize: 10,
+              color: TOKENS.ink4,
+              fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+              whiteSpace: "nowrap",
+            }}>
+              Decision
+            </label>
+            <select
+              id="overall-decision"
+              value={overallDecision ?? ""}
+              onChange={(e) =>
+                setOverallDecision(e.target.value ? (e.target.value as OverallDecision) : null)
+              }
+              disabled={!allDecided}
+              style={{
+                minWidth: 0,
+                flex: 1,
+                height: 30,
+                border: `1px solid ${TOKENS.line}`,
+                background: allDecided ? TOKENS.paper : TOKENS.bg,
+                color: allDecided ? TOKENS.ink2 : TOKENS.ink4,
+                borderRadius: 3,
+                padding: "0 8px",
+                fontSize: 11,
+                fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+                cursor: allDecided ? "pointer" : "not-allowed",
+                outlineColor: LAYOUT.accent,
+              }}
+            >
+              <option value="">select decision</option>
+              <option value="READY_FOR_LICENSING_REVIEW">ready for licensing review</option>
+              <option value="RETURN_TO_APPLICANT">return to applicant</option>
+              <option value="DEFERRED">deferred</option>
+              <option value="DENIED">denied</option>
+            </select>
           </div>
         </div>
 
@@ -850,59 +1079,26 @@ export function ReviewPage() {
         </div>
       </div>
 
-      {/* Decision footer */}
-      <div style={{
-        gridColumn: "1 / -1", background: LAYOUT.sidebar, borderTop: `1px solid ${LAYOUT.sidebarBorder}`,
-        display: "flex", alignItems: "center", padding: "0 18px", gap: 12,
+      <button disabled={!canSubmit} onClick={handleSubmit} style={{
+        position: "absolute",
+        right: 20,
+        bottom: 18,
+        zIndex: 25,
+        background: canSubmit ? LAYOUT.accent : "rgba(10, 31, 61, 0.72)",
         color: "#fff",
+        border: `1px solid ${canSubmit ? "rgba(255,255,255,0.14)" : LAYOUT.sidebarBorder}`,
+        padding: "12px 20px",
+        fontSize: 12,
+        fontWeight: 600,
+        cursor: canSubmit ? "pointer" : "not-allowed",
+        borderRadius: 3,
+        letterSpacing: 0.2,
+        whiteSpace: "nowrap",
+        boxShadow: "0 12px 34px rgba(0,0,0,0.32)",
+        opacity: canSubmit ? 1 : 0.72,
       }}>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase" }}>
-          Overall decision
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          {(["READY_FOR_LICENSING_REVIEW", "RETURN_TO_APPLICANT", "DEFERRED", "DENIED"] as const).map((d) => (
-            <button key={d} onClick={() => allDecided && setOverallDecision(d)} disabled={!allDecided}
-              style={{
-                border: `1px solid ${overallDecision === d ? "rgba(255,255,255,0.4)" : LAYOUT.sidebarBorder}`,
-                background: overallDecision === d ? (d === "DENIED" ? TOKENS.high : "rgba(255,255,255,0.15)") : allDecided ? "rgba(255,255,255,0.06)" : "transparent",
-                color: overallDecision === d ? "#fff" : allDecided ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.3)",
-                padding: "6px 11px", fontSize: 11,
-                fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
-                borderRadius: 2, cursor: allDecided ? "pointer" : "not-allowed",
-                opacity: allDecided ? 1 : 0.55,
-              }}>{d.replaceAll("_", " ").toLowerCase()}</button>
-          ))}
-        </div>
-        <div style={{ flex: 1 }} />
-        <div style={{ fontSize: 11, color: canSubmit ? TOKENS.ok : "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
-          {!allDecided
-            ? flags.length === 0
-              ? "no flags to resolve"
-              : <>
-                <span style={{ marginRight: 6 }}>{"\u231b"}</span>
-                {highPending > 0 && <span style={{ color: TOKENS.high }}>{highPending} High</span>}
-                {highPending > 0 && (medPending > 0 || lowPending > 0) && ", "}
-                {medPending > 0 && <span style={{ color: TOKENS.med }}>{medPending} Med</span>}
-                {medPending > 0 && lowPending > 0 && ", "}
-                {lowPending > 0 && <span style={{ color: TOKENS.low }}>{lowPending} Low</span>}
-                <span style={{ marginLeft: 4 }}>remaining</span>
-              </>
-            : !allOverridesNoted
-              ? "\u26a0 override note required"
-              : !overallDecision
-                ? "\u25c7 select a disposition"
-                : "\u2713 ready to submit"}
-        </div>
-        <button disabled={!canSubmit} onClick={handleSubmit} style={{
-          background: canSubmit ? LAYOUT.accent : "rgba(255,255,255,0.1)",
-          color: "#fff", border: "none",
-          padding: "8px 16px", fontSize: 12, fontWeight: 600,
-          cursor: canSubmit ? "pointer" : "not-allowed",
-          borderRadius: 2, letterSpacing: 0.2,
-        }}>
-          Submit decision &rarr;
-        </button>
-      </div>
+        Submit decision &rarr;
+      </button>
 
       {/* Extracted data drawer */}
       {drawerOpen && (

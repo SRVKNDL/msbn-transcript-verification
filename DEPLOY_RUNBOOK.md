@@ -66,6 +66,39 @@ Stack 3 requires Stack 1. Stack 4 requires Stacks 2 and 3.
 
 ### Deploy commands
 
+Recommended wrapper script:
+
+```bash
+scripts/deploy.sh backend
+```
+
+Deploy backend and frontend together:
+
+```bash
+scripts/deploy.sh all \
+  --frontend-bucket <FrontendHostingBucket> \
+  --distribution-id <CloudFrontDistributionId>
+```
+
+Redeploy one or more individual backend stacks:
+
+```bash
+scripts/deploy.sh api --no-tests
+scripts/deploy.sh compute api --no-tests
+```
+
+Deploy only the frontend bundle:
+
+```bash
+scripts/deploy.sh frontend \
+  --frontend-bucket <FrontendHostingBucket> \
+  --distribution-id <CloudFrontDistributionId>
+```
+
+The script reads `ApiUrl` and `UserPoolClientId` from CloudFormation outputs
+when available. You can override them with `--api-base` and
+`--cognito-client-id`.
+
 Deploy one stack at a time (recommended for first deploy):
 
 ```bash

@@ -1,11 +1,9 @@
-import { useT, useThemeMode } from "../theme";
+import { useT } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
 import { getCurrentUser, signOut } from "../auth";
 
 export function SettingsPage() {
   const t = useT();
-  const { mode, setMode } = useThemeMode();
-  const darkMode = mode === "dark";
   const user = getCurrentUser();
 
   const handleLogout = () => {
@@ -42,35 +40,6 @@ export function SettingsPage() {
             <Btn variant="outline" onClick={handleLogout}>
               Sign out
             </Btn>
-          </div>
-        </Card>
-
-        <div style={{ height: 14 }} />
-
-        <Card title="Appearance" subtitle="Visual preferences">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: t.ink }}>Dark mode</div>
-              <div style={{ fontSize: 11, color: t.ink4, marginTop: 2 }}>
-                Use a softer low-glare theme across the dashboard
-              </div>
-            </div>
-            <button
-              onClick={() => setMode(darkMode ? "light" : "dark")}
-              style={{
-                width: 44, height: 24, borderRadius: 12, border: "none",
-                background: darkMode ? t.accent : t.line,
-                position: "relative", cursor: "pointer",
-                transition: "background 200ms",
-              }}
-            >
-              <div style={{
-                width: 18, height: 18, borderRadius: 9,
-                background: "#fff", position: "absolute", top: 3,
-                left: darkMode ? 23 : 3, transition: "left 200ms",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-              }} />
-            </button>
           </div>
         </Card>
 

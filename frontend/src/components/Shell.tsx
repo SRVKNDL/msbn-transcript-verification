@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { useT } from "../theme";
+import { useEffect, useRef, useState } from "react";
+import { useT, useThemeMode } from "../theme";
 import { listApplications } from "../api";
-import { getCurrentUser } from "../auth";
+import { getCurrentUser, signOut } from "../auth";
 
 interface ShellProps {
   page: string;
@@ -11,8 +11,12 @@ interface ShellProps {
 
 export function Shell({ page, onNavigate, children }: ShellProps) {
   const t = useT();
+  const { mode, setMode } = useThemeMode();
   const [pendingCount, setPendingCount] = useState(0);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
   const user = getCurrentUser();
+  const darkMode = mode === "dark";
 
   useEffect(() => {
     listApplications()
@@ -28,12 +32,22 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
       .catch(() => setPendingCount(0));
   }, []);
 
+  useEffect(() => {
+    if (!profileOpen) return;
+    const handleClick = (event: MouseEvent) => {
+      if (!profileMenuRef.current?.contains(event.target as Node)) {
+        setProfileOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handleClick);
+    return () => window.removeEventListener("mousedown", handleClick);
+  }, [profileOpen]);
+
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: "\u25ce" },
     { id: "queue", label: "Review queue", icon: "\u25a4", badge: pendingCount },
     { id: "upload", label: "Upload transcript", icon: "\u21a5" },
     { id: "audit", label: "Audit log", icon: "\u2261" },
-    { id: "settings", label: "Settings", icon: "\u2726" },
   ];
 
   return (
@@ -100,23 +114,162 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
           </div>
         </div>
         <div style={{ flex: 1 }} />
-        <div style={{ fontSize: 12, opacity: 0.85 }}>
-          {user?.displayName ?? "Signed in"}
-        </div>
-        <div
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 15,
-            background: "rgba(255,255,255,0.15)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 11,
-            fontWeight: 600,
-          }}
-        >
-          {user?.initials ?? "U"}
+        <div ref={profileMenuRef} style={{ position: "relative" }}>
+          <button
+            onClick={() => setProfileOpen((open) => !open)}
+            style={{
+              border: "none",
+              background: "transparent",
+              color: "inherit",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: 0,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            <span style={{ fontSize: 12, opacity: 0.85 }}>
+              {user?.displayName ?? "Signed in"}
+            </span>
+            <span
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 15,
+                background: "rgba(255,255,255,0.15)",
+                border: "1px solid rgba(255,255,255,0.22)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              {user?.initials ?? "U"}
+            </span>
+          </button>
+
+          {profileOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: 42,
+                right: 0,
+                width: 260,
+                background: t.surface,
+                color: t.ink,
+                border: `1px solid ${t.line}`,
+                borderTop: `3px solid ${t.accent}`,
+                borderRadius: 3,
+                boxShadow: "0 18px 45px rgba(0,0,0,0.32)",
+                zIndex: 20,
+                padding: 10,
+              }}
+            >
+              <div
+                style={{
+                  padding: "8px 10px 12px",
+                  borderBottom: `1px solid ${t.line2}`,
+                  marginBottom: 6,
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 600 }}>
+                  {user?.displayName ?? "Signed in"}
+                </div>
+                <div style={{ fontSize: 11, color: t.ink4, marginTop: 3 }}>
+                  {user?.email ?? "Reviewer account"}
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  setProfileOpen(false);
+                  onNavigate("settings");
+                }}
+                style={{
+                  width: "100%",
+                  border: "none",
+                  background: "transparent",
+                  color: t.ink2,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "9px 10px",
+                  borderRadius: 3,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  fontSize: 13,
+                  textAlign: "left",
+                }}
+              >
+                <span>Settings</span>
+                <span style={{ color: t.ink4, fontFamily: t.mono, fontSize: 11 }}>
+                  &rarr;
+                </span>
+              </button>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "9px 10px",
+                  color: t.ink2,
+                  fontSize: 13,
+                }}
+              >
+                <span>{darkMode ? "Dark mode" : "Light mode"}</span>
+                <button
+                  onClick={() => setMode(darkMode ? "light" : "dark")}
+                  aria-label="Toggle dark mode"
+                  style={{
+                    width: 44,
+                    height: 24,
+                    borderRadius: 12,
+                    border: `1px solid ${darkMode ? t.accent : t.line}`,
+                    background: darkMode ? t.accentBg : t.surfaceAlt,
+                    position: "relative",
+                    cursor: "pointer",
+                    transition: "background 200ms, border 200ms",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 18,
+                      height: 18,
+                      borderRadius: 9,
+                      background: darkMode ? t.accent : t.primary,
+                      position: "absolute",
+                      top: 2,
+                      left: darkMode ? 22 : 2,
+                      transition: "left 200ms, background 200ms",
+                      boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
+                    }}
+                  />
+                </button>
+              </div>
+
+              <button
+                onClick={signOut}
+                style={{
+                  width: "100%",
+                  border: "none",
+                  borderTop: `1px solid ${t.line2}`,
+                  background: "transparent",
+                  color: t.high,
+                  padding: "11px 10px 8px",
+                  marginTop: 5,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  fontSize: 13,
+                  textAlign: "left",
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

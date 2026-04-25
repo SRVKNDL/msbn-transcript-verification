@@ -14,6 +14,7 @@ import base64
 import importlib.util
 import json
 import os
+from urllib.parse import parse_qs, urlparse
 
 import boto3
 import pytest
@@ -23,6 +24,7 @@ os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("TABLE_NAME", "msbn-applications")
+os.environ.setdefault("BUCKET_NAME", "msbn-transcripts-test")
 
 _HANDLER_PATH = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "../../services/dashboard_api/handler.py")
@@ -395,6 +397,43 @@ def test_get_application_happy_path(dynamo_table, lambda_context):
     assert body["metadata"]["status"] == "READY_FOR_REVIEW"
     assert body["extraction"]["doc_type"] == "TRANSCRIPT"
     assert len(body["flags"]) == 2
+
+
+def test_get_application_includes_transcript_url(dynamo_table, lambda_context):
+    """Detail endpoint returns a short-lived signed URL for the uploaded PDF."""
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="msbn-transcripts-test")
+    s3.put_object(
+        Bucket="msbn-transcripts-test",
+        Key="uploads/transcript_smith.pdf",
+        Body=b"%PDF-1.4",
+        ContentType="application/pdf",
+    )
+    _seed_application(dynamo_table, "APP-D01")
+
+    event = _make_event(
+        "GET /applications/{id}", path_params={"id": "APP-D01"}
+    )
+    body = _parse_response(handler(event, lambda_context))
+
+    parsed = urlparse(body["transcriptUrl"])
+    assert parsed.netloc.startswith("msbn-transcripts-test.s3.")
+    assert parsed.path.endswith("/uploads/transcript_smith.pdf")
+    assert parse_qs(parsed.query)["Expires"]
+
+
+def test_get_application_missing_transcript_url_is_null(dynamo_table, lambda_context):
+    """Deleted S3 objects must not produce a broken preview URL."""
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="msbn-transcripts-test")
+    _seed_application(dynamo_table, "APP-D01")
+
+    event = _make_event(
+        "GET /applications/{id}", path_params={"id": "APP-D01"}
+    )
+    body = _parse_response(handler(event, lambda_context))
+
+    assert body["transcriptUrl"] is None
 
 
 def test_get_application_flag_status_pending(dynamo_table, lambda_context):

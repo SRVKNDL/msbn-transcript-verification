@@ -16,22 +16,43 @@ function fullTimestamp(hrs: number) {
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+function hasExtractedSummary(app: Application) {
+  return Boolean(app.applicantName.trim() || app.institution.trim());
+}
+
 export function QueuePage() {
   const t = useT();
   const navigate = useNavigate();
   const [apps, setApps] = useState<Application[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    listApplications().then(setApps);
+    listApplications()
+      .then((items) => {
+        setApps(items);
+        setError(null);
+      })
+      .catch((err: Error) => setError(err.message));
   }, []);
 
-  const shown = apps.filter((a) => {
+  const reviewableApps = apps
+    .filter((a) => a.status === "READY_FOR_REVIEW")
+    .filter(hasExtractedSummary);
+  const hiddenPendingCount = apps.filter(
+    (a) => a.status === "READY_FOR_REVIEW" && !hasExtractedSummary(a)
+  ).length;
+  const shown = reviewableApps.filter((a) => {
     if (filter === "high") return a.highestSeverity === "High";
     if (filter === "clean") return a.flagCount === 0;
     return true;
   });
+  const subtitle = error
+    ? `Unable to load queue: ${error}`
+    : hiddenPendingCount > 0
+      ? `${hiddenPendingCount} uploaded transcript${hiddenPendingCount === 1 ? "" : "s"} still waiting for extracted applicant data`
+      : "Prioritized transcript applications ready for board review";
 
   return (
     <div
@@ -46,7 +67,7 @@ export function QueuePage() {
       <PageHeader
         eyebrow="Review queue"
         title={`${shown.length} applications awaiting review`}
-        subtitle="Prioritized transcript applications ready for board review"
+        subtitle={subtitle}
         actions={
           <div style={{ display: "flex", gap: 6 }}>
             {(
@@ -197,10 +218,12 @@ export function QueuePage() {
                   marginBottom: 4,
                 }}
               >
-                No applications match this filter
+                {error ? "Queue failed to load" : "No applications match this filter"}
               </div>
               <div style={{ fontSize: 12 }}>
-                Try a different filter or check back later.
+                {error
+                  ? "Refresh after the API issue is resolved."
+                  : "Try a different filter or check back later."}
               </div>
             </div>
           )}

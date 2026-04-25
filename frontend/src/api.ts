@@ -63,6 +63,7 @@ type RawDetail = {
   applicationId?: string;
   metadata?: RawApplication;
   extraction?: unknown;
+  transcriptUrl?: string | null;
   flags?: RawFlag[];
 };
 
@@ -74,6 +75,24 @@ type RawAuditEvent = Partial<AuditEvent> & {
   notes?: string;
 };
 
+function stringValue(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function normalizeSeverity(value: unknown): Application["highestSeverity"] {
+  if (typeof value !== "string") return null;
+  switch (value.trim().toLowerCase()) {
+    case "high":
+      return "High";
+    case "medium":
+      return "Medium";
+    case "low":
+      return "Low";
+    default:
+      return null;
+  }
+}
+
 function normalizeApplication(raw: RawApplication): Application {
   const submittedAt = raw.submittedAt ?? raw.submission_ts ?? raw.uploadedAt ?? "";
   return {
@@ -84,7 +103,7 @@ function normalizeApplication(raw: RawApplication): Application {
     submittedAt,
     ageHours: raw.ageHours ?? ageHours(submittedAt),
     flagCount: raw.flagCount ?? raw.flag_count ?? 0,
-    highestSeverity: raw.highestSeverity ?? null,
+    highestSeverity: normalizeSeverity(raw.highestSeverity),
     status: raw.status ?? "UNKNOWN",
     caseRef: raw.caseRef ?? raw.case_ref ?? null,
     licenseNumber: raw.licenseNumber ?? raw.license_number ?? "",
@@ -96,9 +115,14 @@ function normalizeApplication(raw: RawApplication): Application {
 
 function normalizeSourceLocation(flag: RawFlag): Flag["sourceLocation"] {
   const loc = flag.sourceLocation ?? flag.source_location;
+  if (!loc || typeof loc !== "object") {
+    return { page: 1, spans: [] };
+  }
+  const page = Number(loc.page ?? loc.page_number ?? 1);
+  const spans = loc.spans ?? loc.text_spans ?? [];
   return {
-    page: loc?.page ?? loc?.page_number ?? 1,
-    spans: loc?.spans ?? loc?.text_spans ?? [],
+    page: Number.isFinite(page) && page > 0 ? page : 1,
+    spans: Array.isArray(spans) ? spans.map(String) : [],
   };
 }
 
@@ -110,16 +134,36 @@ function safePracticeFor(ruleCode: string) {
 }
 
 function normalizeFlag(raw: RawFlag): Flag {
-  const ruleCode = raw.ruleCode ?? raw.rule_code ?? "UNKNOWN";
+  const ruleCode = stringValue(raw.ruleCode ?? raw.rule_code, "UNKNOWN");
   return {
     ruleCode,
-    ruleName: raw.ruleName ?? raw.rule_name ?? ruleCode,
-    severity: raw.severity ?? "Low",
-    rationale: raw.rationale ?? "No rationale provided.",
+    ruleName: stringValue(raw.ruleName ?? raw.rule_name, ruleCode),
+    severity: normalizeSeverity(raw.severity) ?? "Low",
+    rationale: stringValue(raw.rationale, "No rationale provided."),
     sourceLocation: normalizeSourceLocation(raw),
-    status: raw.status ?? "PENDING",
-    safePractice: raw.safePractice ?? raw.safe_practice ?? safePracticeFor(ruleCode),
+    status: stringValue(raw.status, "PENDING"),
+    safePractice: stringValue(raw.safePractice ?? raw.safe_practice, safePracticeFor(ruleCode)),
   };
+}
+
+function normalizeExtractionRows(value: unknown): ExtractionData["physical"] {
+  if (!Array.isArray(value)) return [];
+  return value.map((row) => {
+    if (!row || typeof row !== "object") {
+      return { field: "unknown", value: String(row ?? ""), confidence: "low" as const };
+    }
+    const data = row as Record<string, unknown>;
+    const confidence =
+      typeof data.confidence === "string" && ["high", "medium", "low"].includes(data.confidence.toLowerCase())
+        ? (data.confidence.toLowerCase() as "high" | "medium" | "low")
+        : "low";
+    return {
+      field: stringValue(data.field, "unknown"),
+      value: stringValue(data.value, ""),
+      confidence,
+      expected: typeof data.expected === "string" ? data.expected : undefined,
+    };
+  });
 }
 
 function normalizeExtraction(raw: unknown): ExtractionData {
@@ -130,7 +174,12 @@ function normalizeExtraction(raw: unknown): ExtractionData {
     "content" in raw &&
     "program" in raw
   ) {
-    return raw as ExtractionData;
+    const data = raw as Record<string, unknown>;
+    return {
+      physical: normalizeExtractionRows(data.physical),
+      content: normalizeExtractionRows(data.content),
+      program: normalizeExtractionRows(data.program),
+    };
   }
   return { physical: [], content: [], program: [] };
 }
@@ -158,6 +207,7 @@ export async function getApplication(id: string): Promise<{
   application: Application;
   flags: Flag[];
   extraction: ExtractionData;
+  transcriptUrl: string | null;
 }> {
   const data = await fetchJson<RawDetail>(`/applications/${id}`);
   const metadata = data.application ?? data.metadata ?? { applicationId: data.applicationId };
@@ -168,6 +218,7 @@ export async function getApplication(id: string): Promise<{
     }),
     flags: (data.flags ?? []).map(normalizeFlag),
     extraction: normalizeExtraction(data.extraction),
+    transcriptUrl: data.transcriptUrl ?? null,
   };
 }
 

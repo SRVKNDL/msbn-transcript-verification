@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useT } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
 import { uploadTranscriptWithDetails } from "../api";
@@ -72,6 +72,13 @@ export function UploadPage() {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [draft, setDraft] = useState<ApplicationDraft>(emptyDraft);
   const [dragOver, setDragOver] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => setToast(null), 4500);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + " KB";
@@ -122,6 +129,7 @@ export function UploadPage() {
             : entry
         )
       );
+      setToast(`${file.name} uploaded. Extraction has started.`);
     } catch (err) {
       setFiles((prev) =>
         prev.map((entry) =>
@@ -151,6 +159,32 @@ export function UploadPage() {
 
   return (
     <>
+      {toast && (
+        <div
+          role="status"
+          style={{
+            position: "fixed",
+            right: 24,
+            bottom: 24,
+            zIndex: 40,
+            background: t.surface,
+            color: t.ink,
+            border: `1px solid ${t.line}`,
+            borderTop: `3px solid ${t.ok}`,
+            boxShadow: "0 16px 42px rgba(0,0,0,0.24)",
+            padding: "12px 16px",
+            borderRadius: 3,
+            maxWidth: 360,
+            fontSize: 13,
+            lineHeight: 1.45,
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 2 }}>
+            Upload complete
+          </div>
+          <div style={{ color: t.ink3 }}>{toast}</div>
+        </div>
+      )}
       <PageHeader
         eyebrow="New intake"
         title="Upload transcript"

@@ -37,7 +37,6 @@ function ShortcutLegend({ onClose }: { onClose: () => void }) {
     ["J / K", "Next / previous flag"],
     ["C", "Confirm current flag"],
     ["O", "Override current flag"],
-    ["F", "Toggle focus mode"],
     ["1\u20134", "Jump to page"],
     ["?", "Toggle this legend"],
     ["Esc", "Close overlay"],
@@ -79,6 +78,75 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div>
       <div style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace", letterSpacing: 0.4, textTransform: "uppercase" }}>{label}</div>
       <div style={{ fontSize: 14, color: TOKENS.ink, fontWeight: 600, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>{value}</div>
+    </div>
+  );
+}
+
+function hasExtractedSummary(app: Application) {
+  return Boolean(app.applicantName.trim() || app.institution.trim());
+}
+
+function ReviewStateScreen({
+  title,
+  message,
+  onBack,
+}: {
+  title: string;
+  message: string;
+  onBack: () => void;
+}) {
+  return (
+    <div style={{
+      width: "100vw",
+      height: "100vh",
+      background: LAYOUT.bg,
+      color: TOKENS.ink,
+      fontFamily: "'Inter', system-ui, sans-serif",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 24,
+      boxSizing: "border-box",
+    }}>
+      <div style={{
+        width: "min(520px, 100%)",
+        background: TOKENS.paper,
+        border: `1px solid ${TOKENS.line}`,
+        borderTop: `3px solid ${TOKENS.high}`,
+        borderRadius: 3,
+        padding: "24px 28px",
+        boxShadow: "0 18px 45px rgba(0,0,0,0.16)",
+      }}>
+        <div style={{
+          fontSize: 11,
+          color: TOKENS.ink4,
+          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          letterSpacing: 0.6,
+          textTransform: "uppercase",
+          marginBottom: 8,
+        }}>
+          Review detail
+        </div>
+        <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 10 }}>
+          {title}
+        </div>
+        <div style={{ fontSize: 13, color: TOKENS.ink2, lineHeight: 1.6, marginBottom: 18 }}>
+          {message}
+        </div>
+        <button onClick={onBack} style={{
+          border: "none",
+          background: TOKENS.ink,
+          color: "#fff",
+          padding: "9px 14px",
+          fontSize: 12,
+          fontWeight: 600,
+          borderRadius: 2,
+          cursor: "pointer",
+          fontFamily: "inherit",
+        }}>
+          Back to review queue
+        </button>
+      </div>
     </div>
   );
 }
@@ -198,160 +266,6 @@ function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpen
   );
 }
 
-// --- Focus mode overlay ---
-function FocusMode({ flags, activeIdx, setActiveIdx, decisions, setDecisions, onClose, onOpenData, currentPage, setCurrentPage }: {
-  flags: Flag[]; activeIdx: number; setActiveIdx: (i: number) => void;
-  decisions: Decisions; setDecisions: React.Dispatch<React.SetStateAction<Decisions>>;
-  onClose: () => void; onOpenData: () => void;
-  currentPage: number; setCurrentPage: (p: number) => void;
-}) {
-  const flag = flags[activeIdx];
-  const d = decisions[flag.ruleCode];
-  const decision = d?.decision;
-  const notes = d?.notes;
-  const setDecision = (v: "CONFIRM" | "OVERRIDE") =>
-    setDecisions((x) => ({ ...x, [flag.ruleCode]: { ...x[flag.ruleCode], decision: v, notes: x[flag.ruleCode]?.notes ?? "" } }));
-  const setNotes = (n: string) =>
-    setDecisions((x) => ({ ...x, [flag.ruleCode]: { ...x[flag.ruleCode], decision: x[flag.ruleCode]?.decision, notes: n } }));
-  const resolvedCount = flags.filter((f) => decisions[f.ruleCode]?.decision).length;
-
-  useEffect(() => { setCurrentPage(flag.sourceLocation.page); }, [activeIdx]);
-
-  return (
-    <div style={{
-      position: "absolute", inset: 0, background: "rgba(12,18,28,0.55)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 20, backdropFilter: "blur(4px)",
-    }}>
-      <div style={{
-        background: LAYOUT.bg, width: "94%", height: "92%",
-        display: "grid", gridTemplateRows: "48px 1fr 60px", gridTemplateColumns: "1fr 440px",
-        borderRadius: 4, boxShadow: "0 30px 80px rgba(0,0,0,0.4)",
-        overflow: "hidden", border: `1px solid ${LAYOUT.line}`,
-      }}>
-        {/* Header */}
-        <div style={{
-          gridColumn: "1 / -1", background: LAYOUT.sidebar, borderBottom: `1px solid ${LAYOUT.line}`,
-          display: "flex", alignItems: "center", padding: "0 18px", gap: 14,
-        }}>
-          <div style={{
-            fontSize: 10, fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-            color: LAYOUT.accent, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase",
-            padding: "3px 8px", background: TOKENS.paper, border: `1px solid ${LAYOUT.accent}`, borderRadius: 2,
-          }}>&#9670; Focus mode</div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>
-            Flag {activeIdx + 1} of {flags.length} · <span style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 12 }}>{flag.ruleCode}</span>
-          </div>
-          <div style={{ flex: 1 }} />
-          <ProgressBar total={flags.length} resolved={resolvedCount} />
-          <button onClick={onClose} style={{
-            border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
-            padding: "5px 10px", fontSize: 11, borderRadius: 2, cursor: "pointer",
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace", color: TOKENS.ink2,
-          }}>exit focus &#10005;</button>
-        </div>
-
-        {/* PDF */}
-        <div style={{
-          background: LAYOUT.pdfBg, overflow: "auto",
-          display: "flex", flexDirection: "column", alignItems: "center", padding: 24, gap: 12,
-        }}>
-          <div style={{ width: "100%", maxWidth: 560, display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11, color: TOKENS.ink3, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
-            <div>Page {currentPage} of 4</div>
-            <div style={{ display: "flex", gap: 4 }}>
-              {[1, 2, 3, 4].map((p) => (
-                <button key={p} onClick={() => setCurrentPage(p)} style={{
-                  border: `1px solid ${currentPage === p ? TOKENS.ink2 : TOKENS.line}`,
-                  background: currentPage === p ? TOKENS.ink : TOKENS.paper,
-                  color: currentPage === p ? "#fff" : TOKENS.ink3,
-                  width: 24, height: 22, fontSize: 11, cursor: "pointer", borderRadius: 2, fontFamily: "inherit",
-                }}>{p}</button>
-              ))}
-            </div>
-          </div>
-          <div style={{ padding: 28, color: TOKENS.ink3 }}>
-            Transcript page preview is available from processed S3 page images after deployment wiring.
-          </div>
-        </div>
-
-        {/* Flag detail */}
-        <div style={{ background: TOKENS.paper, padding: "24px 28px", overflow: "auto" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-            <SeverityChip severity={flag.severity} />
-            <span style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>{flag.safePractice}</span>
-          </div>
-          <div style={{ fontSize: 19, fontWeight: 600, marginBottom: 10, letterSpacing: -0.2, lineHeight: 1.25 }}>
-            {flag.ruleName.replaceAll("_", " ").toLowerCase()}
-          </div>
-          <div style={{ fontSize: 13, color: TOKENS.ink2, lineHeight: 1.6, marginBottom: 18 }}>{flag.rationale}</div>
-
-          <div style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>Evidence</div>
-          <div style={{
-            background: TOKENS.bg, border: `1px solid ${TOKENS.line}`, borderRadius: 2,
-            padding: "10px 12px", marginBottom: 18,
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 12, color: TOKENS.ink2,
-            lineHeight: 1.6, whiteSpace: "pre-wrap",
-          }}>
-            {flag.sourceLocation.spans.map((s, i) => <div key={i}>"{s}"</div>)}
-          </div>
-
-          <button onClick={onOpenData} style={{
-            width: "100%", background: TOKENS.bg, border: `1px solid ${TOKENS.line}`,
-            padding: "8px 12px", fontSize: 11, borderRadius: 2, cursor: "pointer",
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace", color: TOKENS.ink2,
-            marginBottom: 18, textAlign: "left",
-          }}>
-            # View extracted fields (21) &rarr;
-          </button>
-
-          <div style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Your decision</div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            <ActionButton big active={decision === "CONFIRM"} onClick={() => setDecision("CONFIRM")} variant="confirm">Confirm this flag</ActionButton>
-            <ActionButton big active={decision === "OVERRIDE"} onClick={() => setDecision("OVERRIDE")} variant="override">Override</ActionButton>
-          </div>
-          {decision === "OVERRIDE" && (
-            <textarea value={notes || ""} onChange={(e) => setNotes(e.target.value)}
-              placeholder="Notes required when overriding a flag..."
-              style={{
-                width: "100%", minHeight: 80, boxSizing: "border-box",
-                border: `1px solid ${TOKENS.line}`, borderRadius: 2,
-                padding: 10, fontSize: 13, fontFamily: "inherit", color: TOKENS.ink2,
-                background: TOKENS.bg, resize: "vertical",
-              }} />
-          )}
-        </div>
-
-        {/* Stepper footer */}
-        <div style={{
-          gridColumn: "1 / -1", background: LAYOUT.sidebar, borderTop: `1px solid ${LAYOUT.line}`,
-          display: "flex", alignItems: "center", padding: "0 18px", gap: 12,
-        }}>
-          <button onClick={() => setActiveIdx(Math.max(0, activeIdx - 1))} disabled={activeIdx === 0} style={{
-            border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
-            padding: "7px 14px", fontSize: 12, borderRadius: 2,
-            cursor: activeIdx === 0 ? "not-allowed" : "pointer",
-            color: activeIdx === 0 ? TOKENS.ink4 : TOKENS.ink2, fontFamily: "inherit",
-          }}>&larr; Previous</button>
-          <div style={{ flex: 1, display: "flex", justifyContent: "center", gap: 6 }}>
-            {flags.map((f, i) => (
-              <div key={i} onClick={() => setActiveIdx(i)} style={{
-                width: 22, height: 6, borderRadius: 3, cursor: "pointer",
-                background: i === activeIdx ? LAYOUT.accent : decisions[f.ruleCode]?.decision ? TOKENS.ok : TOKENS.line,
-              }} />
-            ))}
-          </div>
-          <button onClick={() => setActiveIdx(Math.min(flags.length - 1, activeIdx + 1))} disabled={activeIdx === flags.length - 1} style={{
-            border: "none", background: LAYOUT.accent, color: "#fff",
-            padding: "7px 14px", fontSize: 12, borderRadius: 2, fontWeight: 600,
-            cursor: activeIdx === flags.length - 1 ? "not-allowed" : "pointer",
-            opacity: activeIdx === flags.length - 1 ? 0.5 : 1, fontFamily: "inherit",
-          }}>Next flag &rarr;</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // --- Extracted data drawer ---
 function ExtractedDataDrawer({ flag, extraction, onClose }: {
   flag: Flag | null; extraction: ExtractionData; onClose: () => void;
@@ -465,11 +379,12 @@ export function ReviewPage() {
   const [queueApps, setQueueApps] = useState<Application[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
   const [extraction, setExtraction] = useState<ExtractionData>({ physical: [], content: [], program: [] });
+  const [transcriptUrl, setTranscriptUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [activeFlagIdx, setActiveFlagIdx] = useState(0);
   const [decisions, setDecisions] = useState<Decisions>({});
   const [currentPage, setCurrentPage] = useState(2);
   const [overallDecision, setOverallDecision] = useState<OverallDecision>(null);
-  const [focusMode, setFocusMode] = useState(false);
   const [drawerFlag, setDrawerFlag] = useState<Flag | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -500,14 +415,10 @@ export function ReviewPage() {
           setDecisions((x) => ({ ...x, [code]: { ...x[code], decision: "OVERRIDE", notes: x[code]?.notes ?? "" } }));
         }
         break;
-      case "f":
-        setFocusMode((v) => !v);
-        break;
       case "?":
         setShowShortcuts((v) => !v);
         break;
       case "escape":
-        setFocusMode(false);
         setDrawerOpen(false);
         setShowShortcuts(false);
         break;
@@ -524,19 +435,40 @@ export function ReviewPage() {
 
   useEffect(() => {
     if (!id) return;
+    setApp(null);
+    setFlags([]);
+    setExtraction({ physical: [], content: [], program: [] });
+    setTranscriptUrl(null);
+    setError(null);
     setActiveFlagIdx(0);
     setDecisions({});
     setCurrentPage(2);
     setOverallDecision(null);
-    setFocusMode(false);
     setDrawerOpen(false);
-    getApplication(id).then((data) => {
-      setApp(data.application);
-      setFlags(data.flags);
-      setExtraction(data.extraction);
-    });
+    getApplication(id)
+      .then((data) => {
+        setApp(data.application);
+        setFlags(data.flags);
+        setExtraction(data.extraction);
+        setTranscriptUrl(data.transcriptUrl);
+      })
+      .catch((err: Error) => {
+        setError(err.message);
+        setApp(null);
+        setFlags([]);
+      });
     listApplications().then(setQueueApps).catch(() => setQueueApps([]));
   }, [id]);
+
+  if (error) {
+    return (
+      <ReviewStateScreen
+        title="Application could not load"
+        message={`${error}. This usually means the record is no longer reviewable, the API rejected the request, or the application ID is stale.`}
+        onBack={() => navigate("/queue")}
+      />
+    );
+  }
 
   if (!app) return (
     <div style={{
@@ -578,7 +510,20 @@ export function ReviewPage() {
     </div>
   );
 
-  const activeFlag = flags[activeFlagIdx];
+  const reviewableQueueApps = queueApps
+    .filter((a) => a.status === "READY_FOR_REVIEW")
+    .filter(hasExtractedSummary);
+
+  if (flags.length === 0 && app.flagCount > 0) {
+    return (
+      <ReviewStateScreen
+        title="Flag details are not available"
+        message={`${app.applicantName || app.applicationId} is listed with ${app.flagCount} flag${app.flagCount === 1 ? "" : "s"}, but the detail API returned no flag records. This usually means the queue row is stale or processing has not finished writing the flag items.`}
+        onBack={() => navigate("/queue")}
+      />
+    );
+  }
+
   const resolvedCount = flags.filter((f) => decisions[f.ruleCode]?.decision).length;
   const allDecided = resolvedCount === flags.length;
   const allOverridesNoted = flags.every((f) => {
@@ -640,12 +585,6 @@ export function ReviewPage() {
           fontFamily: "'JetBrains Mono', ui-monospace, monospace",
           textDecoration: "none", cursor: "pointer",
         }}>Check Nursys &#8599;</a>
-        <button onClick={() => setFocusMode(true)} style={{
-          border: `1px solid ${LAYOUT.accent}`, background: TOKENS.paper,
-          color: LAYOUT.accent, padding: "5px 12px", fontSize: 11, borderRadius: 2,
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-          fontWeight: 600, letterSpacing: 0.3, textTransform: "uppercase", cursor: "pointer",
-        }}>&#9670; Focus mode</button>
         <button onClick={() => setShowShortcuts(true)} style={{
           border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
           color: TOKENS.ink3, width: 24, height: 24, fontSize: 13, borderRadius: 2,
@@ -662,11 +601,11 @@ export function ReviewPage() {
         <div style={{ padding: "12px 14px 10px", borderBottom: `1px solid ${TOKENS.line2}` }}>
           <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 }}>Review queue</div>
           <div style={{ fontSize: 13, color: TOKENS.ink2 }}>
-            <span style={{ fontWeight: 600 }}>{queueApps.length}</span> pending · sorted by age
+            <span style={{ fontWeight: 600 }}>{reviewableQueueApps.length}</span> pending · sorted by age
           </div>
         </div>
         <div style={{ flex: 1, overflow: "auto" }}>
-          {queueApps.map((a) => (
+          {reviewableQueueApps.map((a) => (
             <QueueRow key={a.applicationId} app={a} active={a.applicationId === id}
               onClick={() => navigate(`/review/${a.applicationId}`)} />
           ))}
@@ -710,7 +649,23 @@ export function ReviewPage() {
           textAlign: "center",
           lineHeight: 1.5,
         }}>
-          Transcript page preview is available from processed S3 page images after deployment wiring.
+          {transcriptUrl ? (
+            <iframe
+              title={`Transcript preview for ${app.applicationId}`}
+              src={transcriptUrl}
+              style={{
+                width: "100%",
+                minHeight: Math.round(660 * pdfScale),
+                border: "none",
+                background: "#fff",
+              }}
+            />
+          ) : (
+            <span>
+              Transcript preview is unavailable because this application does not
+              have an uploaded S3 object key in DynamoDB.
+            </span>
+          )}
         </div>
         <div style={{
           display: "flex", alignItems: "center", gap: 8,
@@ -826,15 +781,6 @@ export function ReviewPage() {
           Submit decision &rarr;
         </button>
       </div>
-
-      {/* Focus mode overlay */}
-      {focusMode && flags.length > 0 && (
-        <FocusMode flags={flags} activeIdx={activeFlagIdx} setActiveIdx={setActiveFlagIdx}
-          decisions={decisions} setDecisions={setDecisions}
-          currentPage={currentPage} setCurrentPage={setCurrentPage}
-          onClose={() => setFocusMode(false)}
-          onOpenData={() => activeFlag && openDrawer(activeFlag)} />
-      )}
 
       {/* Extracted data drawer */}
       {drawerOpen && (

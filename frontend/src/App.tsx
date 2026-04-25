@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { ThemeCtx, ThemeModeCtx, THEME, DARK_THEME } from "./theme";
 import { Shell } from "./components/Shell";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { QueuePage } from "./pages/QueuePage";
@@ -73,7 +74,7 @@ function App() {
             <Route path="/upload" element={<RequireAuth><ShellRoute page="upload" /></RequireAuth>} />
             <Route path="/settings" element={<RequireAuth><ShellRoute page="settings" /></RequireAuth>} />
             <Route path="/audit" element={<RequireAuth><ShellRoute page="audit" /></RequireAuth>} />
-            <Route path="/review/:id" element={<RequireAuth><ReviewPage /></RequireAuth>} />
+            <Route path="/review/:id" element={<RequireAuth><ErrorBoundary><ReviewPage /></ErrorBoundary></RequireAuth>} />
             <Route path="/audit/:id" element={<RequireAuth><AuditPage /></RequireAuth>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

@@ -10,6 +10,7 @@ from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -165,6 +166,33 @@ def _flag_view(flag: dict) -> dict:
         "status": "PENDING" if reviewer_status == "OPEN" else reviewer_status,
         "safePractice": flag.get("safe_practice") or _safe_practice_for(rule_code),
     }
+
+
+def _transcript_url(metadata: dict) -> str | None:
+    s3_key = metadata.get("s3_key")
+    if not _BUCKET_NAME or not s3_key:
+        return None
+
+    try:
+        _s3.head_object(Bucket=_BUCKET_NAME, Key=s3_key)
+    except ClientError:
+        logger.warning(
+            json.dumps(
+                {
+                    "action": "transcript_preview_missing",
+                    "bucket": _BUCKET_NAME,
+                    "s3_key": s3_key,
+                }
+            )
+        )
+        return None
+
+    return _s3.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={"Bucket": _BUCKET_NAME, "Key": s3_key},
+        ExpiresIn=900,
+        HttpMethod="GET",
+    )
 
 
 # Router.
@@ -336,6 +364,7 @@ def _get_application(app_id: str | None, table) -> dict:
             "application": _application_view(metadata, extraction),
             "metadata": metadata,
             "extraction": extraction,
+            "transcriptUrl": _transcript_url(metadata),
             "flags": flags,
         },
     )

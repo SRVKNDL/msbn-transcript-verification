@@ -224,7 +224,8 @@ class ComputeConstruct(Construct):
             "dynamodb:PutItem",
         )
 
-        # Uploads enter through pre-signed PUT URLs; page images for review live
-        # under processed/.
+        # Uploads enter through pre-signed PUT URLs and are previewed through
+        # short-lived pre-signed GET URLs in the reviewer UI.
         storage.bucket.grant_put(self.dashboard_api_lambda, "uploads/*")
+        storage.bucket.grant_read(self.dashboard_api_lambda, "uploads/*")
         storage.bucket.grant_read(self.dashboard_api_lambda, "processed/*")

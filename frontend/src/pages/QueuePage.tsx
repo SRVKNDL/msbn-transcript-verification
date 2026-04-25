@@ -40,12 +40,24 @@ export function QueuePage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    listApplications({ statuses: ["PROCESSING", "INTAKE_COMPLETE", "READY_FOR_REVIEW"] })
-      .then((items) => {
-        setApps(items);
-        setError(null);
-      })
-      .catch((err: Error) => setError(err.message));
+    let cancelled = false;
+    const load = () => {
+      listApplications({ statuses: ["PROCESSING", "INTAKE_COMPLETE", "READY_FOR_REVIEW"] })
+        .then((items) => {
+          if (cancelled) return;
+          setApps(items);
+          setError(null);
+        })
+        .catch((err: Error) => {
+          if (!cancelled) setError(err.message);
+        });
+    };
+    load();
+    const interval = window.setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, []);
 
   const queueApps = apps.filter(

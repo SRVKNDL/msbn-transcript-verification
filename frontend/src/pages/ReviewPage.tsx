@@ -684,7 +684,7 @@ export function ReviewPage() {
     <div style={{
       width: "100vw", height: "100vh", background: LAYOUT.bg,
       fontFamily: "'Open Sans', system-ui, sans-serif",
-      display: "grid", gridTemplateColumns: "260px 1fr 420px", gridTemplateRows: "44px 1fr",
+      display: "grid", gridTemplateColumns: "240px 1fr 320px", gridTemplateRows: "44px 1fr",
       overflow: "hidden",
     }}>
       <div style={{ gridColumn: "1 / -1", background: LAYOUT.sidebar, borderBottom: `1px solid ${LAYOUT.line}` }} />
@@ -771,7 +771,7 @@ export function ReviewPage() {
       width: "100vw", height: "100vh", position: "relative",
       background: LAYOUT.bg, fontFamily: "'Open Sans', system-ui, sans-serif", color: TOKENS.ink,
       display: "grid",
-      gridTemplateColumns: queueOpen ? "260px 1fr 420px" : "0 1fr 420px",
+      gridTemplateColumns: queueOpen ? "240px 1fr 320px" : "0 1fr 320px",
       gridTemplateRows: "44px 1fr",
       overflow: "hidden",
     }}>

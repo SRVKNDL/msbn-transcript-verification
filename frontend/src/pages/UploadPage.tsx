@@ -23,6 +23,8 @@ const emptyDraft: ApplicationDraft = {
 
 const applicationIdPattern = /^[A-Za-z0-9._-]+$/;
 
+let _uploadCounter = 0;
+
 export function UploadPage() {
   const t = useT();
   const navigate = useNavigate();
@@ -97,7 +99,11 @@ export function UploadPage() {
   };
 
   const startUploads = () => {
-    const details = { ...draft };
+    _uploadCounter += 1;
+    const details = {
+      ...draft,
+      applicantName: `User#${_uploadCounter}`,
+    };
     void Promise.all(
       files
         .filter((entry) => entry.status === "queued" || entry.status === "failed")

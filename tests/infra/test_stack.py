@@ -116,12 +116,12 @@ class TestExtractLambdaHardening:
             }),
         )
 
-    def test_uses_arm64_architecture(self, compute_template):
+    def test_uses_x86_64_architecture(self, compute_template):
         compute_template.has_resource_properties(
             "AWS::Lambda::Function",
             Match.object_like({
                 "FunctionName": "msbn-extract",
-                "Architectures": ["arm64"],
+                "Architectures": ["x86_64"],
             }),
         )
 
@@ -251,12 +251,12 @@ class TestPrefillLambda:
             }),
         )
 
-    def test_uses_arm64_architecture(self, compute_template):
+    def test_uses_x86_64_architecture(self, compute_template):
         compute_template.has_resource_properties(
             "AWS::Lambda::Function",
             Match.object_like({
                 "FunctionName": "msbn-prefill",
-                "Architectures": ["arm64"],
+                "Architectures": ["x86_64"],
             }),
         )
 

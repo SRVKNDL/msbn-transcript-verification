@@ -116,23 +116,6 @@ export function QueuePage() {
         >
           <span>{selected.size} selected</span>
           <button
-            onClick={() => {
-              /* placeholder */
-            }}
-            style={{
-              border: "1px solid rgba(255,255,255,0.3)",
-              background: "transparent",
-              color: t.primaryInk,
-              padding: "4px 10px",
-              fontSize: 11,
-              borderRadius: 2,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            Assign to me
-          </button>
-          <button
             onClick={() => setSelected(new Set())}
             style={{
               border: "none",

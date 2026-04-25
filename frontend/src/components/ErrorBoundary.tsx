@@ -30,7 +30,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           height: "100vh",
           background: LAYOUT.bg,
           color: TOKENS.ink,
-          fontFamily: "'Inter', system-ui, sans-serif",
+          fontFamily: "'Open Sans', system-ui, sans-serif",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -53,7 +53,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             style={{
               fontSize: 11,
               color: TOKENS.ink4,
-              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
               letterSpacing: 0.6,
               textTransform: "uppercase",
               marginBottom: 8,
@@ -61,7 +61,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           >
             Frontend error
           </div>
-          <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 10 }}>
+          <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 10, fontFamily: "'Montserrat', system-ui, sans-serif" }}>
             This review page could not render
           </div>
           <div style={{ fontSize: 13, color: TOKENS.ink2, lineHeight: 1.6, marginBottom: 18 }}>

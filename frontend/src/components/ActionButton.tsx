@@ -29,7 +29,7 @@ export function ActionButton({
         padding: big ? "10px 14px" : "5px 10px",
         fontSize: big ? 13 : 11,
         borderRadius: 2,
-        fontFamily: big ? "inherit" : "'JetBrains Mono', ui-monospace, monospace",
+        fontFamily: big ? "inherit" : "'IBM Plex Mono', ui-monospace, monospace",
         fontWeight: 600,
         letterSpacing: big ? 0.2 : 0.3,
         textTransform: big ? undefined : "uppercase",

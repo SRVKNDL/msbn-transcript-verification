@@ -22,7 +22,7 @@ export function AuditPage() {
         width: "100vw",
         height: "100vh",
         background: LAYOUT.bg,
-        fontFamily: "'Inter', system-ui, sans-serif",
+        fontFamily: "'Open Sans', system-ui, sans-serif",
         color: TOKENS.ink,
         display: "flex",
         flexDirection: "column",
@@ -54,7 +54,7 @@ export function AuditPage() {
               fontSize: 11,
               borderRadius: 2,
               cursor: "pointer",
-              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
               color: TOKENS.ink2,
             }}
           >
@@ -135,7 +135,7 @@ export function AuditPage() {
                   <span
                     style={{
                       fontFamily:
-                        "'JetBrains Mono', ui-monospace, monospace",
+                        "'IBM Plex Mono', ui-monospace, monospace",
                       fontSize: 11,
                       fontWeight: 600,
                       color: TOKENS.ink2,
@@ -147,7 +147,7 @@ export function AuditPage() {
                   <span
                     style={{
                       fontFamily:
-                        "'JetBrains Mono', ui-monospace, monospace",
+                        "'IBM Plex Mono', ui-monospace, monospace",
                       fontSize: 10,
                       color: TOKENS.ink4,
                     }}
@@ -158,7 +158,7 @@ export function AuditPage() {
                   <span
                     style={{
                       fontFamily:
-                        "'JetBrains Mono', ui-monospace, monospace",
+                        "'IBM Plex Mono', ui-monospace, monospace",
                       fontSize: 10,
                       color: TOKENS.ink4,
                     }}

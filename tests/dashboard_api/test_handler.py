@@ -3,6 +3,7 @@
 Covers:
 - GET /applications: happy path, pagination (limit, cursor), empty queue
 - GET /applications/{id}: full detail with flags, 404, missing ID
+- GET /applications/{id}/pages/{page}: presigned rendered page image URLs
 - POST /applications/{id}/decision: happy path, OVERRIDE requires notes,
   unknown ruleCode, missing fields, invalid decision values, 404
 - GET /applications/{id}/audit: newest-first ordering, empty trail, 404
@@ -456,6 +457,75 @@ def test_get_application_missing_s3_key_reports_status(dynamo_table, lambda_cont
     assert body["transcriptUrl"] is None
     assert body["transcriptPreviewStatus"] == "MISSING_S3_KEY"
     assert body["transcriptS3Key"] is None
+
+
+def test_get_page_image_returns_presigned_url(dynamo_table, lambda_context):
+    """Rendered transcript page endpoint returns a short-lived signed PNG URL."""
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="msbn-transcripts-test")
+    s3.put_object(
+        Bucket="msbn-transcripts-test",
+        Key="processed/APP-D05/page_transcript_2.png",
+        Body=b"\x89PNG\r\n",
+        ContentType="image/png",
+    )
+    _seed_application(dynamo_table, "APP-D05")
+    _seed_document(dynamo_table, "APP-D05")
+
+    event = _make_event(
+        "GET /applications/{id}/pages/{page}",
+        path_params={"id": "APP-D05", "page": "2"},
+    )
+    resp = handler(event, lambda_context)
+    assert resp["statusCode"] == 200
+
+    body = _parse_response(resp)
+    parsed = urlparse(body["url"])
+    assert parsed.netloc.startswith("msbn-transcripts-test.s3.")
+    assert parsed.path.endswith("/processed/APP-D05/page_transcript_2.png")
+    assert body["s3Key"] == "processed/APP-D05/page_transcript_2.png"
+    assert body["expiresIn"] == 300
+
+
+def test_get_page_image_missing_object_returns_404(dynamo_table, lambda_context):
+    """Missing rendered page images must return 404 instead of broken URLs."""
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="msbn-transcripts-test")
+    _seed_application(dynamo_table, "APP-D06")
+    _seed_document(dynamo_table, "APP-D06")
+
+    event = _make_event(
+        "GET /applications/{id}/pages/{page}",
+        path_params={"id": "APP-D06", "page": "1"},
+    )
+    resp = handler(event, lambda_context)
+    assert resp["statusCode"] == 404
+    assert "page image" in _parse_response(resp)["error"].lower()
+
+
+def test_get_page_image_invalid_page_returns_400(dynamo_table, lambda_context):
+    """Page path parameter must be a positive integer."""
+    _seed_application(dynamo_table, "APP-D07")
+
+    event = _make_event(
+        "GET /applications/{id}/pages/{page}",
+        path_params={"id": "APP-D07", "page": "zero"},
+    )
+    resp = handler(event, lambda_context)
+    assert resp["statusCode"] == 400
+
+
+def test_get_page_image_outside_page_count_returns_404(dynamo_table, lambda_context):
+    """Requests outside known transcript page count must be rejected."""
+    _seed_application(dynamo_table, "APP-D08")
+    _seed_document(dynamo_table, "APP-D08")
+
+    event = _make_event(
+        "GET /applications/{id}/pages/{page}",
+        path_params={"id": "APP-D08", "page": "5"},
+    )
+    resp = handler(event, lambda_context)
+    assert resp["statusCode"] == 404
 
 
 def test_get_application_flag_status_pending(dynamo_table, lambda_context):

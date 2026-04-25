@@ -9,6 +9,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { QueuePage } from "./pages/QueuePage";
 import { UploadPage } from "./pages/UploadPage";
 import { ReviewPage } from "./pages/ReviewPage";
+import { ReviewedPage } from "./pages/ReviewedPage";
 import { AuditPage } from "./pages/AuditPage";
 import { AuditOverviewPage } from "./pages/AuditOverviewPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -75,6 +76,7 @@ function App() {
             <Route path="/settings" element={<RequireAuth><ShellRoute page="settings" /></RequireAuth>} />
             <Route path="/audit" element={<RequireAuth><ShellRoute page="audit" /></RequireAuth>} />
             <Route path="/review/:id" element={<RequireAuth><ErrorBoundary><ReviewPage /></ErrorBoundary></RequireAuth>} />
+            <Route path="/reviewed/:id" element={<RequireAuth><ReviewedPage /></RequireAuth>} />
             <Route path="/audit/:id" element={<RequireAuth><AuditPage /></RequireAuth>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

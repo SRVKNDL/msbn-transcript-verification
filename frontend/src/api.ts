@@ -252,6 +252,10 @@ export async function submitDecision(
   if (!res.ok) throw new Error(`API ${res.status}: decision submit failed`);
 }
 
+export async function getPageImage(id: string, page: number): Promise<{ url: string }> {
+  return fetchJson(`/applications/${id}/pages/${page}`);
+}
+
 export async function uploadTranscript(file: File): Promise<{ s3Key: string }> {
   return uploadTranscriptWithDetails(file, {});
 }

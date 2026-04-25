@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
 import { uploadTranscriptWithDetails } from "../api";
@@ -67,6 +68,7 @@ async function extractDraftFromPdf(file: File): Promise<Partial<ApplicationDraft
 
 export function UploadPage() {
   const t = useT();
+  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedFilesRef = useRef<Record<string, File>>({});
   const [files, setFiles] = useState<FileEntry[]>([]);
@@ -444,7 +446,7 @@ export function UploadPage() {
             justifyContent: "flex-end",
           }}
         >
-          <Btn variant="ghost">Cancel</Btn>
+          <Btn variant="ghost" onClick={() => navigate("/dashboard")}>Cancel</Btn>
           <Btn
             variant="primary"
             disabled={

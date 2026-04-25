@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
 import { listApplications } from "../api";
@@ -82,6 +83,7 @@ export function DashboardPage({
   onNavigate: (id: string) => void;
 }) {
   const t = useT();
+  const navigate = useNavigate();
   const [apps, setApps] = useState<Application[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,6 +99,13 @@ export function DashboardPage({
   const highSeverity = awaiting.filter((a) => a.highestSeverity === "High").length;
   const flagged = awaiting.reduce((sum, app) => sum + app.flagCount, 0);
   const queue = awaiting.slice(0, 5);
+  const today = new Date();
+  const eyebrowDate = today.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
 
   const stats = [
     {
@@ -128,7 +137,7 @@ export function DashboardPage({
   return (
     <>
       <PageHeader
-        eyebrow={`Tuesday \u00b7 21 April 2026 \u00b7 ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} CT`}
+        eyebrow={`${eyebrowDate} \u00b7 ${today.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} CT`}
         title="Reviewer dashboard"
         subtitle={`${awaiting.length} applications awaiting review \u00b7 ${highSeverity} high severity`}
       />
@@ -340,6 +349,7 @@ export function DashboardPage({
                       style={{ padding: "11px 14px", textAlign: "right" }}
                     >
                       <span
+                        onClick={() => navigate(`/review/${r.applicationId}`)}
                         style={{
                           color: t.primary,
                           fontSize: 12,
@@ -463,7 +473,6 @@ export function DashboardPage({
                   hint="\u2318L"
                   onClick={() => onNavigate("audit")}
                 />
-                <ShortcutBtn label="Rule reference" hint="\u2318R" />
               </div>
             </Card>
           </div>

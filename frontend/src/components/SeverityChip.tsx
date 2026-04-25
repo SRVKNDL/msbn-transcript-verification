@@ -19,7 +19,7 @@ export function SeverityChip({
         style={{
           fontSize: 11,
           color: TOKENS.ink4,
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           letterSpacing: 0.3,
         }}
       >
@@ -42,7 +42,7 @@ export function SeverityChip({
         fontSize: isLg ? 12 : 11,
         fontWeight: 600,
         letterSpacing: 0.2,
-        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+        fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
         textTransform: "uppercase",
       }}
     >

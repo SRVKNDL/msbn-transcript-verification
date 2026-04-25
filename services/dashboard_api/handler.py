@@ -229,6 +229,11 @@ def handler(event: dict, context) -> dict:
         if route_key == "GET /applications/{id}":
             return _get_application(path_params.get("id"), table)
 
+        if route_key == "GET /applications/{id}/pages/{page}":
+            return _get_page_image(
+                path_params.get("id"), path_params.get("page"), table
+            )
+
         if route_key == "POST /applications/{id}/decision":
             return _post_decision(
                 event, path_params.get("id"), reviewer_email, table
@@ -377,6 +382,69 @@ def _get_application(app_id: str | None, table) -> dict:
             "flags": flags,
         },
     )
+
+
+# GET /applications/{id}/pages/{page}.
+
+
+def _get_page_image(app_id: str | None, page: str | None, table) -> dict:
+    """Return a short-lived signed URL for a rendered transcript page image."""
+    if not app_id:
+        return _response(400, {"error": "Missing application ID"})
+
+    try:
+        page_num = int(page or "")
+    except ValueError:
+        return _response(400, {"error": "Page must be an integer"})
+
+    if page_num < 1:
+        return _response(400, {"error": "Page must be >= 1"})
+
+    pk = f"APP#{app_id}"
+    meta_resp = table.get_item(Key={"PK": pk, "SK": "METADATA"})
+    if "Item" not in meta_resp:
+        return _response(404, {"error": f"Application {app_id} not found"})
+
+    doc_resp = table.get_item(Key={"PK": pk, "SK": "DOCUMENT#TRANSCRIPT"})
+    page_count = int(
+        (doc_resp.get("Item") or {}).get("page_count")
+        or meta_resp["Item"].get("page_count")
+        or meta_resp["Item"].get("document_count")
+        or 0
+    )
+    if page_count and page_num > page_count:
+        return _response(
+            404,
+            {"error": f"Page {page_num} is outside transcript page count {page_count}"},
+        )
+
+    if not _BUCKET_NAME:
+        return _response(500, {"error": "Transcript bucket is not configured"})
+
+    image_key = f"processed/{app_id}/page_transcript_{page_num}.png"
+    try:
+        _s3.head_object(Bucket=_BUCKET_NAME, Key=image_key)
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "UNKNOWN")
+        logger.warning(
+            json.dumps(
+                {
+                    "action": "page_image_missing",
+                    "bucket": _BUCKET_NAME,
+                    "s3_key": image_key,
+                    "error_code": error_code,
+                }
+            )
+        )
+        return _response(404, {"error": f"Page image not found: {page_num}"})
+
+    url = _s3.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={"Bucket": _BUCKET_NAME, "Key": image_key},
+        ExpiresIn=300,
+        HttpMethod="GET",
+    )
+    return _response(200, {"url": url, "s3Key": image_key, "expiresIn": 300})
 
 
 # POST /applications/{id}/decision.

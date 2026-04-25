@@ -1,10 +1,12 @@
-import { useT } from "../theme";
+import { useT, useThemeMode } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
 import { getCurrentUser, signOut } from "../auth";
 
 export function SettingsPage() {
   const t = useT();
+  const { mode, setMode } = useThemeMode();
   const user = getCurrentUser();
+  const darkMode = mode === "dark";
 
   const handleLogout = () => {
     signOut();
@@ -40,6 +42,56 @@ export function SettingsPage() {
             <Btn variant="outline" onClick={handleLogout}>
               Sign out
             </Btn>
+          </div>
+        </Card>
+
+        <div style={{ height: 14 }} />
+
+        <Card title="Appearance" subtitle="Interface color mode">
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 16,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: t.ink }}>
+                Dark mode
+              </div>
+              <div style={{ fontSize: 11, color: t.ink4, marginTop: 2 }}>
+                {darkMode ? "Dark Government theme is active" : "Modern Government theme is active"}
+              </div>
+            </div>
+            <button
+              onClick={() => setMode(darkMode ? "light" : "dark")}
+              aria-label="Toggle dark mode"
+              style={{
+                width: 48,
+                height: 26,
+                borderRadius: 13,
+                border: `1px solid ${darkMode ? t.accent : t.line}`,
+                background: darkMode ? t.accentBg : t.surfaceAlt,
+                position: "relative",
+                cursor: "pointer",
+                transition: "background 200ms, border 200ms",
+              }}
+            >
+              <span
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 10,
+                  background: darkMode ? t.accent : t.primary,
+                  position: "absolute",
+                  top: 2,
+                  left: darkMode ? 23 : 3,
+                  transition: "left 200ms, background 200ms",
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.28)",
+                }}
+              />
+            </button>
           </div>
         </Card>
 

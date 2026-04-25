@@ -5,7 +5,7 @@ import { SeverityChip } from "../components/SeverityChip";
 import { ConfidenceDot } from "../components/ConfidenceDot";
 import { ProgressBar } from "../components/ProgressBar";
 import { ActionButton } from "../components/ActionButton";
-import { getApplication, listApplications, submitDecision } from "../api";
+import { getApplication, getPageImage, listApplications, submitDecision } from "../api";
 import { getCurrentUser } from "../auth";
 import type { Application, Flag, Decisions, OverallDecision, ExtractionData } from "../types";
 
@@ -22,7 +22,7 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
       background: TOKENS.ink, color: "#fff", padding: "12px 24px",
       borderRadius: 4, fontSize: 13, fontWeight: 500, zIndex: 100,
       boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
-      fontFamily: "'Inter', system-ui, sans-serif",
+      fontFamily: "'Open Sans', system-ui, sans-serif",
       animation: "toastIn 300ms cubic-bezier(.2,.7,.3,1)",
     }}>
       <span style={{ marginRight: 8, color: TOKENS.ok }}>&#10003;</span>
@@ -37,7 +37,7 @@ function ShortcutLegend({ onClose }: { onClose: () => void }) {
     ["J / K", "Next / previous flag"],
     ["C", "Confirm current flag"],
     ["O", "Override current flag"],
-    ["1\u20134", "Jump to page"],
+    ["1\u20139", "Jump to page"],
     ["?", "Toggle this legend"],
     ["Esc", "Close overlay"],
   ];
@@ -55,7 +55,7 @@ function ShortcutLegend({ onClose }: { onClose: () => void }) {
         {shortcuts.map(([key, desc]) => (
           <div key={key} style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 8 }}>
             <span style={{
-              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
               fontSize: 11, fontWeight: 600, background: TOKENS.bg,
               border: `1px solid ${TOKENS.line}`, borderRadius: 2,
               padding: "2px 8px", minWidth: 40, textAlign: "center",
@@ -76,29 +76,14 @@ function timeAgo(hrs: number) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace", letterSpacing: 0.4, textTransform: "uppercase" }}>{label}</div>
-      <div style={{ fontSize: 14, color: TOKENS.ink, fontWeight: 600, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>{value}</div>
+      <div style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.4, textTransform: "uppercase" }}>{label}</div>
+      <div style={{ fontSize: 14, color: TOKENS.ink, fontWeight: 600, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{value}</div>
     </div>
   );
 }
 
 function hasExtractedSummary(app: Application) {
   return Boolean(app.applicantName.trim() || app.institution.trim());
-}
-
-function transcriptPreviewMessage(status: string, s3Key: string | null) {
-  switch (status) {
-    case "MISSING_S3_KEY":
-      return "Transcript preview is unavailable because this DynamoDB record does not have an s3_key.";
-    case "S3_OBJECT_MISSING":
-      return `Transcript preview is unavailable because the uploaded PDF no longer exists in S3${s3Key ? ` (${s3Key})` : ""}.`;
-    case "BUCKET_NOT_CONFIGURED":
-      return "Transcript preview is unavailable because the dashboard API bucket setting is not configured.";
-    case "LEGACY_API_RESPONSE":
-      return "Transcript preview is unavailable because the deployed dashboard API has not been updated to return transcript preview details.";
-    default:
-      return "Transcript preview is unavailable for this application.";
-  }
 }
 
 function ReviewStateScreen({
@@ -116,7 +101,7 @@ function ReviewStateScreen({
       height: "100vh",
       background: LAYOUT.bg,
       color: TOKENS.ink,
-      fontFamily: "'Inter', system-ui, sans-serif",
+      fontFamily: "'Open Sans', system-ui, sans-serif",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -135,14 +120,14 @@ function ReviewStateScreen({
         <div style={{
           fontSize: 11,
           color: TOKENS.ink4,
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           letterSpacing: 0.6,
           textTransform: "uppercase",
           marginBottom: 8,
         }}>
           Review detail
         </div>
-        <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 10 }}>
+        <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 10, fontFamily: "'Montserrat', system-ui, sans-serif" }}>
           {title}
         </div>
         <div style={{ fontSize: 13, color: TOKENS.ink2, lineHeight: 1.6, marginBottom: 18 }}>
@@ -166,6 +151,103 @@ function ReviewStateScreen({
   );
 }
 
+// --- TranscriptPageViewer: fetches S3 presigned URLs for page images ---
+function TranscriptPageViewer({
+  appId,
+  page,
+  flags,
+  pdfScale,
+}: {
+  appId: string;
+  page: number;
+  flags: Flag[];
+  pdfScale: number;
+}) {
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+
+  useEffect(() => {
+    setImgUrl(null);
+    setStatus("loading");
+    let cancelled = false;
+    getPageImage(appId, page)
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.url) { setImgUrl(data.url); setStatus("loaded"); }
+        else setStatus("error");
+      })
+      .catch(() => { if (!cancelled) setStatus("error"); });
+    return () => { cancelled = true; };
+  }, [appId, page]);
+
+  if (status === "loading") return (
+    <div style={{
+      width: Math.round(560 * pdfScale), minHeight: Math.round(720 * pdfScale),
+      background: TOKENS.paper,
+      border: `1px solid ${TOKENS.line}`, borderRadius: 2,
+      boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16,
+    }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: "50%",
+        border: `3px solid ${TOKENS.line}`, borderTopColor: LAYOUT.accent,
+        animation: "txSpin 0.8s linear infinite",
+      }} />
+      <div style={{ fontSize: 12, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', monospace" }}>
+        Fetching page {page} from S3…
+      </div>
+      <style>{`@keyframes txSpin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+
+  if (status === "loaded" && imgUrl) return (
+    <div style={{
+      width: Math.round(560 * pdfScale), background: TOKENS.paper,
+      border: `1px solid ${TOKENS.line}`, borderRadius: 2,
+      boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
+      position: "relative", overflow: "hidden",
+    }}>
+      <img
+        src={imgUrl}
+        alt={`Transcript page ${page}`}
+        style={{ width: "100%", display: "block" }}
+        onError={() => setStatus("error")}
+      />
+      {flags.filter(f => f.sourceLocation.page === page).map(f => (
+        <div key={f.ruleCode} style={{
+          position: "absolute", bottom: 12, left: 12,
+          background: f.severity === "High" ? TOKENS.highBg : f.severity === "Medium" ? TOKENS.medBg : TOKENS.lowBg,
+          border: `1px solid ${f.severity === "High" ? TOKENS.high : f.severity === "Medium" ? TOKENS.med : TOKENS.low}`,
+          borderRadius: 4, padding: "4px 10px",
+          fontSize: 10, fontFamily: "'IBM Plex Mono', monospace",
+          color: f.severity === "High" ? TOKENS.high : f.severity === "Medium" ? TOKENS.med : TOKENS.low,
+          fontWeight: 600,
+        }}>&#9873; {f.ruleCode} · {f.severity}</div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div style={{
+      width: Math.round(560 * pdfScale), minHeight: Math.round(720 * pdfScale),
+      background: TOKENS.paper,
+      border: `1px solid ${TOKENS.line}`,
+      boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
+      padding: "36px 42px", boxSizing: "border-box",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      textAlign: "center", color: TOKENS.ink3,
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: TOKENS.ink, fontFamily: "'Montserrat', system-ui, sans-serif", marginBottom: 8 }}>
+        Transcript page unavailable
+      </div>
+      <div style={{ fontSize: 12, lineHeight: 1.6, maxWidth: 380 }}>
+        Page {page} could not be loaded from the transcript page-image API. Confirm that
+        GET /applications/{`{id}`}/pages/{`{page}`} returns a presigned image URL for this application.
+      </div>
+    </div>
+  );
+}
+
 // --- Queue row (sidebar) ---
 function QueueRow({ app, active, onClick }: { app: Application; active: boolean; onClick: () => void }) {
   return (
@@ -184,13 +266,13 @@ function QueueRow({ app, active, onClick }: { app: Application; active: boolean;
         <div style={{ fontWeight: 500, color: TOKENS.ink }}>{app.applicantName}</div>
         <div style={{ fontSize: 11, color: TOKENS.ink4, marginTop: 1 }}>{app.institution}</div>
       </div>
-      <div style={{ fontSize: 11, color: TOKENS.ink3, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+      <div style={{ fontSize: 11, color: TOKENS.ink3, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
         {app.country} · {app.programYear}
       </div>
-      <div style={{ fontSize: 11, color: app.flagCount ? TOKENS.ink2 : TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+      <div style={{ fontSize: 11, color: app.flagCount ? TOKENS.ink2 : TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
         {app.flagCount} flag{app.flagCount !== 1 ? "s" : ""}
       </div>
-      <div style={{ fontSize: 11, color: TOKENS.ink3, fontFamily: "'JetBrains Mono', ui-monospace, monospace", textAlign: "right" }}>
+      <div style={{ fontSize: 11, color: TOKENS.ink3, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", textAlign: "right" }}>
         {timeAgo(app.ageHours)}
       </div>
     </div>
@@ -209,17 +291,17 @@ function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpen
     <div onClick={onClick} style={{
       border: `1px solid ${active ? TOKENS.ink3 : TOKENS.line}`,
       borderLeft: `3px solid ${flag.severity === "High" ? TOKENS.high : flag.severity === "Medium" ? TOKENS.med : TOKENS.low}`,
-      background: resolved ? LAYOUT.sidebar : TOKENS.paper,
+      background: resolved ? LAYOUT.line2 : TOKENS.paper,
       opacity: resolved && !active ? 0.72 : 1,
       borderRadius: 2, padding: "12px 14px", cursor: "pointer", marginBottom: 8,
       transition: "background 140ms, opacity 140ms",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <span style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 12, fontWeight: 600, color: TOKENS.ink }}>{flag.ruleCode}</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 12, fontWeight: 600, color: TOKENS.ink }}>{flag.ruleCode}</span>
         <SeverityChip severity={flag.severity} />
         {resolved && (
           <span style={{
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 10, fontWeight: 600,
+            fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 10, fontWeight: 600,
             color: decision === "CONFIRM" ? TOKENS.high : TOKENS.ok,
             background: decision === "CONFIRM" ? TOKENS.highBg : TOKENS.okBg,
             padding: "2px 7px", borderRadius: 2, letterSpacing: 0.3,
@@ -227,7 +309,7 @@ function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpen
             {decision === "CONFIRM" ? "\u2713 CONFIRMED" : "\u2713 OVERRIDDEN"}
           </span>
         )}
-        <span style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace", marginLeft: "auto" }}>
+        <span style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", marginLeft: "auto" }}>
           {flag.safePractice}
         </span>
       </div>
@@ -242,18 +324,18 @@ function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpen
         <button onClick={(e) => { e.stopPropagation(); onJumpTo(); }} style={{
           border: `1px solid ${TOKENS.line}`, background: TOKENS.bg,
           fontSize: 10, padding: "3px 8px", borderRadius: 2, cursor: "pointer",
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace", color: TOKENS.ink2,
+          fontFamily: "'IBM Plex Mono', ui-monospace, monospace", color: TOKENS.ink2,
         }}>
           &darr; page {flag.sourceLocation.page}
         </button>
         <button onClick={(e) => { e.stopPropagation(); onOpenData(); }} style={{
           border: `1px solid ${TOKENS.line}`, background: TOKENS.bg,
           fontSize: 10, padding: "3px 8px", borderRadius: 2, cursor: "pointer",
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace", color: TOKENS.ink2,
+          fontFamily: "'IBM Plex Mono', ui-monospace, monospace", color: TOKENS.ink2,
         }}>
           # data
         </button>
-        <span style={{ fontSize: 10, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+        <span style={{ fontSize: 10, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
           "{flag.sourceLocation.spans[0]}"
         </span>
       </div>
@@ -292,6 +374,7 @@ function ExtractedDataDrawer({ flag, extraction, onClose }: {
     PROG_002: ["graduation_confirmation_present"],
   };
   const highlighted = flag ? (fieldMap[flag.ruleCode] ?? []) : [];
+  const totalFields = extraction.physical.length + extraction.content.length + extraction.program.length;
 
   const TABS = [
     { key: "physical" as const, label: "Physical", count: extraction.physical.length },
@@ -314,15 +397,15 @@ function ExtractedDataDrawer({ flag, extraction, onClose }: {
       }}>
         <div style={{ padding: "18px 22px 12px", borderBottom: `1px solid ${TOKENS.line}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-            <span style={{ fontSize: 10, fontFamily: "'JetBrains Mono', ui-monospace, monospace", color: TOKENS.ink4, letterSpacing: 0.5, textTransform: "uppercase" }}>Extracted fields</span>
+            <span style={{ fontSize: 10, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", color: TOKENS.ink4, letterSpacing: 0.5, textTransform: "uppercase" }}>Extracted fields</span>
             <div style={{ flex: 1 }} />
             <button onClick={onClose} style={{
               border: "none", background: "transparent", cursor: "pointer",
               color: TOKENS.ink3, fontSize: 16, padding: 0, lineHeight: 1,
             }}>&times;</button>
           </div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: TOKENS.ink, marginBottom: 4 }}>Bedrock Nova extraction</div>
-          <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: TOKENS.ink, marginBottom: 4, fontFamily: "'Montserrat', system-ui, sans-serif" }}>Bedrock Nova extraction</div>
+          <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
             nova-pro-v1:0 · prompt v1.2 · extracted 2026-04-19 14:24 UTC
           </div>
           {flag && (
@@ -330,7 +413,7 @@ function ExtractedDataDrawer({ flag, extraction, onClose }: {
               marginTop: 12, padding: "7px 10px",
               background: TOKENS.highBg, border: `1px solid ${TOKENS.highBgStrong}`,
               borderRadius: 2, fontSize: 11, color: TOKENS.ink2,
-              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
             }}>
               showing fields related to <b style={{ color: TOKENS.high }}>{flag.ruleCode}</b>
             </div>
@@ -348,7 +431,7 @@ function ExtractedDataDrawer({ flag, extraction, onClose }: {
               borderBottom: `2px solid ${tab === t.key ? LAYOUT.accent : "transparent"}`,
               marginBottom: -1, fontFamily: "inherit",
             }}>
-              {t.label} <span style={{ color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 11 }}>{t.count}</span>
+              {t.label} <span style={{ color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 11 }}>{t.count}</span>
             </button>
           ))}
         </div>
@@ -366,18 +449,18 @@ function ExtractedDataDrawer({ flag, extraction, onClose }: {
                 borderBottom: `1px solid ${TOKENS.line2}`,
               }}>
                 <div style={{
-                  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                  fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
                   fontSize: 11, color: hi ? TOKENS.ink : TOKENS.ink3, fontWeight: hi ? 600 : 400,
                 }}>{row.field}</div>
-                <div style={{ fontSize: 12, color: TOKENS.ink2, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>{row.value}</div>
+                <div style={{ fontSize: 12, color: TOKENS.ink2, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{row.value}</div>
                 <ConfidenceDot level={row.confidence} />
               </div>
             );
           })}
         </div>
 
-        <div style={{ padding: "12px 22px", borderTop: `1px solid ${TOKENS.line}`, fontSize: 10, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
-          21 fields · GET /applications/{"{id}"}/extraction
+        <div style={{ padding: "12px 22px", borderTop: `1px solid ${TOKENS.line}`, fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
+          {totalFields} fields · GET /applications/{"{id}"}/extraction
         </div>
       </div>
     </div>
@@ -394,13 +477,10 @@ export function ReviewPage() {
   const [queueApps, setQueueApps] = useState<Application[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
   const [extraction, setExtraction] = useState<ExtractionData>({ physical: [], content: [], program: [] });
-  const [transcriptUrl, setTranscriptUrl] = useState<string | null>(null);
-  const [transcriptPreviewStatus, setTranscriptPreviewStatus] = useState("LEGACY_API_RESPONSE");
-  const [transcriptS3Key, setTranscriptS3Key] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeFlagIdx, setActiveFlagIdx] = useState(0);
   const [decisions, setDecisions] = useState<Decisions>({});
-  const [currentPage, setCurrentPage] = useState(2);
+  const [currentPage, setCurrentPage] = useState(1);
   const [overallDecision, setOverallDecision] = useState<OverallDecision>(null);
   const [drawerFlag, setDrawerFlag] = useState<Flag | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -408,9 +488,12 @@ export function ReviewPage() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [pdfScale, setPdfScale] = useState(1);
 
+  const pageCount = Math.max(1, app?.pageCount || 1);
+  const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
+  const totalFields = extraction.physical.length + extraction.content.length + extraction.program.length;
+
   // Keyboard shortcuts
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // Don't fire when typing in textarea/input
     if ((e.target as HTMLElement).tagName === "TEXTAREA" || (e.target as HTMLElement).tagName === "INPUT") return;
 
     switch (e.key.toLowerCase()) {
@@ -439,11 +522,13 @@ export function ReviewPage() {
         setDrawerOpen(false);
         setShowShortcuts(false);
         break;
-      case "1": case "2": case "3": case "4":
-        setCurrentPage(parseInt(e.key));
+      default: {
+        const num = parseInt(e.key);
+        if (num >= 1 && num <= pageCount) setCurrentPage(num);
         break;
+      }
     }
-  }, [flags, activeFlagIdx]);
+  }, [flags, activeFlagIdx, pageCount]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
@@ -455,13 +540,10 @@ export function ReviewPage() {
     setApp(null);
     setFlags([]);
     setExtraction({ physical: [], content: [], program: [] });
-    setTranscriptUrl(null);
-    setTranscriptPreviewStatus("LEGACY_API_RESPONSE");
-    setTranscriptS3Key(null);
     setError(null);
     setActiveFlagIdx(0);
     setDecisions({});
-    setCurrentPage(2);
+    setCurrentPage(1);
     setOverallDecision(null);
     setDrawerOpen(false);
     getApplication(id)
@@ -469,9 +551,6 @@ export function ReviewPage() {
         setApp(data.application);
         setFlags(data.flags);
         setExtraction(data.extraction);
-        setTranscriptUrl(data.transcriptUrl);
-        setTranscriptPreviewStatus(data.transcriptPreviewStatus);
-        setTranscriptS3Key(data.transcriptS3Key);
       })
       .catch((err: Error) => {
         setError(err.message);
@@ -494,12 +573,12 @@ export function ReviewPage() {
   if (!app) return (
     <div style={{
       width: "100vw", height: "100vh", background: LAYOUT.bg,
-      fontFamily: "'Inter', system-ui, sans-serif",
+      fontFamily: "'Open Sans', system-ui, sans-serif",
       display: "grid", gridTemplateColumns: "260px 1fr 420px", gridTemplateRows: "44px 1fr",
       overflow: "hidden",
     }}>
       <div style={{ gridColumn: "1 / -1", background: LAYOUT.sidebar, borderBottom: `1px solid ${LAYOUT.line}` }} />
-      <div style={{ background: LAYOUT.sidebar, borderRight: `1px solid ${LAYOUT.line}`, padding: 14 }}>
+      <div style={{ background: LAYOUT.sidebar, borderRight: `1px solid ${LAYOUT.sidebarBorder}`, padding: 14 }}>
         {[1,2,3].map(i => (
           <div key={i} style={{
             height: 52, marginBottom: 8, borderRadius: 2,
@@ -527,7 +606,6 @@ export function ReviewPage() {
           }} />
         ))}
       </div>
-      <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
     </div>
   );
 
@@ -546,7 +624,7 @@ export function ReviewPage() {
   }
 
   const resolvedCount = flags.filter((f) => decisions[f.ruleCode]?.decision).length;
-  const allDecided = resolvedCount === flags.length;
+  const allDecided = flags.length > 0 && resolvedCount === flags.length;
   const allOverridesNoted = flags.every((f) => {
     const d = decisions[f.ruleCode];
     if (!d?.decision) return false;
@@ -566,7 +644,7 @@ export function ReviewPage() {
     }));
     await submitDecision(id, { flagDecisions, overallDecision: overallDecision! });
     setToast(`Decision recorded for ${app.applicantName}.`);
-    setTimeout(() => navigate("/dashboard"), 1800);
+    setTimeout(() => navigate(`/reviewed/${id}`), 1800);
   };
 
   // Severity summary for footer
@@ -577,51 +655,52 @@ export function ReviewPage() {
   return (
     <div style={{
       width: "100vw", height: "100vh", position: "relative",
-      background: LAYOUT.bg, fontFamily: "'Inter', system-ui, sans-serif", color: TOKENS.ink,
+      background: LAYOUT.bg, fontFamily: "'Open Sans', system-ui, sans-serif", color: TOKENS.ink,
       display: "grid", gridTemplateColumns: "260px 1fr 420px", gridTemplateRows: "44px 1fr 56px",
       overflow: "hidden",
     }}>
       {/* Top bar */}
       <div style={{
-        gridColumn: "1 / -1", borderBottom: `1px solid ${LAYOUT.line}`,
+        gridColumn: "1 / -1", borderBottom: `1px solid ${LAYOUT.sidebarBorder}`,
         background: LAYOUT.sidebar, display: "flex", alignItems: "center", padding: "0 18px", gap: 18,
+        color: "#fff",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => navigate("/dashboard")}>
-          <div style={{ width: 20, height: 20, borderRadius: 2, background: TOKENS.ink, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>M</div>
-          <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.1 }}>MSBN Review</span>
-          <span style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>POC v0.1</span>
+          <div style={{ width: 20, height: 20, borderRadius: 4, background: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 700, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>M</div>
+          <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.1, fontFamily: "'Montserrat', system-ui, sans-serif" }}>MSBN Review</span>
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>POC v0.1</span>
         </div>
-        <div style={{ height: 20, width: 1, background: LAYOUT.line }} />
+        <div style={{ height: 20, width: 1, background: LAYOUT.sidebarBorder }} />
         <button onClick={() => navigate("/dashboard")} style={{
-          border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
+          border: `1px solid ${LAYOUT.sidebarBorder}`, background: "rgba(255,255,255,0.08)",
           padding: "4px 10px", fontSize: 11, borderRadius: 2, cursor: "pointer",
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace", color: TOKENS.ink2,
+          fontFamily: "'IBM Plex Mono', ui-monospace, monospace", color: "rgba(255,255,255,0.7)",
         }}>&larr; Dashboard</button>
-        <div style={{ height: 20, width: 1, background: LAYOUT.line }} />
+        <div style={{ height: 20, width: 1, background: LAYOUT.sidebarBorder }} />
         {flags.length > 0 && <ProgressBar total={flags.length} resolved={resolvedCount} />}
         <div style={{ flex: 1 }} />
         <a href={`https://www.nursys.com`} target="_blank" rel="noopener noreferrer" style={{
-          border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
-          color: TOKENS.ink2, padding: "5px 12px", fontSize: 11, borderRadius: 2,
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          border: `1px solid ${LAYOUT.sidebarBorder}`, background: "rgba(255,255,255,0.08)",
+          color: "rgba(255,255,255,0.7)", padding: "5px 12px", fontSize: 11, borderRadius: 2,
+          fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           textDecoration: "none", cursor: "pointer",
         }}>Check Nursys &#8599;</a>
         <button onClick={() => setShowShortcuts(true)} style={{
-          border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
-          color: TOKENS.ink3, width: 24, height: 24, fontSize: 13, borderRadius: 2,
-          cursor: "pointer", fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          border: `1px solid ${LAYOUT.sidebarBorder}`, background: "rgba(255,255,255,0.08)",
+          color: "rgba(255,255,255,0.5)", width: 24, height: 24, fontSize: 13, borderRadius: 2,
+          cursor: "pointer", fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
         }} title="Keyboard shortcuts (?)">&quest;</button>
-        <div style={{ fontSize: 11, color: TOKENS.ink3, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
           {(user?.email || user?.displayName || "Signed in user")} · SoD enforced
         </div>
       </div>
 
       {/* Queue sidebar */}
-      <div style={{ borderRight: `1px solid ${LAYOUT.line}`, background: LAYOUT.sidebar, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "12px 14px 10px", borderBottom: `1px solid ${TOKENS.line2}` }}>
-          <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 }}>Review queue</div>
-          <div style={{ fontSize: 13, color: TOKENS.ink2 }}>
+      <div style={{ borderRight: `1px solid ${LAYOUT.sidebarBorder}`, background: LAYOUT.sidebar, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "12px 14px 10px", borderBottom: `1px solid ${LAYOUT.sidebarBorder}` }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 }}>Review queue</div>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.8)" }}>
             <span style={{ fontWeight: 600 }}>{reviewableQueueApps.length}</span> pending · sorted by age
           </div>
         </div>
@@ -633,18 +712,18 @@ export function ReviewPage() {
         </div>
       </div>
 
-      {/* PDF pane */}
+      {/* PDF pane — TranscriptPageViewer */}
       <div style={{
         background: LAYOUT.pdfBg, overflow: "auto",
         display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 24px 40px", gap: 14,
       }}>
         <div style={{
           width: "100%", maxWidth: 560, display: "flex", alignItems: "center", justifyContent: "space-between",
-          fontSize: 11, color: TOKENS.ink3, fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          fontSize: 11, color: TOKENS.ink3, fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
         }}>
           <div>{app.applicantName} · {app.applicationId}</div>
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-            {[1, 2, 3, 4].map((p) => (
+            {pages.map((p) => (
               <button key={p} onClick={() => setCurrentPage(p)} style={{
                 border: `1px solid ${currentPage === p ? TOKENS.ink2 : TOKENS.line}`,
                 background: currentPage === p ? TOKENS.ink : TOKENS.paper,
@@ -654,42 +733,15 @@ export function ReviewPage() {
             ))}
           </div>
         </div>
-        <div style={{
-          width: Math.round(560 * pdfScale),
-          minHeight: Math.round(720 * pdfScale),
-          background: TOKENS.paper,
-          border: `1px solid ${TOKENS.line}`,
-          boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 28,
-          boxSizing: "border-box",
-          color: TOKENS.ink3,
-          fontSize: 13,
-          textAlign: "center",
-          lineHeight: 1.5,
-        }}>
-          {transcriptUrl ? (
-            <iframe
-              title={`Transcript preview for ${app.applicationId}`}
-              src={transcriptUrl}
-              style={{
-                width: "100%",
-                minHeight: Math.round(660 * pdfScale),
-                border: "none",
-                background: "#fff",
-              }}
-            />
-          ) : (
-            <span>
-              {transcriptPreviewMessage(transcriptPreviewStatus, transcriptS3Key)}
-            </span>
-          )}
-        </div>
+        <TranscriptPageViewer
+          appId={id!}
+          page={currentPage}
+          flags={flags}
+          pdfScale={pdfScale}
+        />
         <div style={{
           display: "flex", alignItems: "center", gap: 8,
-          fontSize: 10, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
         }}>
           <span>source: uploaded transcript · nova-pro-v1:0</span>
           <div style={{ height: 12, width: 1, background: TOKENS.line }} />
@@ -709,10 +761,10 @@ export function ReviewPage() {
 
       {/* Flag list */}
       <div style={{ background: LAYOUT.bg, borderLeft: `1px solid ${LAYOUT.line}`, overflow: "auto", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "14px 16px", borderBottom: `1px solid ${LAYOUT.line}`, background: LAYOUT.sidebar }}>
+        <div style={{ padding: "14px 16px", borderBottom: `1px solid ${LAYOUT.line}`, background: TOKENS.paper }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>{app.applicantName}</div>
-            <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>#{app.applicationId}</div>
+            <div style={{ fontSize: 15, fontWeight: 600, fontFamily: "'Montserrat', system-ui, sans-serif" }}>{app.applicantName}</div>
+            <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>#{app.applicationId}</div>
           </div>
           <div style={{ fontSize: 12, color: TOKENS.ink3, marginTop: 3 }}>
             {app.institution} · license {app.licenseNumber}
@@ -726,7 +778,7 @@ export function ReviewPage() {
         </div>
 
         <div style={{ flex: 1, overflow: "auto", padding: "12px 14px" }}>
-          <div style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>
+          <div style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>
             Flags raised — {resolvedCount} / {flags.length} resolved
           </div>
           {flags.map((flag, i) => (
@@ -744,39 +796,42 @@ export function ReviewPage() {
             width: "100%", marginTop: 4, padding: "9px 12px",
             background: TOKENS.paper, border: `1px dashed ${TOKENS.line}`,
             fontSize: 11, color: TOKENS.ink3, cursor: "pointer",
-            borderRadius: 2, fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+            borderRadius: 2, fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           }}>
-            View all extraction fields (21) &rarr;
+            View all extraction fields ({totalFields}) &rarr;
           </button>
         </div>
       </div>
 
       {/* Decision footer */}
       <div style={{
-        gridColumn: "1 / -1", background: LAYOUT.sidebar, borderTop: `1px solid ${LAYOUT.line}`,
+        gridColumn: "1 / -1", background: LAYOUT.sidebar, borderTop: `1px solid ${LAYOUT.sidebarBorder}`,
         display: "flex", alignItems: "center", padding: "0 18px", gap: 12,
+        color: "#fff",
       }}>
-        <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase" }}>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase" }}>
           Overall decision
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           {(["READY_FOR_LICENSING_REVIEW", "RETURN_TO_APPLICANT", "DEFERRED", "DENIED"] as const).map((d) => (
             <button key={d} onClick={() => allDecided && setOverallDecision(d)} disabled={!allDecided}
               style={{
-                border: `1px solid ${overallDecision === d ? TOKENS.ink2 : TOKENS.line}`,
-                background: overallDecision === d ? (d === "DENIED" ? TOKENS.high : TOKENS.ink) : allDecided ? TOKENS.bg : LAYOUT.sidebar,
-                color: overallDecision === d ? "#fff" : allDecided ? TOKENS.ink2 : TOKENS.ink4,
+                border: `1px solid ${overallDecision === d ? "rgba(255,255,255,0.4)" : LAYOUT.sidebarBorder}`,
+                background: overallDecision === d ? (d === "DENIED" ? TOKENS.high : "rgba(255,255,255,0.15)") : allDecided ? "rgba(255,255,255,0.06)" : "transparent",
+                color: overallDecision === d ? "#fff" : allDecided ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.3)",
                 padding: "6px 11px", fontSize: 11,
-                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
                 borderRadius: 2, cursor: allDecided ? "pointer" : "not-allowed",
                 opacity: allDecided ? 1 : 0.55,
               }}>{d.replaceAll("_", " ").toLowerCase()}</button>
           ))}
         </div>
         <div style={{ flex: 1 }} />
-        <div style={{ fontSize: 11, color: canSubmit ? TOKENS.ok : TOKENS.ink4, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+        <div style={{ fontSize: 11, color: canSubmit ? TOKENS.ok : "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
           {!allDecided
-            ? <>
+            ? flags.length === 0
+              ? "no flags to resolve"
+              : <>
                 <span style={{ marginRight: 6 }}>{"\u231b"}</span>
                 {highPending > 0 && <span style={{ color: TOKENS.high }}>{highPending} High</span>}
                 {highPending > 0 && (medPending > 0 || lowPending > 0) && ", "}
@@ -792,7 +847,7 @@ export function ReviewPage() {
                 : "\u2713 ready to submit"}
         </div>
         <button disabled={!canSubmit} onClick={handleSubmit} style={{
-          background: canSubmit ? TOKENS.ink : TOKENS.line,
+          background: canSubmit ? LAYOUT.accent : "rgba(255,255,255,0.1)",
           color: "#fff", border: "none",
           padding: "8px 16px", fontSize: 12, fontWeight: 600,
           cursor: canSubmit ? "pointer" : "not-allowed",

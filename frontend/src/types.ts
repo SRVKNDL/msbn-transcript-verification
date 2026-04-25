@@ -62,20 +62,3 @@ export type OverallDecision =
   | "DENIED"
   | "DEFERRED"
   | null;
-
-// Review-page annotation overlays.
-export interface Mark {
-  kind: "oval" | "underline" | "arrow" | "note" | "rectCircle";
-  target?: string;
-  color?: string;
-  strokeW?: number;
-  extraLoop?: boolean;
-  fromX?: number;
-  fromY?: number;
-  x?: number;
-  y?: number;
-  text?: string;
-  width?: number;
-  rotate?: number;
-  box?: { x: number; y: number; w: number; h: number };
-}

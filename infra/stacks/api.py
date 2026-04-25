@@ -63,6 +63,7 @@ class ApiConstruct(Construct):
             ("GET", "/applications"),
             ("POST", "/uploads"),
             ("GET", "/applications/{id}"),
+            ("GET", "/applications/{id}/pages/{page}"),
             ("POST", "/applications/{id}/decision"),
             ("GET", "/applications/{id}/audit"),
         ]

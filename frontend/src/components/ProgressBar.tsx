@@ -13,7 +13,7 @@ export function ProgressBar({
       <div
         style={{
           fontSize: 10,
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           color: TOKENS.ink4,
           letterSpacing: 0.5,
           textTransform: "uppercase",
@@ -42,7 +42,7 @@ export function ProgressBar({
       <div
         style={{
           fontSize: 11,
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           color: TOKENS.ink2,
           fontWeight: 600,
           minWidth: 32,

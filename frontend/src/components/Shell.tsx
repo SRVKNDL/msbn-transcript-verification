@@ -82,8 +82,8 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
             style={{
               width: 30,
               height: 30,
-              borderRadius: "50%",
-              border: `1.5px solid ${t.primaryInk}`,
+              borderRadius: 6,
+              background: "#2563eb",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -91,6 +91,7 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
               fontWeight: 700,
               letterSpacing: 0.5,
               fontFamily: t.mono,
+              color: "#fff",
             }}
           >
             MS
@@ -284,6 +285,18 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
           gap: 2,
         }}
       >
+        <div
+          style={{
+            padding: "0 18px 10px",
+            fontSize: 10,
+            color: t.ink4,
+            letterSpacing: 0.8,
+            textTransform: "uppercase",
+            fontFamily: t.mono,
+          }}
+        >
+          Navigation
+        </div>
         {navItems.map((item) => {
           const active = item.id === page;
           return (
@@ -294,17 +307,17 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
                 display: "flex",
                 alignItems: "center",
                 gap: 12,
-                padding: "9px 22px",
+                padding: "9px 18px",
+                margin: "0 10px",
                 border: "none",
                 cursor: "pointer",
-                background: active ? t.surfaceAlt : "transparent",
+                background: active ? t.accentBg : "transparent",
                 color: active ? t.primary : t.ink2,
                 fontSize: 13,
                 fontWeight: active ? 600 : 500,
                 fontFamily: "inherit",
                 textAlign: "left",
-                borderLeft: `3px solid ${active ? t.accent : "transparent"}`,
-                marginLeft: -1,
+                borderRadius: 6,
               }}
             >
               <span
@@ -436,7 +449,7 @@ export function Card({
       style={{
         background: t.surface,
         border: `1px solid ${t.line}`,
-        borderRadius: 4,
+        borderRadius: 8,
         overflow: "hidden",
       }}
     >

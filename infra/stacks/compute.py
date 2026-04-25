@@ -4,6 +4,7 @@ import os
 
 from aws_cdk import (
     Duration,
+    aws_ecr_assets as ecr_assets,
     aws_iam as iam,
     aws_lambda as lambda_,
     aws_logs as logs,
@@ -70,8 +71,10 @@ class ComputeConstruct(Construct):
                     os.path.join(
                         os.path.dirname(__file__), "../../services/extract"
                     )
-                )
+                ),
+                platform=ecr_assets.Platform.LINUX_ARM64,
             ),
+            architecture=lambda_.Architecture.ARM_64,
             # PDF rendering needs enough memory for multi-page transcripts.
             memory_size=2048,
             timeout=Duration.seconds(180),
@@ -113,8 +116,10 @@ class ComputeConstruct(Construct):
                     os.path.join(
                         os.path.dirname(__file__), "../../services/prefill"
                     )
-                )
+                ),
+                platform=ecr_assets.Platform.LINUX_ARM64,
             ),
+            architecture=lambda_.Architecture.ARM_64,
             memory_size=1536,
             timeout=Duration.seconds(25),
             log_retention=logs.RetentionDays.ONE_WEEK,

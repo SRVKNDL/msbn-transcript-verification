@@ -293,18 +293,19 @@ function QueueRow({ app, active, onClick }: { app: Application; active: boolean;
 }
 
 // --- Flag card ---
-function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpenData, active, onClick }: {
+function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpenData, active, onClick, shaded }: {
   flag: Flag; decision?: string; notes?: string;
   onDecision: (d: "CONFIRM" | "OVERRIDE") => void; onNotes: (n: string) => void;
   onJumpTo: () => void; onOpenData: () => void;
-  active: boolean; onClick: () => void;
+  active: boolean; onClick: () => void; shaded?: boolean;
 }) {
   const resolved = !!decision;
+  const cardBackground = resolved ? LAYOUT.line2 : shaded ? "#f8fafc" : TOKENS.paper;
   return (
     <div onClick={onClick} style={{
       border: `1px solid ${active ? TOKENS.ink3 : TOKENS.line}`,
       borderLeft: `3px solid ${flag.severity === "High" ? TOKENS.high : flag.severity === "Medium" ? TOKENS.med : TOKENS.low}`,
-      background: resolved ? LAYOUT.line2 : TOKENS.paper,
+      background: cardBackground,
       opacity: resolved && !active ? 0.72 : 1,
       borderRadius: 2, padding: "12px 14px", cursor: "pointer", marginBottom: 8,
       transition: "background 140ms, opacity 140ms",
@@ -820,33 +821,60 @@ export function ReviewPage() {
       background: t.bg, fontFamily: "'Open Sans', system-ui, sans-serif", color: t.ink,
       display: "grid",
       gridTemplateColumns: queueOpen ? "240px 1fr 320px" : "0 1fr 320px",
-      gridTemplateRows: "44px 1fr",
+      gridTemplateRows: "60px 1fr",
       overflow: "hidden",
     }}>
       {/* Top bar */}
       <div style={{
         gridColumn: "1 / -1", borderBottom: `3px solid ${t.accent}`,
-        background: t.primary, display: "flex", alignItems: "center", padding: "0 18px", gap: 18,
+        background: t.primary, display: "flex", alignItems: "center", padding: "0 22px", gap: 16,
         color: t.primaryInk,
       }}>
         <button onClick={() => setQueueOpen((open) => !open)} style={{
           border: "1px solid rgba(255,255,255,0.2)",
           background: "rgba(255,255,255,0.08)",
-          color: "rgba(255,255,255,0.82)",
-          width: 26,
-          height: 26,
+          color: "inherit",
+          width: 32,
+          height: 32,
           borderRadius: 4,
           cursor: "pointer",
-          fontSize: 16,
+          fontSize: 18,
           lineHeight: 1,
-          fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+          fontFamily: t.mono,
           padding: 0,
         }} title={queueOpen ? "Hide review queue (B)" : "Show review queue (B)"} aria-label={queueOpen ? "Hide review queue" : "Show review queue"}>
           &#9776;
         </button>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => navigate("/dashboard")}>
-          <div style={{ width: 20, height: 20, borderRadius: 4, background: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 700, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>M</div>
-          <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.1, fontFamily: "'Montserrat', system-ui, sans-serif" }}>MSBN Review</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => navigate("/dashboard")}>
+          <div style={{
+            width: 30,
+            height: 30,
+            borderRadius: 6,
+            background: "#2563eb",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: 0.5,
+            fontFamily: t.mono,
+            color: "#fff",
+          }}>
+            MS
+          </div>
+          <div>
+            <div style={{
+              fontSize: 10,
+              opacity: 0.75,
+              letterSpacing: 1,
+              textTransform: "uppercase",
+            }}>
+              Mississippi Board of Nursing
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 600, fontFamily: t.serif }}>
+              Transcript Verification
+            </div>
+          </div>
         </div>
         <div style={{ height: 20, width: 1, background: "rgba(255,255,255,0.16)" }} />
         <button onClick={() => navigate("/dashboard")} style={{
@@ -869,8 +897,24 @@ export function ReviewPage() {
           cursor: "pointer", fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
         }} title="Keyboard shortcuts (?)">?</button>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.68)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
-          {user?.email || user?.displayName || "Signed in user"}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 12, opacity: 0.85 }}>
+            {user?.displayName ?? "Signed in"}
+          </span>
+          <span style={{
+            width: 30,
+            height: 30,
+            borderRadius: 15,
+            background: "rgba(255,255,255,0.15)",
+            border: "1px solid rgba(255,255,255,0.22)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 11,
+            fontWeight: 600,
+          }}>
+            {user?.initials ?? "U"}
+          </span>
         </div>
       </div>
 
@@ -1151,13 +1195,7 @@ export function ReviewPage() {
             <div
               key={group.ruleCode}
               style={{
-                marginBottom: 10,
-                padding: "10px 10px 2px",
-                borderRadius: 4,
-                border: `1px solid ${group.groupIndex % 2 === 0 ? t.line : "rgba(148, 163, 184, 0.2)"}`,
-                background: group.groupIndex % 2 === 0
-                  ? "rgba(255,255,255,0.68)"
-                  : "repeating-linear-gradient(135deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 12px, rgba(255,255,255,0.62) 12px, rgba(255,255,255,0.62) 24px)",
+                marginBottom: 12,
               }}
             >
               <div style={{
@@ -1191,6 +1229,7 @@ export function ReviewPage() {
 
                 return (
                   <FlagCard key={`${flag.ruleCode}-${originalIndex}`} flag={flag} active={displayIndex === activeFlagIdx}
+                    shaded={group.groupIndex % 2 === 1}
                     decision={decisions[flag.ruleCode]?.decision}
                     notes={decisions[flag.ruleCode]?.notes}
                     onClick={() => setActiveFlagIdx(displayIndex)}

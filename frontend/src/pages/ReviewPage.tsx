@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { WheelEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { TOKENS, LAYOUT } from "../tokens";
+import { useT } from "../theme";
 import { SeverityChip } from "../components/SeverityChip";
 import { ConfidenceDot } from "../components/ConfidenceDot";
 import { ProgressBar } from "../components/ProgressBar";
@@ -10,23 +11,27 @@ import { getApplication, getPageImage, listApplications, submitDecision } from "
 import { getCurrentUser } from "../auth";
 import type { Application, Flag, Decisions, OverallDecision, ExtractionData, ExtractionRow } from "../types";
 
+const DEFAULT_TRANSCRIPT_ZOOM = 2;
+
 // --- Toast notification ---
 function Toast({ message, onClose }: { message: string; onClose: () => void }) {
+  const t = useT();
+
   useEffect(() => {
-    const t = setTimeout(onClose, 3500);
-    return () => clearTimeout(t);
+    const timeoutId = setTimeout(onClose, 3500);
+    return () => clearTimeout(timeoutId);
   }, [onClose]);
 
   return (
     <div style={{
       position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
-      background: TOKENS.ink, color: "#fff", padding: "12px 24px",
+      background: t.primary, color: t.primaryInk, padding: "12px 24px",
       borderRadius: 4, fontSize: 13, fontWeight: 500, zIndex: 100,
       boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
       fontFamily: "'Open Sans', system-ui, sans-serif",
       animation: "toastIn 300ms cubic-bezier(.2,.7,.3,1)",
     }}>
-      <span style={{ marginRight: 8, color: TOKENS.ok }}>&#10003;</span>
+      <span style={{ marginRight: 8, color: t.ok }}>&#10003;</span>
       {message}
     </div>
   );
@@ -34,6 +39,7 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
 
 // --- Keyboard shortcut legend ---
 function ShortcutLegend({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const shortcuts = [
     ["J / K", "Next / previous flag"],
     ["C", "Confirm current flag"],
@@ -50,20 +56,20 @@ function ShortcutLegend({ onClose }: { onClose: () => void }) {
       zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center",
     }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{
-        background: TOKENS.paper, borderRadius: 4, padding: "24px 32px",
+        background: t.surface, borderRadius: 4, padding: "24px 32px",
         boxShadow: "0 20px 60px rgba(0,0,0,0.3)", minWidth: 280,
-        border: `1px solid ${LAYOUT.line}`,
+        border: `1px solid ${t.line}`,
       }}>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Keyboard shortcuts</div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14, color: t.ink }}>Keyboard shortcuts</div>
         {shortcuts.map(([key, desc]) => (
           <div key={key} style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 8 }}>
             <span style={{
               fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
-              fontSize: 11, fontWeight: 600, background: TOKENS.bg,
-              border: `1px solid ${TOKENS.line}`, borderRadius: 2,
-              padding: "2px 8px", minWidth: 40, textAlign: "center",
+              fontSize: 11, fontWeight: 600, background: t.surfaceAlt,
+              border: `1px solid ${t.line}`, borderRadius: 2,
+              padding: "2px 8px", minWidth: 40, textAlign: "center", color: t.ink2,
             }}>{key}</span>
-            <span style={{ fontSize: 12, color: TOKENS.ink2 }}>{desc}</span>
+            <span style={{ fontSize: 12, color: t.ink2 }}>{desc}</span>
           </div>
         ))}
       </div>
@@ -98,12 +104,14 @@ function ReviewStateScreen({
   message: string;
   onBack: () => void;
 }) {
+  const t = useT();
+
   return (
     <div style={{
       width: "100vw",
       height: "100vh",
-      background: LAYOUT.bg,
-      color: TOKENS.ink,
+      background: t.bg,
+      color: t.ink,
       fontFamily: "'Open Sans', system-ui, sans-serif",
       display: "flex",
       alignItems: "center",
@@ -113,16 +121,16 @@ function ReviewStateScreen({
     }}>
       <div style={{
         width: "min(520px, 100%)",
-        background: TOKENS.paper,
-        border: `1px solid ${TOKENS.line}`,
-        borderTop: `3px solid ${TOKENS.high}`,
+        background: t.surface,
+        border: `1px solid ${t.line}`,
+        borderTop: `3px solid ${t.accent}`,
         borderRadius: 3,
         padding: "24px 28px",
         boxShadow: "0 18px 45px rgba(0,0,0,0.16)",
       }}>
         <div style={{
           fontSize: 11,
-          color: TOKENS.ink4,
+          color: t.ink4,
           fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           letterSpacing: 0.6,
           textTransform: "uppercase",
@@ -130,16 +138,16 @@ function ReviewStateScreen({
         }}>
           Review detail
         </div>
-        <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 10, fontFamily: "'Montserrat', system-ui, sans-serif" }}>
+        <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 10, fontFamily: "'Montserrat', system-ui, sans-serif", color: t.ink }}>
           {title}
         </div>
-        <div style={{ fontSize: 13, color: TOKENS.ink2, lineHeight: 1.6, marginBottom: 18 }}>
+        <div style={{ fontSize: 13, color: t.ink2, lineHeight: 1.6, marginBottom: 18 }}>
           {message}
         </div>
         <button onClick={onBack} style={{
           border: "none",
-          background: TOKENS.ink,
-          color: "#fff",
+          background: t.primary,
+          color: t.primaryInk,
           padding: "9px 14px",
           fontSize: 12,
           fontWeight: 600,
@@ -253,29 +261,31 @@ function TranscriptPageViewer({
 
 // --- Queue row (sidebar) ---
 function QueueRow({ app, active, onClick }: { app: Application; active: boolean; onClick: () => void }) {
+  const t = useT();
+
   return (
     <div onClick={onClick} style={{
       display: "grid", gridTemplateColumns: "14px 1fr 90px 60px 70px",
       gap: 12, alignItems: "center", padding: "9px 14px",
-      borderBottom: `1px solid ${TOKENS.line2}`,
-      background: active ? TOKENS.line2 : "transparent",
-      cursor: "pointer", fontSize: 13, color: TOKENS.ink2,
+      borderBottom: "1px solid rgba(255,255,255,0.08)",
+      background: active ? "rgba(255,255,255,0.08)" : "transparent",
+      cursor: "pointer", fontSize: 13, color: "rgba(255,255,255,0.78)",
     }}>
       <div style={{ width: 6, height: 6, borderRadius: 3,
         background: app.highestSeverity === "High" ? TOKENS.high
           : app.highestSeverity === "Medium" ? TOKENS.med
           : app.highestSeverity === "Low" ? TOKENS.low : TOKENS.ink5 }} />
       <div>
-        <div style={{ fontWeight: 500, color: TOKENS.ink }}>{app.applicantName}</div>
-        <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", marginTop: 1 }}>{app.applicationId}</div>
+        <div style={{ fontWeight: 500, color: t.primaryInk }}>{app.applicantName}</div>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.48)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", marginTop: 1 }}>{app.applicationId}</div>
       </div>
-      <div style={{ fontSize: 11, color: TOKENS.ink3, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.62)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
         {app.country} · {app.programYear}
       </div>
-      <div style={{ fontSize: 11, color: app.flagCount ? TOKENS.ink2 : TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
+      <div style={{ fontSize: 11, color: app.flagCount ? "rgba(255,255,255,0.78)" : "rgba(255,255,255,0.48)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
         {app.flagCount} flag{app.flagCount !== 1 ? "s" : ""}
       </div>
-      <div style={{ fontSize: 11, color: TOKENS.ink3, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", textAlign: "right" }}>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.62)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", textAlign: "right" }}>
         {timeAgo(app.ageHours)}
       </div>
     </div>
@@ -500,6 +510,7 @@ function buildFallbackExtraction(app: Application): ExtractionData {
 
 // --- Main review page ---
 export function ReviewPage() {
+  const t = useT();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = getCurrentUser();
@@ -519,10 +530,10 @@ export function ReviewPage() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [queueOpen, setQueueOpen] = useState(true);
   const [isTranscriptFullscreen, setIsTranscriptFullscreen] = useState(false);
-  const [transcriptZoom, setTranscriptZoom] = useState(1);
+  const [transcriptZoom, setTranscriptZoom] = useState(DEFAULT_TRANSCRIPT_ZOOM);
   const transcriptPaneRef = useRef<HTMLDivElement>(null);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
-  const transcriptZoomRef = useRef(1);
+  const transcriptZoomRef = useRef(DEFAULT_TRANSCRIPT_ZOOM);
 
   const pageCount = Math.max(1, app?.pageCount || 1);
   const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
@@ -651,7 +662,8 @@ export function ReviewPage() {
     setActiveFlagIdx(0);
     setDecisions({});
     setCurrentPage(1);
-    setTranscriptZoom(1);
+    transcriptZoomRef.current = DEFAULT_TRANSCRIPT_ZOOM;
+    setTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM);
     setOverallDecision(null);
     setDrawerOpen(false);
     getApplication(id)
@@ -682,35 +694,35 @@ export function ReviewPage() {
 
   if (!app) return (
     <div style={{
-      width: "100vw", height: "100vh", background: LAYOUT.bg,
+      width: "100vw", height: "100vh", background: t.bg,
       fontFamily: "'Open Sans', system-ui, sans-serif",
       display: "grid", gridTemplateColumns: "240px 1fr 320px", gridTemplateRows: "44px 1fr",
       overflow: "hidden",
     }}>
-      <div style={{ gridColumn: "1 / -1", background: LAYOUT.sidebar, borderBottom: `1px solid ${LAYOUT.line}` }} />
-      <div style={{ background: LAYOUT.sidebar, borderRight: `1px solid ${LAYOUT.sidebarBorder}`, padding: 14 }}>
+      <div style={{ gridColumn: "1 / -1", background: t.primary, borderBottom: `3px solid ${t.accent}` }} />
+      <div style={{ background: t.primary, borderRight: `1px solid ${t.line}`, padding: 14 }}>
         {[1,2,3].map(i => (
           <div key={i} style={{
             height: 52, marginBottom: 8, borderRadius: 2,
-            background: `linear-gradient(90deg, ${TOKENS.line2} 25%, ${TOKENS.line} 50%, ${TOKENS.line2} 75%)`,
+            background: `linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.16) 50%, rgba(255,255,255,0.08) 75%)`,
             backgroundSize: "200% 100%",
             animation: "shimmer 1.5s infinite",
           }} />
         ))}
       </div>
-      <div style={{ background: LAYOUT.pdfBg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: t.surfaceAlt, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{
           width: 560, height: 720, borderRadius: 2,
-          background: `linear-gradient(90deg, ${TOKENS.line2} 25%, ${TOKENS.line} 50%, ${TOKENS.line2} 75%)`,
+          background: `linear-gradient(90deg, ${t.line2} 25%, ${t.line} 50%, ${t.line2} 75%)`,
           backgroundSize: "200% 100%",
           animation: "shimmer 1.5s infinite",
         }} />
       </div>
-      <div style={{ background: LAYOUT.bg, borderLeft: `1px solid ${LAYOUT.line}`, padding: 14 }}>
+      <div style={{ background: t.bg, borderLeft: `1px solid ${t.line}`, padding: 14 }}>
         {[1,2,3].map(i => (
           <div key={i} style={{
             height: 120, marginBottom: 8, borderRadius: 2,
-            background: `linear-gradient(90deg, ${TOKENS.line2} 25%, ${TOKENS.line} 50%, ${TOKENS.line2} 75%)`,
+            background: `linear-gradient(90deg, ${t.line2} 25%, ${t.line} 50%, ${t.line2} 75%)`,
             backgroundSize: "200% 100%",
             animation: "shimmer 1.5s infinite",
           }} />
@@ -769,7 +781,7 @@ export function ReviewPage() {
   return (
     <div style={{
       width: "100vw", height: "100vh", position: "relative",
-      background: LAYOUT.bg, fontFamily: "'Open Sans', system-ui, sans-serif", color: TOKENS.ink,
+      background: t.bg, fontFamily: "'Open Sans', system-ui, sans-serif", color: t.ink,
       display: "grid",
       gridTemplateColumns: queueOpen ? "240px 1fr 320px" : "0 1fr 320px",
       gridTemplateRows: "44px 1fr",
@@ -777,17 +789,17 @@ export function ReviewPage() {
     }}>
       {/* Top bar */}
       <div style={{
-        gridColumn: "1 / -1", borderBottom: `1px solid ${LAYOUT.sidebarBorder}`,
-        background: LAYOUT.sidebar, display: "flex", alignItems: "center", padding: "0 18px", gap: 18,
-        color: "#fff",
+        gridColumn: "1 / -1", borderBottom: `3px solid ${t.accent}`,
+        background: t.primary, display: "flex", alignItems: "center", padding: "0 18px", gap: 18,
+        color: t.primaryInk,
       }}>
         <button onClick={() => setQueueOpen((open) => !open)} style={{
-          border: `1px solid ${LAYOUT.sidebarBorder}`,
+          border: "1px solid rgba(255,255,255,0.2)",
           background: "rgba(255,255,255,0.08)",
-          color: "rgba(255,255,255,0.72)",
+          color: "rgba(255,255,255,0.82)",
           width: 26,
           height: 26,
-          borderRadius: 3,
+          borderRadius: 4,
           cursor: "pointer",
           fontSize: 16,
           lineHeight: 1,
@@ -800,35 +812,35 @@ export function ReviewPage() {
           <div style={{ width: 20, height: 20, borderRadius: 4, background: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 700, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>M</div>
           <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.1, fontFamily: "'Montserrat', system-ui, sans-serif" }}>MSBN Review</span>
         </div>
-        <div style={{ height: 20, width: 1, background: LAYOUT.sidebarBorder }} />
+        <div style={{ height: 20, width: 1, background: "rgba(255,255,255,0.16)" }} />
         <button onClick={() => navigate("/dashboard")} style={{
-          border: `1px solid ${LAYOUT.sidebarBorder}`, background: "rgba(255,255,255,0.08)",
+          border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)",
           padding: "4px 10px", fontSize: 11, borderRadius: 2, cursor: "pointer",
-          fontFamily: "'IBM Plex Mono', ui-monospace, monospace", color: "rgba(255,255,255,0.7)",
+          fontFamily: "'IBM Plex Mono', ui-monospace, monospace", color: "rgba(255,255,255,0.82)",
         }}>&larr; Dashboard</button>
-        <div style={{ height: 20, width: 1, background: LAYOUT.sidebarBorder }} />
+        <div style={{ height: 20, width: 1, background: "rgba(255,255,255,0.16)" }} />
         {flags.length > 0 && <ProgressBar total={flags.length} resolved={resolvedCount} />}
         <div style={{ flex: 1 }} />
         <a href={`https://www.nursys.com`} target="_blank" rel="noopener noreferrer" style={{
-          border: `1px solid ${LAYOUT.sidebarBorder}`, background: "rgba(255,255,255,0.08)",
-          color: "rgba(255,255,255,0.7)", padding: "5px 12px", fontSize: 11, borderRadius: 2,
+          border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)",
+          color: "rgba(255,255,255,0.82)", padding: "5px 12px", fontSize: 11, borderRadius: 2,
           fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           textDecoration: "none", cursor: "pointer",
         }}>Check Nursys &#8599;</a>
         <button onClick={() => setShowShortcuts(true)} style={{
-          border: `1px solid ${LAYOUT.sidebarBorder}`, background: "rgba(255,255,255,0.08)",
-          color: "rgba(255,255,255,0.5)", width: 24, height: 24, fontSize: 13, borderRadius: 2,
+          border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)",
+          color: "rgba(255,255,255,0.7)", width: 24, height: 24, fontSize: 13, borderRadius: 2,
           cursor: "pointer", fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
         }} title="Keyboard shortcuts (?)">?</button>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.68)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
           {user?.email || user?.displayName || "Signed in user"}
         </div>
       </div>
 
       {/* Queue sidebar */}
-      <div style={{ gridColumn: 1, gridRow: 2, borderRight: queueOpen ? `1px solid ${LAYOUT.sidebarBorder}` : "none", background: LAYOUT.sidebar, overflow: "hidden", display: queueOpen ? "flex" : "none", flexDirection: "column" }}>
-        <div style={{ padding: "12px 14px 10px", borderBottom: `1px solid ${LAYOUT.sidebarBorder}` }}>
+      <div style={{ gridColumn: 1, gridRow: 2, borderRight: queueOpen ? `1px solid ${t.line}` : "none", background: t.primaryDark, overflow: "hidden", display: queueOpen ? "flex" : "none", flexDirection: "column" }}>
+        <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 }}>Review queue</div>
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.8)" }}>
             <span style={{ fontWeight: 600 }}>{reviewableQueueApps.length}</span> pending · sorted by age
@@ -848,15 +860,15 @@ export function ReviewPage() {
           height: 12px;
         }
         #transcript-scroll-viewport::-webkit-scrollbar-track {
-          background: ${LAYOUT.pdfBg};
+          background: ${t.surfaceAlt};
         }
         #transcript-scroll-viewport::-webkit-scrollbar-thumb {
-          background: ${TOKENS.ink4};
-          border: 3px solid ${LAYOUT.pdfBg};
+          background: ${t.ink4};
+          border: 3px solid ${t.surfaceAlt};
           border-radius: 8px;
         }
         #transcript-scroll-viewport::-webkit-scrollbar-thumb:hover {
-          background: ${TOKENS.ink3};
+          background: ${t.ink3};
         }
       `}</style>
 
@@ -864,7 +876,7 @@ export function ReviewPage() {
       <div id="transcript-preview-pane" ref={transcriptPaneRef} style={{
         gridColumn: 2,
         gridRow: 2,
-        background: LAYOUT.pdfBg,
+        background: t.surfaceAlt,
         overflow: "hidden",
         minHeight: 0,
         height: isTranscriptFullscreen ? "100vh" : "100%",
@@ -875,7 +887,7 @@ export function ReviewPage() {
       }}>
         <div style={{
           width: "100%", maxWidth: isTranscriptFullscreen ? 760 : 560, alignItems: "center", justifyContent: "space-between",
-          fontSize: 11, color: TOKENS.ink3, fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+          fontSize: 11, color: t.ink3, fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           padding: "24px 24px 10px",
           boxSizing: "border-box",
           flexShrink: 0,
@@ -900,7 +912,7 @@ export function ReviewPage() {
           overflowY: "scroll",
           overflowX: "auto",
           scrollbarGutter: "stable",
-          scrollbarColor: `${TOKENS.ink4} ${LAYOUT.pdfBg}`,
+          scrollbarColor: `${t.ink4} ${t.surfaceAlt}`,
           display: "flex",
           justifyContent: "center",
           alignItems: "flex-start",
@@ -921,45 +933,37 @@ export function ReviewPage() {
         </div>
         {!isTranscriptFullscreen && <div style={{
           display: "flex", alignItems: "center", gap: 8,
-          fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+          fontSize: 10, color: t.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           padding: "10px 24px 24px",
           boxSizing: "border-box",
           flexShrink: 0,
         }}>
           <span>source: uploaded transcript · nova-pro-v1:0</span>
-          <div style={{ height: 12, width: 1, background: TOKENS.line }} />
+          <div style={{ height: 12, width: 1, background: t.line }} />
           <button onClick={() => zoomTranscriptBy(-0.1)} style={{
-            border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
+            border: `1px solid ${t.line}`, background: t.surface,
             width: 24, height: 22, fontSize: 13, cursor: "pointer", borderRadius: 2,
-            color: TOKENS.ink3, fontFamily: "inherit", padding: 0,
+            color: t.ink3, fontFamily: "inherit", padding: 0,
           }} title="Zoom out">&minus;</button>
-          <button onClick={() => applyTranscriptZoom(1)} style={{
+          <button onClick={() => applyTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM)} style={{
             border: "none", background: "transparent",
             minWidth: 42, height: 22, fontSize: 10, cursor: "pointer",
-            color: TOKENS.ink4, fontFamily: "inherit", padding: "0 4px",
+            color: t.ink4, fontFamily: "inherit", padding: "0 4px",
           }} title="Reset zoom">
             {Math.round(transcriptZoom * 100)}%
           </button>
           <button onClick={() => zoomTranscriptBy(0.1)} style={{
-            border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
+            border: `1px solid ${t.line}`, background: t.surface,
             width: 24, height: 22, fontSize: 13, cursor: "pointer", borderRadius: 2,
-            color: TOKENS.ink3, fontFamily: "inherit", padding: 0,
+            color: t.ink3, fontFamily: "inherit", padding: 0,
           }} title="Zoom in">+</button>
-          <div style={{ height: 12, width: 1, background: TOKENS.line }} />
-          <button onClick={toggleTranscriptFullscreen} style={{
-            border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
-            height: 22, fontSize: 10, cursor: "pointer", borderRadius: 2,
-            color: TOKENS.ink3, fontFamily: "inherit", padding: "0 9px",
-          }} title="Toggle transcript fullscreen (F)">
-            {isTranscriptFullscreen ? "Exit fullscreen" : "Fullscreen"}
-          </button>
         </div>}
         {isTranscriptFullscreen && (
           <div style={{
             position: "absolute",
             top: 12,
             right: 14,
-            bottom: 12,
+            bottom: 68,
             width: 42,
             zIndex: 3,
             display: "flex",
@@ -968,8 +972,8 @@ export function ReviewPage() {
             gap: 8,
             padding: "8px 5px",
             boxSizing: "border-box",
-            background: "rgba(203, 213, 225, 0.82)",
-            border: `1px solid ${TOKENS.line}`,
+            background: "rgba(255, 255, 255, 0.9)",
+            border: `1px solid ${t.line}`,
             borderRadius: 3,
             boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
             fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
@@ -982,60 +986,72 @@ export function ReviewPage() {
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
               fontSize: 10,
-              color: TOKENS.ink3,
+              color: t.ink3,
               lineHeight: 1.1,
             }}>
               {app.applicantName} · {app.applicationId}
             </div>
-            <div style={{ width: 18, height: 1, background: TOKENS.line }} />
+            <div style={{ width: 18, height: 1, background: t.line }} />
             {pages.map((p) => (
               <button key={p} onClick={() => setCurrentPage(p)} style={{
-                border: `1px solid ${currentPage === p ? TOKENS.ink2 : TOKENS.line}`,
-                background: currentPage === p ? TOKENS.ink : TOKENS.paper,
-                color: currentPage === p ? "#fff" : TOKENS.ink3,
+                border: `1px solid ${currentPage === p ? t.ink2 : t.line}`,
+                background: currentPage === p ? t.ink : t.surface,
+                color: currentPage === p ? "#fff" : t.ink3,
                 width: 26, height: 24, fontSize: 11, cursor: "pointer", borderRadius: 2, fontFamily: "inherit",
               }}>{p}</button>
             ))}
-            <div style={{ width: 18, height: 1, background: TOKENS.line }} />
+            <div style={{ width: 18, height: 1, background: t.line }} />
             <button onClick={() => zoomTranscriptBy(-0.1)} style={{
-              border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
+              border: `1px solid ${t.line}`, background: t.surface,
               width: 26, height: 24, fontSize: 14, cursor: "pointer", borderRadius: 2,
-              color: TOKENS.ink3, fontFamily: "inherit", padding: 0,
+              color: t.ink3, fontFamily: "inherit", padding: 0,
             }} title="Zoom out">&minus;</button>
-            <button onClick={() => applyTranscriptZoom(1)} style={{
-              border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
+            <button onClick={() => applyTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM)} style={{
+              border: `1px solid ${t.line}`, background: t.surface,
               width: 34, minHeight: 28, fontSize: 9, cursor: "pointer", borderRadius: 2,
-              color: TOKENS.ink3, fontFamily: "inherit", padding: "2px 0",
+              color: t.ink3, fontFamily: "inherit", padding: "2px 0",
             }} title="Reset zoom">
               {Math.round(transcriptZoom * 100)}%
             </button>
             <button onClick={() => zoomTranscriptBy(0.1)} style={{
-              border: `1px solid ${TOKENS.line}`, background: TOKENS.paper,
+              border: `1px solid ${t.line}`, background: t.surface,
               width: 26, height: 24, fontSize: 14, cursor: "pointer", borderRadius: 2,
-              color: TOKENS.ink3, fontFamily: "inherit", padding: 0,
+              color: t.ink3, fontFamily: "inherit", padding: 0,
             }} title="Zoom in">+</button>
-            <div style={{ flex: 1 }} />
-            <button onClick={toggleTranscriptFullscreen} style={{
-              border: `1px solid ${TOKENS.line}`,
-              background: TOKENS.paper,
-              width: 30,
-              height: 30,
-              fontSize: 16,
-              cursor: "pointer",
-              borderRadius: 2,
-              color: TOKENS.ink3,
-              fontFamily: "inherit",
-              lineHeight: 1,
-            }} title="Exit fullscreen">
-              &times;
-            </button>
           </div>
         )}
+        <button
+          onClick={toggleTranscriptFullscreen}
+          aria-label={isTranscriptFullscreen ? "Exit transcript fullscreen" : "Enter transcript fullscreen"}
+          title={isTranscriptFullscreen ? "Exit transcript fullscreen (F)" : "Enter transcript fullscreen (F)"}
+          style={{
+            position: "absolute",
+            right: 18,
+            bottom: 18,
+            zIndex: 4,
+            width: 38,
+            height: 38,
+            borderRadius: 4,
+            border: `1px solid ${t.line}`,
+            background: "rgba(255,255,255,0.94)",
+            color: t.ink2,
+            boxShadow: "0 10px 24px rgba(15,23,42,0.16)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            fontSize: 18,
+            lineHeight: 1,
+            padding: 0,
+          }}
+        >
+          ⛶
+        </button>
       </div>
 
       {/* Flag list */}
-      <div style={{ gridColumn: 3, gridRow: 2, background: LAYOUT.bg, borderLeft: `1px solid ${LAYOUT.line}`, overflow: "auto", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "14px 16px", borderBottom: `1px solid ${LAYOUT.line}`, background: TOKENS.paper }}>
+      <div style={{ gridColumn: 3, gridRow: 2, background: t.bg, borderLeft: `1px solid ${t.line}`, overflow: "auto", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "14px 16px", borderBottom: `1px solid ${t.line}`, background: t.surface }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
             <div style={{ fontSize: 15, fontWeight: 600, fontFamily: "'Montserrat', system-ui, sans-serif" }}>{app.applicantName}</div>
             <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>#{app.applicationId}</div>
@@ -1071,15 +1087,15 @@ export function ReviewPage() {
                 minWidth: 0,
                 flex: 1,
                 height: 30,
-                border: `1px solid ${TOKENS.line}`,
-                background: allDecided ? TOKENS.paper : TOKENS.bg,
-                color: allDecided ? TOKENS.ink2 : TOKENS.ink4,
+                border: `1px solid ${t.line}`,
+                background: allDecided ? t.surface : t.surfaceAlt,
+                color: allDecided ? t.ink2 : t.ink4,
                 borderRadius: 3,
                 padding: "0 8px",
                 fontSize: 11,
                 fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
                 cursor: allDecided ? "pointer" : "not-allowed",
-                outlineColor: LAYOUT.accent,
+                outlineColor: t.accent,
               }}
             >
               <option value="">select decision</option>
@@ -1130,9 +1146,9 @@ export function ReviewPage() {
           width: 52,
           height: 52,
           borderRadius: "50%",
-          background: canSubmit ? LAYOUT.accent : "rgba(10, 31, 61, 0.72)",
+          background: canSubmit ? t.accent : "rgba(10, 31, 61, 0.72)",
           color: "#fff",
-          border: `1px solid ${canSubmit ? "rgba(255,255,255,0.14)" : LAYOUT.sidebarBorder}`,
+          border: `1px solid ${canSubmit ? "rgba(255,255,255,0.14)" : t.primary}`,
           padding: 0,
           fontSize: 22,
           lineHeight: 1,

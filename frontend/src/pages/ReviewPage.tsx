@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { WheelEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { TOKENS, LAYOUT } from "../tokens";
@@ -538,6 +538,38 @@ export function ReviewPage() {
   const pageCount = Math.max(1, app?.pageCount || 1);
   const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
   const totalFields = extraction.physical.length + extraction.content.length + extraction.program.length;
+  const groupedFlags = useMemo(() => {
+    const indexed = flags
+      .map((flag, originalIndex) => ({ flag, originalIndex }))
+      .sort((a, b) =>
+        a.flag.ruleCode.localeCompare(b.flag.ruleCode)
+        || a.flag.sourceLocation.page - b.flag.sourceLocation.page
+        || a.originalIndex - b.originalIndex
+      );
+
+    return indexed.reduce<Array<{
+      ruleCode: string;
+      items: Array<{ flag: Flag; originalIndex: number }>;
+      groupIndex: number;
+    }>>((groups, item) => {
+      const lastGroup = groups[groups.length - 1];
+      if (lastGroup && lastGroup.ruleCode === item.flag.ruleCode) {
+        lastGroup.items.push(item);
+        return groups;
+      }
+
+      groups.push({
+        ruleCode: item.flag.ruleCode,
+        items: [item],
+        groupIndex: groups.length,
+      });
+      return groups;
+    }, []);
+  }, [flags]);
+  const displayFlags = useMemo(
+    () => groupedFlags.flatMap((group) => group.items),
+    [groupedFlags]
+  );
 
   useEffect(() => {
     transcriptZoomRef.current = transcriptZoom;
@@ -608,22 +640,26 @@ export function ReviewPage() {
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.target as HTMLElement).tagName === "TEXTAREA" || (e.target as HTMLElement).tagName === "INPUT") return;
 
+    const activeFlag = displayFlags[activeFlagIdx]?.flag;
+
     switch (e.key.toLowerCase()) {
       case "j":
-        setActiveFlagIdx((i) => Math.min(flags.length - 1, i + 1));
+        if (displayFlags.length === 0) break;
+        setActiveFlagIdx((i) => Math.min(displayFlags.length - 1, i + 1));
         break;
       case "k":
+        if (displayFlags.length === 0) break;
         setActiveFlagIdx((i) => Math.max(0, i - 1));
         break;
       case "c":
-        if (flags[activeFlagIdx]) {
-          const code = flags[activeFlagIdx].ruleCode;
+        if (activeFlag) {
+          const code = activeFlag.ruleCode;
           setDecisions((x) => ({ ...x, [code]: { ...x[code], decision: "CONFIRM", notes: x[code]?.notes ?? "" } }));
         }
         break;
       case "o":
-        if (flags[activeFlagIdx]) {
-          const code = flags[activeFlagIdx].ruleCode;
+        if (activeFlag) {
+          const code = activeFlag.ruleCode;
           setDecisions((x) => ({ ...x, [code]: { ...x[code], decision: "OVERRIDE", notes: x[code]?.notes ?? "" } }));
         }
         break;
@@ -646,7 +682,7 @@ export function ReviewPage() {
         break;
       }
     }
-  }, [flags, activeFlagIdx, pageCount, toggleTranscriptFullscreen]);
+  }, [displayFlags, activeFlagIdx, pageCount, toggleTranscriptFullscreen]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
@@ -1111,16 +1147,61 @@ export function ReviewPage() {
           <div style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>
             Flags raised — {resolvedCount} / {flags.length} resolved
           </div>
-          {flags.map((flag, i) => (
-            <FlagCard key={flag.ruleCode} flag={flag} active={i === activeFlagIdx}
-              decision={decisions[flag.ruleCode]?.decision}
-              notes={decisions[flag.ruleCode]?.notes}
-              onClick={() => setActiveFlagIdx(i)}
-              onDecision={(d) => setDecisions((x) => ({ ...x, [flag.ruleCode]: { ...x[flag.ruleCode], decision: d, notes: x[flag.ruleCode]?.notes ?? "" } }))}
-              onNotes={(n) => setDecisions((x) => ({ ...x, [flag.ruleCode]: { ...x[flag.ruleCode], decision: x[flag.ruleCode]?.decision, notes: n } }))}
-              onJumpTo={() => jumpTo(flag)}
-              onOpenData={() => openDrawer(flag)}
-            />
+          {groupedFlags.map((group) => (
+            <div
+              key={group.ruleCode}
+              style={{
+                marginBottom: 10,
+                padding: "10px 10px 2px",
+                borderRadius: 4,
+                border: `1px solid ${group.groupIndex % 2 === 0 ? t.line : "rgba(148, 163, 184, 0.2)"}`,
+                background: group.groupIndex % 2 === 0
+                  ? "rgba(255,255,255,0.68)"
+                  : "repeating-linear-gradient(135deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 12px, rgba(255,255,255,0.62) 12px, rgba(255,255,255,0.62) 24px)",
+              }}
+            >
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                marginBottom: 8,
+                padding: "0 2px",
+              }}>
+                <div style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: t.ink2,
+                  fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+                  letterSpacing: 0.3,
+                }}>
+                  {group.ruleCode}
+                </div>
+                <div style={{
+                  fontSize: 10,
+                  color: t.ink4,
+                  fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+                  textTransform: "uppercase",
+                }}>
+                  {group.items.length} flag{group.items.length === 1 ? "" : "s"}
+                </div>
+              </div>
+              {group.items.map(({ flag, originalIndex }) => {
+                const displayIndex = displayFlags.findIndex((item) => item.originalIndex === originalIndex);
+
+                return (
+                  <FlagCard key={`${flag.ruleCode}-${originalIndex}`} flag={flag} active={displayIndex === activeFlagIdx}
+                    decision={decisions[flag.ruleCode]?.decision}
+                    notes={decisions[flag.ruleCode]?.notes}
+                    onClick={() => setActiveFlagIdx(displayIndex)}
+                    onDecision={(d) => setDecisions((x) => ({ ...x, [flag.ruleCode]: { ...x[flag.ruleCode], decision: d, notes: x[flag.ruleCode]?.notes ?? "" } }))}
+                    onNotes={(n) => setDecisions((x) => ({ ...x, [flag.ruleCode]: { ...x[flag.ruleCode], decision: x[flag.ruleCode]?.decision, notes: n } }))}
+                    onJumpTo={() => jumpTo(flag)}
+                    onOpenData={() => openDrawer(flag)}
+                  />
+                );
+              })}
+            </div>
           ))}
           <button onClick={() => openDrawer(null)} style={{
             width: "100%", marginTop: 4, padding: "9px 12px",

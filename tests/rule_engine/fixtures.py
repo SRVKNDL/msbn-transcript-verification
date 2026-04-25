@@ -103,51 +103,51 @@ CLEAN_BASELINE: dict = {
 # ── Fraud-laden fixture (Case B + diploma mill signals) ───────────────────────
 # Inspired by MSBN Case B (fabricated non-nursing courses, duplicate entry)
 # combined with Case D/E diploma mill signals and cross-document mismatches.
-# Expected to fire: CONT_003 (x2), PHYS_001, PHYS_002, PHYS_004, PHYS_005,
-#                   PROG_001 (x2), PROG_002, PROG_003 (x4 missing domains),
-#                   CROSS_001, CROSS_002, CROSS_003
+# Expected to fire (new rules):
+#   PHYS_001 (x2): pixelated seal, no security features
+#   PHYS_002 (x4): registrar name/signature/title/contact absent
+#   PHYS_004 (x1): misaligned text
+#   CONT_003 (x1): ADN program duration too short (5 months vs 18-month minimum)
+#   PROG_001 (x2): diploma mill language + unknown accreditor
+#   PROG_002 (x1): no graduation confirmation
+#   PROG_003 (x4): missing all required nursing domains
+#   CROSS_001–003 deferred to Phase 4
 FRAUD_CASE_B: dict = {
     "applicationId": "APP-FRAUD-002",
     # Physical section — multiple problems
     "seal_type": "stamped_ink",
     "seal_type_source": {"page_number": 1, "text_spans": ["stamped seal bottom-right"]},
-    "institution_expected_seal_type": "embossed",   # PHYS_002 fires
-    "seal_quality": "pixelated",                    # PHYS_001 fires
+    "seal_quality": "pixelated",                    # PHYS_001 Check 2 fires
     "seal_quality_source": {"page_number": 1, "text_spans": ["institution logo region"]},
     "print_technology": "laser",
     "print_technology_source": {"page_number": 1, "text_spans": []},
     "issue_year": 2019,
-    "text_alignment": "misaligned",                 # PHYS_004 fires
+    "text_alignment": "misaligned",                 # PHYS_004 Check 1 fires
     "text_alignment_source": {
         "page_number": 2,
         "text_spans": ["grade column — cell at row 5 appears offset"],
     },
-    "document_provenance_appearance": "scan_artifacts_present",  # PHYS_005 fires
+    "document_provenance_appearance": "scan_artifacts_present",
     "document_provenance_appearance_source": {
         "page_number": 1,
         "text_spans": ["JPEG compression artifacts visible in background"],
     },
     "document_presented_as_original": True,
-    "security_features_present": [],                # PHYS_002 fires (no features)
+    "security_features_present": [],                # PHYS_001 Check 4 fires
     "security_features_present_source": {"page_number": 1, "text_spans": []},
     "security_features_assessable": "yes",
-    # Content section — non-nursing courses + duplicates
+    # PHYS_002: missing registrar information — all four checks fire
+    "registrar_name_present": False,
+    "registrar_signature_present": False,
+    "registrar_title_present": False,
+    "institution_contact_info_present": False,
+    # Content section — suspicious courses kept for future rule coverage
     "grading_scale_format": "letter_grade_us",
     "grading_scale_format_source": {"page_number": 2, "text_spans": ["A, B, C"]},
     "language_of_issue": "english",
     "language_of_issue_source": {"page_number": 1, "text_spans": []},
     "country_of_study": "nigeria",
     "declared_language_of_instruction": "english",
-    "course_relevance": "predominantly_non_nursing",  # CONT_003 fires
-    "course_relevance_source": {
-        "page_number": 2,
-        "text_spans": ["Bandaging", "Theater techniques & surgery"],
-    },
-    "duplicate_courses_detected": "yes",              # CONT_003 fires again
-    "duplicate_courses_detected_source": {
-        "page_number": 2,
-        "text_spans": ["Family planning (appears at rows 4 and 11)"],
-    },
     "suspicious_course_names": [
         "Bandaging",
         "Theater techniques & surgery",
@@ -163,13 +163,21 @@ FRAUD_CASE_B: dict = {
             "Ear/nose/throat",
         ],
     },
-    "gpa_arithmetic_consistency": "consistent",
-    "gpa_arithmetic_consistency_source": None,
     "dates_chronology_ok": "yes",
     "dates_chronology_ok_source": None,
     "dates_chronology_issue": "none",
     "program_duration_consistency": "consistent_with_degree",
     "program_duration_consistency_source": None,
+    # CONT_003: claimed ADN with implausibly short 5-month duration
+    "claimed_degree_type": "ADN",
+    "programs": [
+        {
+            "name": "Global Nursing College ADN",
+            "start_date": "2019-01-01",
+            "end_date": "2019-06-01",
+            "claimed_degree_type": "ADN",
+        }
+    ],
     # Program section — diploma mill + missing graduation + unknown accreditor
     "accreditation_claim": "Global Online Nursing Board",  # PROG_001 fires
     "accreditation_claim_source": {

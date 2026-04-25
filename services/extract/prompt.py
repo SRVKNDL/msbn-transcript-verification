@@ -1,8 +1,10 @@
 """Prompt text and enum vocabulary for transcript extraction."""
 
-PROMPT_VERSION = "1.0"
+PROMPT_VERSION = "2.0"
 
 # Enum values the handler accepts from Nova.
+# Only scalar enum fields appear here; boolean, free-text, array-of-objects,
+# and numeric fields are validated structurally by the model, not via this dict.
 
 VOCABULARY: dict[str, set] = {
     # Physical document fields.
@@ -23,25 +25,32 @@ VOCABULARY: dict[str, set] = {
         "watermark", "micro_printing", "hologram", "serial_number",
     },
     "security_features_assessable": {"yes", "no"},
-    # Academic content fields.
+    "printer_quality_consistency": {"consistent", "inconsistent", "unclear"},
+    # Academic content fields — kept for PROG_002 corroboration signal and
+    # aggregate handler _ARRAY_FIELDS (suspicious_course_names) and
+    # PROG_002 (program_duration_consistency, dates_chronology_ok).
     "grading_scale_format": {
         "letter_grade_us", "percentage", "20_point_french",
         "5_point_russian", "pass_fail", "mixed", "unclear",
     },
     "language_of_issue": {"english", "french", "spanish", "other", "unclear"},
-    "course_relevance": {
-        "nursing_standard", "mixed_with_non_nursing",
-        "predominantly_non_nursing", "unclear",
-    },
-    "duplicate_courses_detected": {"yes", "no", "unclear"},
-    "gpa_arithmetic_consistency": {"consistent", "inconsistent", "unclear"},
+    # suspicious_course_names is still merged by services/aggregate/handler.py
+    # _ARRAY_FIELDS — do NOT remove until that handler is updated.
+    "suspicious_course_names": set(),   # free-text strings; no controlled vocab
     "dates_chronology_ok": {"yes", "no", "unclear"},
     "dates_chronology_issue": {
         "none", "overlap", "gap",
         "enrollment_implausibly_early", "enrollment_implausibly_late", "other",
     },
+    # program_duration_consistency is still consumed by check_prog_002 in program.py
+    # — do NOT remove until that rule is updated.
     "program_duration_consistency": {
         "consistent_with_degree", "unusually_short", "unusually_long", "unclear",
+    },
+    # New content control vocab for CONT_003.
+    "claimed_degree_type": {
+        "LPN", "ADN", "BSN", "ABSN", "RN-BSN", "LPN-RN",
+        "MSN", "DNP", "CRNA", "unclear",
     },
     # Program and institution fields.
     "diploma_mill_language_detected": {"yes", "no", "possible"},
@@ -76,7 +85,7 @@ FIELD FORMAT:
 Return every requested field in this structure:
 
   "<field_name>": {
-    "value": <extracted value — enum string, free string, or array>,
+    "value": <extracted value — enum string, free string, boolean, number, or array>,
     "confidence": "high" | "medium" | "low",
     "source_location": {
       "page_number": 1,
@@ -86,8 +95,12 @@ Return every requested field in this structure:
 
 Rules:
 - For array-valued fields (security_features_present, suspicious_course_names, \
-diploma_mill_phrases_found, required_nursing_domains_present), "value" MUST be a \
-JSON array. Use an empty array [] if nothing is found. Do not use null.
+diploma_mill_phrases_found, required_nursing_domains_present, seal_present_on_pages, \
+print_technology_per_page, suspected_alteration_fields), "value" MUST be a JSON array. \
+Use an empty array [] if nothing is found. Do not use null.
+- For object-array fields (courses, semesters, programs, registrar_signature_instances, \
+leave_of_absence_markers), "value" MUST be a JSON array of objects. Use [] if none found.
+- For boolean fields, "value" must be true or false (JSON boolean, not a string).
 - For fields derived from the overall page with no single locatable text span \
 (e.g., text_alignment, document_provenance_appearance, print_technology), \
 "source_location" may be omitted.
@@ -110,7 +123,8 @@ allowed set.
 _USER_PROMPT = """\
 Extract all fields below from the attached transcript page image.
 Return a single JSON object with exactly the keys listed. Use only the allowed \
-enum values. If a value cannot be determined from this page, use "unclear".
+enum values. If a value cannot be determined from this page, use "unclear" for \
+enum fields, null for free-text/date/number fields, and [] for array fields.
 Return valid JSON only — no markdown fences, no preamble, no explanation.
 
 === SECTION 0: Transcript Identity Fields ===
@@ -137,7 +151,14 @@ program_year
   Value: free text graduation/completion/program year, or null if absent
   Description: The graduation year, completion year, or program year printed on the transcript.
 
-=== SECTION 1: Physical Document Fields ===
+document_page_count
+  Value: integer (total number of pages in this document), or null if not determinable
+  Description: The total page count of the entire document (e.g., from "Page 1 of 3" notation
+               or physical count). Used to verify that institution seals appear on all pages.
+
+=== SECTION 1: Physical Document Fields (PHYS_001 – PHYS_005) ===
+
+--- PHYS_001: Seal Authenticity ---
 
 seal_type
   Allowed: embossed | stamped_ink | printed_flat | sticker_foil | absent | unclear
@@ -147,21 +168,15 @@ seal_quality
   Allowed: clear | degraded | pixelated | absent | unclear
   Description: The visual fidelity of the seal or logo.
 
-print_technology
-  Allowed: typewriter | dot_matrix | laser | inkjet | photocopy | unclear
-  Description: The apparent machinery used to print the document text.
+seal_visible_text
+  Value: string (any readable text from the seal or watermark), or null if not readable
+  Description: Verbatim text visible in the institution seal or watermark impression.
+               Return null if the seal contains no readable text or text is illegible.
 
-paper_size_format
-  Allowed: us_letter | a4 | legal | custom_irregular | unclear
-  Description: The dimensions and standard of the paper.
-
-text_alignment
-  Allowed: normal | misaligned | uneven_spacing | unclear
-  Description: The consistency of text baselines and column edges across the page.
-
-document_provenance_appearance
-  Allowed: original | color_copy | scan_artifacts_present | unclear
-  Description: Visual indicators of how the document was reproduced.
+seal_present_on_pages
+  Value: JSON array of integers (page numbers where the institution seal is visible)
+  Description: List every page number on which a seal or watermark is clearly visible.
+               Use [] if the seal is not visible on any page of this document.
 
 security_features_present
   Value: JSON array containing zero or more of: watermark, micro_printing, hologram, serial_number
@@ -176,32 +191,159 @@ security_features_assessable
                If watermark or micro-printing visibility is uncertain, return "no".
                If "no", security_features_present should be treated as unreliable.
 
-=== SECTION 2: Content Fields ===
+--- PHYS_002: Registrar Information ---
 
-grading_scale_format
-  Allowed: letter_grade_us | percentage | 20_point_french | 5_point_russian | pass_fail | mixed | unclear
-  Description: The standard used for course grades on this page.
+registrar_name_present
+  Value: boolean (true if a printed registrar name appears, false if absent)
+  Description: Whether a registrar name is printed on this page.
 
-language_of_issue
-  Allowed: english | french | spanish | other | unclear
-  Description: The primary language the document is written in.
+registrar_signature_present
+  Value: boolean (true if a registrar signature is present — handwritten, stamped, or digital)
+  Description: Whether a registrar signature of any type appears on this page.
 
-course_relevance
-  Allowed: nursing_standard | mixed_with_non_nursing | predominantly_non_nursing | unclear
-  Description: The relevancy of listed courses to the nursing curriculum.
+registrar_title_present
+  Value: boolean (true if a registrar title appears — e.g., "Registrar", "University Registrar",
+         "Director of Admissions and Records")
+  Description: Whether an official registrar title is printed on this page.
 
-duplicate_courses_detected
-  Allowed: yes | no | unclear
-  Description: Whether duplicate or near-duplicate course entries appear on this page.
+institution_contact_info_present
+  Value: boolean (true if institution address OR phone number appears)
+  Description: Whether any institution contact information (street address or phone) is present.
 
-suspicious_course_names
-  Value: JSON array of strings (verbatim course names)
-  Description: Specific course names that appear non-nursing or suspicious. Use [] if none.
+registrar_signature_instances
+  Value: JSON array of objects, each with:
+         { "page": <integer>, "type": "handwritten" | "stamped" | "digital",
+           "appears_consistent": <boolean — true if this instance looks the same as others> }
+  Description: One entry per distinct registrar signature instance found on this page.
+               "appears_consistent" should be false only when the signature looks meaningfully
+               different from other instances (suggesting different hands). Use [] if no
+               signature is present.
 
-gpa_arithmetic_consistency
+--- PHYS_003: Print Technology ---
+
+print_technology
+  Allowed: typewriter | dot_matrix | laser | inkjet | photocopy | unclear
+  Description: The apparent machinery used to print the document text.
+
+print_technology_per_page
+  Value: JSON array of strings (one print_technology enum value per page of the document,
+         in page order). Use the same allowed values as print_technology.
+  Description: Per-page print technology assessment. A single-page document returns a
+               one-element array. Use "unclear" for pages that cannot be assessed.
+
+reissue_markers_detected
+  Value: boolean (true if the document contains "reissued", "certified copy", "duplicate",
+         or similar language indicating this is an officially reissued transcript)
+  Description: Whether explicit reissue language is present. A reissued transcript may
+               legitimately use different print technology than the original.
+
+document_issue_date
+  Value: date string in YYYY-MM-DD format, or null if not found
+  Description: The date this transcript was issued or certified, as printed on the document.
+               Look for "Date Issued", "Issue Date", "Certified", or similar labels.
+
+--- PHYS_004: Text and Print Integrity ---
+
+paper_size_format
+  Allowed: us_letter | a4 | legal | custom_irregular | unclear
+  Description: The dimensions and standard of the paper.
+
+text_alignment
+  Allowed: normal | misaligned | uneven_spacing | unclear
+  Description: The consistency of text baselines and column edges across the page.
+               "misaligned" = baselines or column edges are offset.
+               "uneven_spacing" = irregular spacing between characters or words.
+
+compressed_numbers_detected
+  Value: boolean (true if any numbers appear squeezed or compressed to fit a space)
+  Description: Whether numerals look horizontally compressed, indicating possible digit insertion.
+
+mixed_fonts_detected
+  Value: boolean (true if noticeably different fonts, sizes, or weights appear inconsistently)
+  Description: Whether the document uses inconsistent typefaces suggesting inserted content.
+
+correction_artifacts_present
+  Value: boolean (true if correction fluid, erasures, or smudge marks are visible)
+  Description: Whether physical tampering marks are detectable on the page.
+
+obliteration_marks_detected
+  Value: boolean (true if text appears crossed out, obliterated, or interrupted unexpectedly)
+  Description: Whether text has been deliberately obscured without explanation.
+
+mixed_ink_colors_in_field
+  Value: boolean (true if the same field — e.g., grade column — shows different ink colors
+         across entries)
+  Description: Whether handwritten entries in a single field use noticeably different inks,
+               suggesting some entries were added later.
+
+printer_quality_consistency
   Allowed: consistent | inconsistent | unclear
-  Description: Whether the reported cumulative GPA matches individual grades.
-               Use "unclear" when cumulative GPA and individual grades are on different pages.
+  Description: Whether print density, sharpness, and quality are uniform across the page.
+               "inconsistent" = blurry letters mixed with clear letters or uneven density.
+
+document_provenance_appearance
+  Allowed: original | color_copy | scan_artifacts_present | unclear
+  Description: Visual indicators of how the document was reproduced.
+
+suspected_alteration_fields
+  Value: JSON array of strings (free-text field names or descriptions where alteration is suspected)
+  Description: Any fields where the examiner suspects content was altered. Use [] if none.
+
+--- PHYS_005: Document Completeness ---
+
+degree_conferral_statement_present
+  Value: boolean (true if a degree conferral statement appears — e.g., "Student has completed
+         requirements for [degree]", "Degrees Earned: BSN", "Awarded: Associate Degree in Nursing")
+  Description: Whether this page contains an explicit statement that the degree was conferred.
+
+degree_conferred_date
+  Value: date string in YYYY-MM-DD format, or null if not found
+  Description: The specific date on which the degree was conferred, if stated.
+
+=== SECTION 2: Content Fields (CONT_001 – CONT_004) ===
+
+--- CONT_001 – CONT_004: Shared Structured Data ---
+
+date_of_birth
+  Value: date string in YYYY-MM-DD format, or null if not found
+  Description: The applicant date of birth if printed on this transcript.
+
+programs
+  Value: JSON array of objects, each with:
+         { "name": <string>, "start_date": <YYYY-MM-DD or null>,
+           "end_date": <YYYY-MM-DD or null>, "claimed_degree_type": <string or null> }
+  Description: Each distinct degree program appearing in the transcript. start_date is the
+               enrollment date, end_date is the graduation/completion date. Use [] if none found.
+
+courses
+  Value: JSON array of objects, each with:
+         { "name": <string>, "course_code": <string or null>, "course_title": <string or null>,
+           "credit_hours": <number or null>, "grade_points": <number or null>,
+           "start_date": <YYYY-MM-DD or null>, "end_date": <YYYY-MM-DD or null>,
+           "retake_marker": <boolean — true if course is marked as a repeat/retake>,
+           "transfer_marker": <boolean — true if marked TR, TRANSFER, or CREDIT AWARDED> }
+  Description: Every course entry on this page. grade_points is the numeric GPA equivalent
+               (e.g., A=4.0, B+=3.3). Use null for Pass/Fail or non-numeric grades.
+               Use [] if no courses are found on this page.
+
+semesters
+  Value: JSON array of objects, each with:
+         { "term": <string, e.g., "Fall 2020">, "term_type": "fall" | "spring" | "summer" | "winter",
+           "start_date": <YYYY-MM-DD or null>, "end_date": <YYYY-MM-DD or null>,
+           "courses": <array of course names or codes in this term>,
+           "term_gpa_stated": <number or null>, "term_credit_hours_stated": <number or null>,
+           "cum_gpa_stated_after_term": <number or null> }
+  Description: Each academic term/semester block found on this page. start_date and end_date
+               are the term start and end dates. Use [] if no semester structure is found.
+
+leave_of_absence_markers
+  Value: JSON array of objects, each with:
+         { "start_date": <YYYY-MM-DD or null>, "end_date": <YYYY-MM-DD or null>,
+           "reason": <string or null> }
+  Description: Any leave of absence, withdrawal, or academic stop-out periods noted on the
+               transcript. Use [] if none found.
+
+--- CONT_001: Date and Chronology ---
 
 dates_chronology_ok
   Allowed: yes | no | unclear
@@ -211,11 +353,38 @@ dates_chronology_issue
   Allowed: none | overlap | gap | enrollment_implausibly_early | enrollment_implausibly_late | other
   Description: If dates_chronology_ok is "no", the specific issue. Use "none" otherwise.
 
-program_duration_consistency
-  Allowed: consistent_with_degree | unusually_short | unusually_long | unclear
-  Description: The total elapsed time of the academic program relative to its degree type.
+--- CONT_002: GPA Arithmetic ---
+
+final_cum_gpa_stated
+  Value: number (the final cumulative GPA printed at the bottom or end of the transcript),
+         or null if not found
+  Description: The overall cumulative GPA as stated — typically labeled "Cumulative GPA",
+               "Overall GPA", or "CGPA".
+
+grading_scale_maximum
+  Value: number (the maximum GPA value on the stated scale, e.g., 4.0 or 4.3)
+  Description: The ceiling of the grading scale in use. Default assumption is 4.0 for US
+               transcripts unless another maximum is explicitly stated.
+
+--- CONT_003: Program Duration ---
+
+claimed_degree_type
+  Allowed: LPN | ADN | BSN | ABSN | RN-BSN | LPN-RN | MSN | DNP | CRNA | unclear
+  Description: The nursing degree or credential this transcript is for.
+
+total_credit_hours_stated
+  Value: number (total credit hours as stated on the transcript), or null if not found
+  Description: The total program credit hours printed on the transcript (e.g., "Total: 68 hours").
 
 === SECTION 3: Program and Institution Fields ===
+
+grading_scale_format
+  Allowed: letter_grade_us | percentage | 20_point_french | 5_point_russian | pass_fail | mixed | unclear
+  Description: The standard used for course grades on this page.
+
+language_of_issue
+  Allowed: english | french | spanish | other | unclear
+  Description: The primary language the document is written in.
 
 accreditation_claim
   Value: free text string extracted verbatim, or null if absent
@@ -262,6 +431,14 @@ required_nursing_domains_present
   Description: The fundamental nursing domains visible in courses on this page.
                Include a domain only if courses on this page clearly belong to it.
                Use [] if no domains can be identified on this page.
+
+suspicious_course_names
+  Value: JSON array of strings (verbatim course names)
+  Description: Specific course names that appear non-nursing or suspicious. Use [] if none.
+
+program_duration_consistency
+  Allowed: consistent_with_degree | unusually_short | unusually_long | unclear
+  Description: The total elapsed time of the academic program relative to its degree type.
 """
 
 

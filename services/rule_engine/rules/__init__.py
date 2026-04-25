@@ -5,8 +5,6 @@ from rules.content import (
     check_cont_002,
     check_cont_003,
     check_cont_004,
-    check_cont_005,
-    check_cont_006,
 )
 from rules.physical import (
     check_phys_001,
@@ -37,8 +35,6 @@ ALL_RULES = [
     check_cont_002,
     check_cont_003,
     check_cont_004,
-    check_cont_005,
-    check_cont_006,
     # SP-5/SP-4: program authenticity.
     check_prog_001,
     check_prog_002,
@@ -53,7 +49,7 @@ ALL_RULES = [
 
 RULE_CODES = [
     "PHYS_001", "PHYS_002", "PHYS_003", "PHYS_004", "PHYS_005",
-    "CONT_001", "CONT_002", "CONT_003", "CONT_004", "CONT_005", "CONT_006",
+    "CONT_001", "CONT_002", "CONT_003", "CONT_004",
     "PROG_001", "PROG_002", "PROG_003",
     "PROG_004", "PROG_005", "PROG_006", "PROG_007",
     # CROSS_001-003 deferred to Phase 4.

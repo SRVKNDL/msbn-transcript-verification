@@ -7,6 +7,9 @@ FRONTEND_DIR="$ROOT_DIR/frontend"
 INFRA_VENV="$INFRA_DIR/.venv"
 JSII_CACHE="${JSII_RUNTIME_PACKAGE_CACHE:-/tmp/jsii-runtime-package-cache}"
 
+DEFAULT_FRONTEND_BUCKET="msbn-dashboard-frontend-357621881714"
+DEFAULT_CLOUDFRONT_DISTRIBUTION_ID="EWFC9ZR5VW20B"
+
 REGION="${AWS_REGION:-us-east-1}"
 PROFILE="${AWS_PROFILE:-}"
 REQUIRE_APPROVAL="${CDK_REQUIRE_APPROVAL:-broadening}"
@@ -17,9 +20,10 @@ RUN_DIFF=0
 DEPLOY_FRONTEND=0
 BACKEND_REQUESTED=0
 FRONTEND_ONLY=0
+WAIT_FOR_INVALIDATION="${WAIT_FOR_INVALIDATION:-1}"
 
-FRONTEND_BUCKET="${FRONTEND_BUCKET:-}"
-CLOUDFRONT_DISTRIBUTION_ID="${CLOUDFRONT_DISTRIBUTION_ID:-${DISTRIBUTION_ID:-}}"
+FRONTEND_BUCKET="${FRONTEND_BUCKET:-$DEFAULT_FRONTEND_BUCKET}"
+CLOUDFRONT_DISTRIBUTION_ID="${CLOUDFRONT_DISTRIBUTION_ID:-${DISTRIBUTION_ID:-$DEFAULT_CLOUDFRONT_DISTRIBUTION_ID}}"
 API_BASE="${VITE_API_BASE:-}"
 COGNITO_CLIENT_ID="${VITE_COGNITO_CLIENT_ID:-}"
 COGNITO_REGION="${VITE_COGNITO_REGION:-$REGION}"
@@ -42,14 +46,16 @@ Examples:
   scripts/deploy.sh api --no-tests
 
   scripts/deploy.sh frontend \
-    --frontend-bucket msbn-dashboard-frontend-357621881714 \
-    --distribution-id EWFC9ZR5VW20B
+    --api-base https://<api-id>.execute-api.us-east-1.amazonaws.com \
+    --cognito-client-id <user-pool-client-id>
 
 Options:
   --frontend                  Deploy frontend after requested backend stacks.
   --frontend-only             Build/upload frontend only.
   --frontend-bucket NAME      S3 bucket that hosts frontend assets.
+                              Default: msbn-dashboard-frontend-357621881714.
   --distribution-id ID        CloudFront distribution to invalidate.
+                              Default: EWFC9ZR5VW20B.
   --api-base URL              API Gateway URL for VITE_API_BASE.
   --cognito-client-id ID      Cognito app client ID for VITE_COGNITO_CLIENT_ID.
   --cognito-region REGION     Cognito region; default is AWS region.
@@ -58,12 +64,14 @@ Options:
   --require-approval VALUE    CDK require-approval value; default broadening.
   --no-tests                  Skip make test.
   --no-synth                  Skip make synth.
+  --no-wait-invalidation      Do not wait for CloudFront invalidation completion.
   --diff                      Run cdk diff before deploying backend stacks.
   -h, --help                  Show this help.
 
 Environment alternatives:
   FRONTEND_BUCKET, CLOUDFRONT_DISTRIBUTION_ID, VITE_API_BASE,
   VITE_COGNITO_CLIENT_ID, VITE_COGNITO_REGION, AWS_PROFILE, AWS_REGION.
+  WAIT_FOR_INVALIDATION=0 disables CloudFront invalidation waiting.
 EOF
 }
 
@@ -198,6 +206,12 @@ deploy_frontend() {
       npm run build
   )
 
+  local js_asset
+  js_asset="$(grep -o 'assets/[^"]*\.js' "$FRONTEND_DIR/dist/index.html" | head -1 || true)"
+  if [[ -n "$js_asset" ]]; then
+    log "built frontend entry asset: $js_asset"
+  fi
+
   log "syncing frontend/dist to s3://$FRONTEND_BUCKET/"
   run_aws s3 sync "$FRONTEND_DIR/dist/" "s3://$FRONTEND_BUCKET/" --delete
 
@@ -212,6 +226,28 @@ deploy_frontend() {
         --output text
     )"
     log "CloudFront invalidation created: $invalidation_id"
+
+    if [[ "$WAIT_FOR_INVALIDATION" == "1" ]]; then
+      log "waiting for CloudFront invalidation to complete"
+      run_aws cloudfront wait invalidation-completed \
+        --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+        --id "$invalidation_id"
+      log "CloudFront invalidation completed: $invalidation_id"
+    fi
+
+    local domain_name
+    domain_name="$(
+      run_aws cloudfront get-distribution \
+        --id "$CLOUDFRONT_DISTRIBUTION_ID" \
+        --query 'Distribution.DomainName' \
+        --output text 2>/dev/null || true
+    )"
+    if [[ -n "$domain_name" && "$domain_name" != "None" ]]; then
+      log "frontend URL: https://$domain_name/"
+      if [[ -n "$js_asset" ]]; then
+        log "verify deployed index contains asset: curl -s https://$domain_name/index.html | grep '$js_asset'"
+      fi
+    fi
   else
     log "no CloudFront distribution ID provided; skipping invalidation"
   fi
@@ -310,6 +346,10 @@ parse_args() {
         ;;
       --no-synth)
         RUN_SYNTH=0
+        shift
+        ;;
+      --no-wait-invalidation)
+        WAIT_FOR_INVALIDATION=0
         shift
         ;;
       --diff)

@@ -39,6 +39,57 @@ function hasExtractedSummary(app: Application) {
   return Boolean(app.applicantName.trim() || app.institution.trim());
 }
 
+function isReadyForReview(app: Application) {
+  return app.status === "READY_FOR_REVIEW" && hasExtractedSummary(app);
+}
+
+function isProcessing(app: Application) {
+  return app.status === "PROCESSING" || app.status === "INTAKE_COMPLETE";
+}
+
+function displayApplicant(app: Application) {
+  return app.applicantName || app.originalFilename || "Transcript upload";
+}
+
+function displayInstitution(app: Application) {
+  if (app.institution) return app.institution;
+  if (isProcessing(app)) return "Extraction in progress";
+  if (app.status === "FAILED") return "Processing failed";
+  return "Pending metadata";
+}
+
+function StatusPill({ status }: { status: string }) {
+  const t = useT();
+  const processing = status === "PROCESSING" || status === "INTAKE_COMPLETE";
+  const failed = status === "FAILED";
+  const label = processing
+    ? "Processing"
+    : status === "READY_FOR_REVIEW"
+      ? "Ready"
+      : status.replaceAll("_", " ").toLowerCase();
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        border: `1px solid ${failed ? t.high : processing ? t.med : t.ok}`,
+        background: failed ? t.highBg : processing ? t.medBg : t.okBg,
+        color: failed ? t.high : processing ? t.med : t.ok,
+        borderRadius: 2,
+        padding: "2px 7px",
+        fontSize: 10,
+        fontWeight: 700,
+        fontFamily: t.mono,
+        letterSpacing: 0.3,
+        textTransform: "uppercase",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
 function ShortcutBtn({
   label,
   hint,
@@ -88,17 +139,32 @@ export function DashboardPage({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    listApplications()
-      .then(setApps)
-      .catch((err: Error) => setError(err.message));
+    let cancelled = false;
+    const load = () => {
+      listApplications({ limit: 50 })
+        .then((items) => {
+          if (cancelled) return;
+          setApps(items);
+          setError(null);
+        })
+        .catch((err: Error) => {
+          if (!cancelled) setError(err.message);
+        });
+    };
+    load();
+    const interval = window.setInterval(load, 8000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, []);
 
-  const awaiting = apps
-    .filter((a) => a.status === "READY_FOR_REVIEW")
-    .filter(hasExtractedSummary);
+  const awaiting = apps.filter(isReadyForReview);
+  const processing = apps.filter(isProcessing);
+  const failed = apps.filter((a) => a.status === "FAILED");
   const highSeverity = awaiting.filter((a) => a.highestSeverity === "High").length;
   const flagged = awaiting.reduce((sum, app) => sum + app.flagCount, 0);
-  const queue = awaiting.slice(0, 5);
+  const queue = [...processing, ...failed, ...awaiting].slice(0, 5);
   const today = new Date();
   const eyebrowDate = today.toLocaleDateString("en-US", {
     weekday: "long",
@@ -115,6 +181,12 @@ export function DashboardPage({
       accent: t.accent,
     },
     {
+      label: "Processing",
+      value: String(processing.length),
+      delta: failed.length ? `${failed.length} failed` : "visible after S3 upload",
+      accent: processing.length ? t.med : t.ink2,
+    },
+    {
       label: "High-severity flags",
       value: String(highSeverity),
       delta: `across ${awaiting.length} apps`,
@@ -125,12 +197,6 @@ export function DashboardPage({
       value: String(flagged),
       delta: "ready for reviewer action",
       accent: t.ok,
-    },
-    {
-      label: "Newest upload",
-      value: awaiting[0] ? timeAgo(awaiting[0].ageHours) : "—",
-      delta: "queue age",
-      accent: t.ink2,
     },
   ];
 
@@ -150,7 +216,6 @@ export function DashboardPage({
           gap: 18,
         }}
       >
-        {/* Stat cards */}
         <div
           style={{
             display: "grid",
@@ -207,10 +272,9 @@ export function DashboardPage({
             gap: 18,
           }}
         >
-          {/* Queue preview */}
           <Card
-            title="Review queue"
-            subtitle="Sorted by intake date \u00b7 oldest first"
+            title="Transcript activity"
+            subtitle="Processing uploads appear before ready-for-review cases"
             pad={0}
             actions={
               <Btn
@@ -235,6 +299,7 @@ export function DashboardPage({
                     "Application",
                     "Applicant",
                     "Institution",
+                    "Status",
                     "Age",
                     "Flags",
                     "",
@@ -262,7 +327,7 @@ export function DashboardPage({
                 {queue.length === 0 && (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       style={{
                         padding: "34px 18px",
                         textAlign: "center",
@@ -270,7 +335,7 @@ export function DashboardPage({
                         fontSize: 13,
                       }}
                     >
-                      No applications awaiting review.
+                      No transcript activity yet.
                     </td>
                   </tr>
                 )}
@@ -301,7 +366,7 @@ export function DashboardPage({
                         color: t.ink,
                       }}
                     >
-                      {r.applicantName}
+                      {displayApplicant(r)}
                     </td>
                     <td
                       style={{
@@ -310,7 +375,10 @@ export function DashboardPage({
                         fontSize: 12,
                       }}
                     >
-                      {r.institution}
+                      {displayInstitution(r)}
+                    </td>
+                    <td style={{ padding: "11px 14px" }}>
+                      <StatusPill status={r.status} />
                     </td>
                     <td
                       style={{
@@ -349,15 +417,17 @@ export function DashboardPage({
                       style={{ padding: "11px 14px", textAlign: "right" }}
                     >
                       <span
-                        onClick={() => navigate(`/review/${r.applicationId}`)}
+                        onClick={() =>
+                          isReadyForReview(r) && navigate(`/review/${r.applicationId}`)
+                        }
                         style={{
-                          color: t.primary,
+                          color: isReadyForReview(r) ? t.primary : t.ink4,
                           fontSize: 12,
                           fontWeight: 600,
-                          cursor: "pointer",
+                          cursor: isReadyForReview(r) ? "pointer" : "default",
                         }}
                       >
-                        Review &rarr;
+                        {isReadyForReview(r) ? "Review \u2192" : "Waiting"}
                       </span>
                     </td>
                   </tr>
@@ -423,7 +493,13 @@ export function DashboardPage({
                       <span style={{ fontWeight: 600, color: t.ink }}>
                         System
                       </span>{" "}
-                      <span style={{ color: t.ink3 }}>queued</span>{" "}
+                      <span style={{ color: t.ink3 }}>
+                        {isProcessing(a)
+                          ? "started processing"
+                          : a.status === "FAILED"
+                            ? "failed"
+                            : "queued"}
+                      </span>{" "}
                       <span
                         style={{
                           fontFamily: t.mono,

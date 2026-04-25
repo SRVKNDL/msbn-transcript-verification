@@ -129,6 +129,9 @@ def _application_view(metadata: dict, document: dict | None = None) -> dict:
         "status": metadata.get("status"),
         "caseRef": metadata.get("case_ref"),
         "licenseNumber": metadata.get("license_number") or "",
+        "originalFilename": metadata.get("originalFilename")
+        or metadata.get("original_filename")
+        or "",
         "programYear": (
             metadata.get("program_year")
             or metadata.get("grad_year")
@@ -253,7 +256,7 @@ def handler(event: dict, context) -> dict:
 
 
 def _list_applications(event: dict, table) -> dict:
-    """Query GSI1-ReviewQueue for applications with status READY_FOR_REVIEW."""
+    """Query GSI1-ReviewQueue for applications with requested statuses."""
     params = event.get("queryStringParameters") or {}
 
     try:
@@ -263,11 +266,35 @@ def _list_applications(event: dict, table) -> dict:
     except ValueError:
         return _response(400, {"error": "limit must be an integer"})
 
+    statuses = [
+        status.strip()
+        for status in str(params.get("status") or "READY_FOR_REVIEW").split(",")
+        if status.strip()
+    ]
+    if not statuses:
+        return _response(400, {"error": "status must include at least one value"})
+
     cursor = params.get("cursor")
+    if cursor and len(statuses) > 1:
+        return _response(400, {"error": "cursor is only supported for one status"})
+
+    if len(statuses) > 1:
+        items = []
+        for status in statuses:
+            result = table.query(
+                IndexName="GSI1-ReviewQueue",
+                KeyConditionExpression=Key("status").eq(status),
+                ScanIndexForward=True,
+                Limit=limit,
+            )
+            items.extend(_application_view(item) for item in result.get("Items", []))
+
+        items.sort(key=lambda item: item.get("submittedAt") or "")
+        return _response(200, {"items": items[:limit], "nextCursor": None})
 
     query_kwargs = {
         "IndexName": "GSI1-ReviewQueue",
-        "KeyConditionExpression": Key("status").eq("READY_FOR_REVIEW"),
+        "KeyConditionExpression": Key("status").eq(statuses[0]),
         "ScanIndexForward": True,
         "Limit": limit,
     }

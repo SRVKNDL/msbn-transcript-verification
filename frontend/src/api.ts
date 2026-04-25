@@ -35,6 +35,8 @@ type RawApplication = Partial<Application> & {
   uploadedAt?: string;
   flag_count?: number;
   license_number?: string;
+  originalFilename?: string;
+  original_filename?: string;
   program_year?: string;
   grad_year?: string;
   graduation_year?: string;
@@ -109,6 +111,7 @@ function normalizeApplication(raw: RawApplication): Application {
     status: raw.status ?? "UNKNOWN",
     caseRef: raw.caseRef ?? raw.case_ref ?? null,
     licenseNumber: raw.licenseNumber ?? raw.license_number ?? "",
+    originalFilename: raw.originalFilename ?? raw.original_filename ?? "",
     programYear:
       raw.programYear ?? raw.program_year ?? raw.grad_year ?? raw.graduation_year ?? "",
     pageCount: raw.pageCount ?? raw.page_count ?? raw.document_count ?? 0,
@@ -200,8 +203,25 @@ function normalizeAuditEvent(raw: RawAuditEvent): AuditEvent {
   };
 }
 
-export async function listApplications(): Promise<Application[]> {
-  const data = await fetchJson<{ items: RawApplication[] }>("/applications");
+const DEFAULT_APPLICATION_STATUSES = [
+  "PROCESSING",
+  "READY_FOR_REVIEW",
+  "FAILED",
+  "INTAKE_COMPLETE",
+];
+
+export async function listApplications(options?: {
+  statuses?: string[];
+  limit?: number;
+}): Promise<Application[]> {
+  const statuses = options?.statuses ?? DEFAULT_APPLICATION_STATUSES;
+  const params = new URLSearchParams();
+  if (statuses.length > 0) params.set("status", statuses.join(","));
+  if (options?.limit) params.set("limit", String(options.limit));
+  const query = params.toString();
+  const data = await fetchJson<{ items: RawApplication[] }>(
+    `/applications${query ? `?${query}` : ""}`
+  );
   return data.items.map(normalizeApplication);
 }
 

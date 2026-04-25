@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { CSSProperties } from "react";
 import { getApplication, getAuditTrail } from "../api";
@@ -154,6 +154,21 @@ function clampTextStyle(lines: number): CSSProperties {
   };
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function severityColor(severity: Flag["severity"], t: ReturnType<typeof useT>) {
+  if (severity === "High") return { tone: t.high, bg: t.highBg };
+  if (severity === "Medium") return { tone: t.med, bg: t.medBg };
+  return { tone: t.low, bg: t.lowBg };
+}
+
 export function AuditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -163,7 +178,9 @@ export function AuditPage() {
   const [flags, setFlags] = useState<Flag[]>([]);
   const [app, setApp] = useState<Application | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isPrinting, setIsPrinting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const printInProgressRef = useRef(false);
 
   useEffect(() => {
     if (!id) return;
@@ -199,8 +216,410 @@ export function AuditPage() {
   const reviewed = hasReviewOutcome(app, events);
   const terminalStage = reviewed ? "review" : "system";
   const terminalStyle = auditStageStyle(terminalStage, t);
-  const timelineMinWidth = Math.max(840, (timelineItems.length + 1) * 170);
+  const timelineColumns = Math.max(1, timelineItems.length + 1);
+  const timelineCardWidth = Math.max(88, Math.min(150, Math.floor(980 / timelineColumns)));
+  const timelineHeight = 340;
+  const timelineBranchOffset = 72;
+  const timelineBranchHeight = 62;
   const legendStages: AuditStage[] = ["created", "processing", "flag", "review", "system"];
+
+  function handleDownloadAuditTrail() {
+    if (!app || !id || isPrinting || printInProgressRef.current) return;
+
+    printInProgressRef.current = true;
+    setIsPrinting(true);
+    setError(null);
+
+    const generatedAt = new Date();
+    const summaryCards = [
+      ["Application ID", app.applicationId || id],
+      ["Applicant", app.applicantName || "Not provided"],
+      ["Institution", app.institution || "Not provided"],
+      ["Status", formatStatusLabel(app.status || "unknown")],
+      ["Flags", String(flags.length)],
+      ["Pages", String(app.pageCount || 0)],
+      ["Generated", generatedAt.toLocaleString()],
+      ["Reviewer", user?.email ?? "Reviewer account"],
+    ];
+
+    const eventMarkup = timelineItems
+      .map((item) => {
+        const stageStyle = auditStageStyle(item.stage, t);
+        const timestamp = formatAuditTimestamp(item.ts);
+        return `
+          <div class="event-row">
+            <div class="event-time">
+              <div>${escapeHtml(timestamp.date)}</div>
+              <div class="muted">${escapeHtml(timestamp.time)}</div>
+            </div>
+            <div class="event-stage" style="color:${stageStyle.color};background:${stageStyle.background};border-color:${stageStyle.border};">
+              ${escapeHtml(stageStyle.label)}
+            </div>
+            <div class="event-body">
+              <div class="event-title" style="color:${stageStyle.color};">${escapeHtml(item.title)}</div>
+              <div class="event-meta">${escapeHtml(item.actor)}</div>
+              <div class="event-detail">${escapeHtml(item.detail)}</div>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    const flagMarkup = flags.length === 0
+      ? `<div class="empty-state">No flags were returned for this application.</div>`
+      : flags.map((flag, index) => {
+        const palette = severityColor(flag.severity, t);
+        const snippets = flag.sourceLocation.spans.length > 0
+          ? flag.sourceLocation.spans
+              .map((span) => `<blockquote>${escapeHtml(span)}</blockquote>`)
+              .join("")
+          : `<blockquote>No text span was provided for this flag.</blockquote>`;
+
+        return `
+          <section class="flag-card">
+            <div class="flag-card-head">
+              <div>
+                <div class="flag-code">${escapeHtml(flag.ruleCode)}</div>
+                <div class="flag-name">${escapeHtml(flag.ruleName.replaceAll("_", " ").toLowerCase())}</div>
+              </div>
+              <div class="flag-badges">
+                <span class="severity-chip" style="color:${palette.tone};background:${palette.bg};border-color:${palette.tone};">${escapeHtml(flag.severity)}</span>
+                <span class="safe-chip">${escapeHtml(flag.safePractice)}</span>
+              </div>
+            </div>
+            <div class="flag-grid">
+              <div>
+                <div class="label">Page</div>
+                <div class="value">${escapeHtml(String(flag.sourceLocation.page || "Unknown"))}</div>
+              </div>
+              <div>
+                <div class="label">Flag Status</div>
+                <div class="value">${escapeHtml(flag.status)}</div>
+              </div>
+              <div>
+                <div class="label">Flag #</div>
+                <div class="value">${index + 1} of ${flags.length}</div>
+              </div>
+            </div>
+            <div class="flag-section">
+              <div class="label">Rationale</div>
+              <div class="body-copy">${escapeHtml(flag.rationale)}</div>
+            </div>
+            <div class="flag-section">
+              <div class="label">Transcript Evidence</div>
+              <div class="evidence-list">${snippets}</div>
+            </div>
+          </section>
+        `;
+      }).join("");
+
+    const reportHtml = `
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <title>Audit Trail - ${escapeHtml(app.applicationId || id)}</title>
+          <style>
+            :root {
+              color-scheme: light;
+            }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              font-family: "Open Sans", Arial, sans-serif;
+              color: #111827;
+              background: #f4f7fb;
+            }
+            .page {
+              width: 100%;
+              max-width: 1040px;
+              margin: 0 auto;
+              padding: 28px 28px 36px;
+            }
+            .report-shell {
+              background: #ffffff;
+              border: 1px solid #dbe3ef;
+              border-top: 5px solid #0d2240;
+              border-radius: 8px;
+              overflow: hidden;
+            }
+            .report-header {
+              padding: 26px 28px 22px;
+              border-bottom: 1px solid #e5e7eb;
+              background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            }
+            .eyebrow {
+              font-family: "IBM Plex Mono", monospace;
+              font-size: 11px;
+              letter-spacing: 0.8px;
+              text-transform: uppercase;
+              color: #6b7280;
+            }
+            h1 {
+              margin: 10px 0 6px;
+              font-family: "Montserrat", Arial, sans-serif;
+              font-size: 28px;
+              line-height: 1.1;
+            }
+            .subhead {
+              font-size: 14px;
+              color: #4b5563;
+            }
+            .summary-grid {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              padding: 20px 28px;
+              background: #f8fafc;
+              border-bottom: 1px solid #e5e7eb;
+            }
+            .summary-card {
+              background: #ffffff;
+              border: 1px solid #dbe3ef;
+              border-radius: 6px;
+              padding: 10px 12px;
+            }
+            .label {
+              font-family: "IBM Plex Mono", monospace;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+              text-transform: uppercase;
+              color: #6b7280;
+              margin-bottom: 5px;
+            }
+            .value {
+              font-size: 13px;
+              color: #1f2937;
+              font-weight: 600;
+              line-height: 1.35;
+            }
+            .section {
+              padding: 22px 28px 8px;
+            }
+            .section-title {
+              font-family: "Montserrat", Arial, sans-serif;
+              font-size: 19px;
+              margin: 0 0 6px;
+            }
+            .section-copy {
+              font-size: 13px;
+              color: #6b7280;
+              margin-bottom: 14px;
+            }
+            .event-row {
+              display: grid;
+              grid-template-columns: 130px 110px minmax(0, 1fr);
+              gap: 14px;
+              align-items: start;
+              padding: 12px 0;
+              border-top: 1px solid #eef2f7;
+            }
+            .event-row:first-of-type { border-top: none; }
+            .event-time,
+            .event-meta {
+              font-family: "IBM Plex Mono", monospace;
+              font-size: 11px;
+            }
+            .muted {
+              color: #9ca3af;
+              margin-top: 3px;
+            }
+            .event-stage,
+            .safe-chip,
+            .severity-chip {
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+              border: 1px solid;
+              border-radius: 999px;
+              padding: 4px 8px;
+              font-family: "IBM Plex Mono", monospace;
+              font-size: 10px;
+              font-weight: 800;
+              letter-spacing: 0.4px;
+              text-transform: uppercase;
+            }
+            .event-stage {
+              width: fit-content;
+            }
+            .event-title {
+              font-family: "IBM Plex Mono", monospace;
+              font-size: 12px;
+              font-weight: 800;
+              margin-bottom: 5px;
+            }
+            .event-detail,
+            .body-copy {
+              font-size: 13px;
+              line-height: 1.55;
+              color: #374151;
+            }
+            .flags-layout {
+              display: grid;
+              gap: 14px;
+            }
+            .flag-card {
+              border: 1px solid #dbe3ef;
+              border-left: 5px solid #0d2240;
+              border-radius: 8px;
+              padding: 16px 18px;
+              break-inside: avoid;
+              page-break-inside: avoid;
+              background: #ffffff;
+            }
+            .flag-card-head {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              align-items: start;
+            }
+            .flag-badges {
+              display: flex;
+              gap: 8px;
+              align-items: center;
+              flex-wrap: wrap;
+            }
+            .flag-code {
+              font-family: "IBM Plex Mono", monospace;
+              font-size: 14px;
+              font-weight: 800;
+              color: #111827;
+            }
+            .flag-name {
+              margin-top: 5px;
+              font-size: 13px;
+              color: #4b5563;
+              font-weight: 600;
+            }
+            .safe-chip {
+              color: #0d2240;
+              background: #eff6ff;
+              border-color: #93c5fd;
+            }
+            .flag-grid {
+              display: grid;
+              grid-template-columns: repeat(3, minmax(0, 1fr));
+              gap: 12px;
+              margin-top: 16px;
+              padding: 12px;
+              border-radius: 6px;
+              background: #f8fafc;
+              border: 1px solid #e5e7eb;
+            }
+            .flag-section {
+              margin-top: 16px;
+            }
+            .evidence-list {
+              display: grid;
+              gap: 8px;
+            }
+            blockquote {
+              margin: 0;
+              padding: 10px 12px;
+              border-left: 3px solid #0d2240;
+              background: #f8fafc;
+              color: #1f2937;
+              font-size: 13px;
+              line-height: 1.55;
+            }
+            .empty-state {
+              padding: 18px;
+              border: 1px dashed #cbd5e1;
+              border-radius: 8px;
+              background: #f8fafc;
+              color: #6b7280;
+              font-size: 13px;
+            }
+            @media print {
+              body { background: #ffffff; }
+              .page { max-width: none; padding: 0; }
+              .report-shell { border: none; border-top: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="page">
+            <div class="report-shell">
+              <div class="report-header">
+                <div class="eyebrow">Mississippi Board of Nursing · Audit Trail</div>
+                <h1>${escapeHtml(app.applicantName || "Application Audit Trail")}</h1>
+                <div class="subhead">Application #${escapeHtml(app.applicationId || id)} · ${escapeHtml(app.institution || "Institution not provided")}</div>
+              </div>
+              <div class="summary-grid">
+                ${summaryCards
+                  .map(([label, value]) => `
+                    <div class="summary-card">
+                      <div class="label">${escapeHtml(label)}</div>
+                      <div class="value">${escapeHtml(value)}</div>
+                    </div>
+                  `)
+                  .join("")}
+              </div>
+              <section class="section">
+                <h2 class="section-title">Audit Events</h2>
+                <div class="section-copy">Chronological record of intake, processing, flags, and reviewer activity.</div>
+                ${eventMarkup}
+              </section>
+              <section class="section" style="padding-bottom: 28px;">
+                <h2 class="section-title">Flag Evidence</h2>
+                <div class="section-copy">Each flag includes its rationale, page reference, and the transcript excerpt returned by the review API.</div>
+                <div class="flags-layout">${flagMarkup}</div>
+              </section>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.style.opacity = "0";
+    iframe.style.pointerEvents = "none";
+
+    let cleanedUp = false;
+    let printStarted = false;
+    let fallbackTimer: number | undefined;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      if (fallbackTimer !== undefined) {
+        window.clearTimeout(fallbackTimer);
+      }
+      window.setTimeout(() => {
+        iframe.remove();
+        printInProgressRef.current = false;
+        setIsPrinting(false);
+      }, 200);
+    };
+
+    iframe.onload = () => {
+      if (printStarted) return;
+      printStarted = true;
+
+      const printFrame = iframe.contentWindow;
+      if (!printFrame) {
+        setError("Unable to prepare audit trail for printing.");
+        cleanup();
+        return;
+      }
+
+      printFrame.onafterprint = cleanup;
+      printFrame.focus();
+      window.setTimeout(() => {
+        printFrame.print();
+      }, 200);
+      fallbackTimer = window.setTimeout(cleanup, 60_000);
+    };
+
+    document.body.appendChild(iframe);
+    iframe.srcdoc = reportHtml;
+  }
 
   return (
     <div
@@ -438,16 +857,48 @@ export function AuditPage() {
                 Chronological audit events from intake through reviewer action.
               </div>
             </div>
-            <div
-              style={{
-                fontFamily: t.mono,
-                fontSize: 11,
-                color: t.ink4,
-                textTransform: "uppercase",
-                letterSpacing: 0.8,
-              }}
-            >
-              {events.length} audit events · {flags.length} flags
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button
+                onClick={handleDownloadAuditTrail}
+                disabled={isLoading || !app || isPrinting}
+                title="Download audit trail"
+                aria-label="Download audit trail"
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 5,
+                  border: `1px solid ${t.line}`,
+                  background: t.surfaceAlt,
+                  color: isLoading || !app || isPrinting ? t.ink4 : t.ink2,
+                  cursor: isLoading || !app || isPrinting ? "not-allowed" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                  boxShadow: "0 6px 16px rgba(15, 23, 42, 0.06)",
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M7 8V4H17V8M7 14H17V20H7V14ZM5 8H19C20.1046 8 21 8.89543 21 10V15H17V12H7V15H3V10C3 8.89543 3.89543 8 5 8Z"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              <div
+                style={{
+                  fontFamily: t.mono,
+                  fontSize: 11,
+                  color: t.ink4,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.8,
+                }}
+              >
+                {events.length} audit events · {flags.length} flags
+              </div>
             </div>
           </div>
 
@@ -458,14 +909,14 @@ export function AuditPage() {
               Loading audit timeline...
             </div>
           ) : (
-            <div style={{ overflowX: "auto", padding: "24px 18px 10px" }}>
+            <div style={{ padding: "24px 18px 10px" }}>
               <div
                 style={{
                   position: "relative",
-                  minWidth: timelineMinWidth,
-                  height: 260,
+                  width: "100%",
+                  height: timelineHeight,
                   display: "grid",
-                  gridTemplateColumns: `repeat(${timelineItems.length + 1}, minmax(150px, 1fr))`,
+                  gridTemplateColumns: `repeat(${timelineColumns}, minmax(0, 1fr))`,
                   alignItems: "center",
                 }}
               >
@@ -485,6 +936,7 @@ export function AuditPage() {
                   const stageStyle = auditStageStyle(item.stage, t);
                   const timestamp = formatAuditTimestamp(item.ts);
                   const isAbove = index % 2 === 0;
+                  const opensReview = item.stage === "flag";
 
                   return (
                     <div key={item.id} style={{ position: "relative", height: "100%" }}>
@@ -507,25 +959,32 @@ export function AuditPage() {
                         style={{
                           position: "absolute",
                           left: "50%",
-                          top: isAbove ? "calc(50% - 58px)" : "calc(50% + 10px)",
-                          height: 48,
+                          top: isAbove
+                            ? `calc(50% - ${timelineBranchOffset}px)`
+                            : "calc(50% + 10px)",
+                          height: timelineBranchHeight,
                           borderLeft: `2px solid ${stageStyle.color}`,
                           opacity: 0.65,
                         }}
                       />
                       <div
+                        onClick={() => {
+                          if (opensReview && id) navigate(`/review/${id}`);
+                        }}
+                        title={opensReview ? "Open review page" : undefined}
                         style={{
                           position: "absolute",
                           left: "50%",
-                          top: isAbove ? 0 : "calc(50% + 58px)",
+                          top: isAbove ? 0 : `calc(50% + ${timelineBranchOffset}px)`,
                           transform: "translateX(-50%)",
-                          width: 148,
+                          width: timelineCardWidth,
                           minHeight: 70,
                           background: stageStyle.background,
                           border: `1px solid ${stageStyle.border}`,
                           borderRadius: 6,
                           padding: "9px 10px",
                           boxShadow: "0 10px 22px rgba(15, 23, 42, 0.08)",
+                          cursor: opensReview ? "pointer" : "default",
                         }}
                       >
                         <div
@@ -591,8 +1050,8 @@ export function AuditPage() {
                     style={{
                       position: "absolute",
                       left: "50%",
-                      top: "calc(50% - 58px)",
-                      height: 48,
+                      top: `calc(50% - ${timelineBranchOffset}px)`,
+                      height: timelineBranchHeight,
                       borderLeft: reviewed
                         ? `2px solid ${terminalStyle.color}`
                         : `2px dashed ${t.ink4}`,
@@ -600,18 +1059,23 @@ export function AuditPage() {
                     }}
                   />
                   <div
+                    onClick={() => {
+                      if (id) navigate(`/review/${id}`);
+                    }}
+                    title="Open review page"
                     style={{
                       position: "absolute",
                       left: "50%",
                       top: 0,
                       transform: "translateX(-50%)",
-                      width: 148,
+                      width: timelineCardWidth,
                       minHeight: 70,
                       background: terminalStyle.background,
                       border: `1px solid ${terminalStyle.border}`,
                       borderRadius: 6,
                       padding: "9px 10px",
                       boxShadow: "0 10px 22px rgba(15, 23, 42, 0.08)",
+                      cursor: "pointer",
                     }}
                   >
                     <div

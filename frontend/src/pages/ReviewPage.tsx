@@ -13,13 +13,16 @@ import type { Application, Flag, Decisions, OverallDecision, ExtractionData, Ext
 
 const DEFAULT_TRANSCRIPT_ZOOM = 2;
 const SEVERITY_ORDER = { High: 0, Medium: 1, Low: 2 } as const;
-type QueueSort = "age" | "flags" | "severity" | "name";
+type QueueSort = "oldest" | "newest" | "flags" | "severity" | "applicant" | "institution";
 const QUEUE_SORT_LABELS: Record<QueueSort, string> = {
-  age: "age",
-  flags: "flag count",
+  oldest: "oldest first",
+  newest: "newest first",
+  flags: "most flags",
   severity: "severity",
-  name: "name",
+  applicant: "applicant",
+  institution: "institution",
 };
+type FlagSort = "severity" | "page" | "rule" | "status";
 
 function severityRank(severity: Flag["severity"]) {
   return SEVERITY_ORDER[severity] ?? 3;
@@ -406,6 +409,7 @@ function QueueRow({ app, active, onClick, shaded }: { app: Application; active: 
     : t.ink4;
   const rowBackground = active ? t.accentBg : shaded ? "#eef4fb" : t.surface;
   const rowBorder = active ? "rgba(0, 94, 162, 0.28)" : shaded ? "#dbe7f4" : "transparent";
+  const metaText = [app.country, app.programYear].filter(Boolean).join(" · ") || timeAgo(app.ageHours);
 
   return (
     <div onClick={onClick} style={{
@@ -422,9 +426,11 @@ function QueueRow({ app, active, onClick, shaded }: { app: Application; active: 
       fontSize: 13,
       color: active ? t.primary : t.ink2,
       boxShadow: active ? "0 8px 18px rgba(0,94,162,0.11)" : "none",
+      minHeight: 86,
+      boxSizing: "border-box",
     }}>
       <div style={{ width: 6, height: 6, borderRadius: 3, background: dotColor, marginTop: 7 }} />
-      <div style={{ minWidth: 0 }}>
+      <div style={{ minWidth: 0, display: "grid", gridTemplateRows: "20px 16px 16px", alignContent: "start" }}>
         <div style={{
           fontWeight: active ? 600 : 500,
           color: active ? t.primary : t.ink2,
@@ -446,17 +452,18 @@ function QueueRow({ app, active, onClick, shaded }: { app: Application; active: 
           {app.applicationId}
         </div>
         <div style={{
-          display: "flex",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) auto",
           gap: 6,
           alignItems: "center",
-          justifyContent: "space-between",
           marginTop: 3,
           fontSize: 10,
           color: t.ink3,
           fontFamily: t.mono,
+          minHeight: 16,
         }}>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {[app.country, app.programYear].filter(Boolean).join(" · ") || timeAgo(app.ageHours)}
+            {metaText}
           </span>
           <span style={{ flexShrink: 0 }}>
             {app.flagCount} flag{app.flagCount !== 1 ? "s" : ""}
@@ -701,7 +708,7 @@ export function ReviewPage() {
   const [decisions, setDecisions] = useState<Decisions>({});
   const [currentPage, setCurrentPage] = useState(1);
   const [overallDecision, setOverallDecision] = useState<OverallDecision>(null);
-  const [flagSort, setFlagSort] = useState<"priority" | "rule" | "page">("priority");
+  const [flagSort, setFlagSort] = useState<FlagSort>("severity");
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [drawerFlag, setDrawerFlag] = useState<Flag | null>(null);
@@ -709,7 +716,7 @@ export function ReviewPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [queueOpen, setQueueOpen] = useState(true);
-  const [queueSort, setQueueSort] = useState<QueueSort>("age");
+  const [queueSort, setQueueSort] = useState<QueueSort>("oldest");
   const [isTranscriptFullscreen, setIsTranscriptFullscreen] = useState(false);
   const [transcriptZoom, setTranscriptZoom] = useState(DEFAULT_TRANSCRIPT_ZOOM);
   const transcriptPaneRef = useRef<HTMLDivElement>(null);
@@ -754,6 +761,14 @@ export function ReviewPage() {
   const sortedFlagGroups = useMemo(() => {
     const groups = [...groupedFlags];
     groups.sort((a, b) => {
+      if (flagSort === "status") {
+        const aResolved = a.items.every(({ flag }) => decisions[flag.ruleCode]?.decision);
+        const bResolved = b.items.every(({ flag }) => decisions[flag.ruleCode]?.decision);
+        return Number(aResolved) - Number(bResolved)
+          || severityRank(a.highestSeverity) - severityRank(b.highestSeverity)
+          || a.firstPage - b.firstPage
+          || a.ruleCode.localeCompare(b.ruleCode);
+      }
       if (flagSort === "page") {
         return a.firstPage - b.firstPage || a.ruleCode.localeCompare(b.ruleCode);
       }
@@ -765,7 +780,7 @@ export function ReviewPage() {
         || a.ruleCode.localeCompare(b.ruleCode);
     });
     return groups.map((group, index) => ({ ...group, groupIndex: index }));
-  }, [groupedFlags, flagSort]);
+  }, [decisions, groupedFlags, flagSort]);
   const displayFlags = useMemo(
     () => sortedFlagGroups.flatMap((group) =>
       [...group.items].sort((a, b) =>
@@ -966,6 +981,9 @@ export function ReviewPage() {
     .filter((a) => a.status === "READY_FOR_REVIEW")
     .filter(hasExtractedSummary)]
     .sort((a, b) => {
+      if (queueSort === "newest") {
+        return a.ageHours - b.ageHours || b.flagCount - a.flagCount;
+      }
       if (queueSort === "flags") {
         return b.flagCount - a.flagCount || b.ageHours - a.ageHours;
       }
@@ -974,8 +992,12 @@ export function ReviewPage() {
           || b.flagCount - a.flagCount
           || b.ageHours - a.ageHours;
       }
-      if (queueSort === "name") {
+      if (queueSort === "applicant") {
         return (a.applicantName || a.originalFilename).localeCompare(b.applicantName || b.originalFilename)
+          || b.ageHours - a.ageHours;
+      }
+      if (queueSort === "institution") {
+        return (a.institution || "").localeCompare(b.institution || "")
           || b.ageHours - a.ageHours;
       }
       return b.ageHours - a.ageHours || b.flagCount - a.flagCount;
@@ -1187,12 +1209,15 @@ export function ReviewPage() {
               fontFamily: t.mono,
               cursor: "pointer",
               outlineColor: t.accent,
+              minWidth: 0,
             }}
           >
-            <option value="age">Oldest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="newest">Newest first</option>
             <option value="flags">Most flags</option>
             <option value="severity">Highest severity</option>
-            <option value="name">Name</option>
+            <option value="applicant">Applicant name</option>
+            <option value="institution">Institution</option>
           </select>
         </div>
         <div style={{ flex: 1, overflow: "auto" }}>
@@ -1451,14 +1476,15 @@ export function ReviewPage() {
               aria-label="Sort flags"
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
+                gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
                 gap: 6,
               }}
             >
               {([
-                ["priority", "Priority"],
+                ["severity", "Severity"],
                 ["rule", "Rule"],
                 ["page", "Page"],
+                ["status", "Status"],
               ] as const).map(([value, label]) => {
                 const active = flagSort === value;
                 return (

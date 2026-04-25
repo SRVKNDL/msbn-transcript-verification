@@ -251,10 +251,23 @@ export function DashboardPage({
     const noun = ids.length === 1 ? "1 entry" : `${ids.length} entries`;
     if (!window.confirm(`Permanently delete ${noun}? This removes all records and files and cannot be undone.`)) return;
     setDeleting(true);
+    setError(null);
     try {
-      await Promise.all(ids.map((id) => deleteApplication(id)));
-      setApps((prev) => prev.filter((a) => !selected.has(a.applicationId)));
+      const results = await Promise.allSettled(ids.map((appId) => deleteApplication(appId)));
+      const failedIds = results.flatMap((result, index) =>
+        result.status === "rejected" ? [ids[index]] : []
+      );
+
+      setApps((prev) => prev.filter((a) => !ids.includes(a.applicationId) || failedIds.includes(a.applicationId)));
       setSelected(new Set());
+
+      if (failedIds.length > 0) {
+        setError(
+          failedIds.length === 1
+            ? `Delete failed for ${failedIds[0]}`
+            : `Delete failed for ${failedIds.length} selected applications`
+        );
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Delete failed";
       setError(msg);
@@ -299,6 +312,21 @@ export function DashboardPage({
           gap: 18,
         }}
       >
+        {error && (
+          <div
+            style={{
+              background: t.highBg,
+              border: `1px solid ${t.high}`,
+              borderRadius: 4,
+              padding: "12px 14px",
+              color: t.high,
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            {error}
+          </div>
+        )}
         {/* Stats row */}
         <div
           style={{

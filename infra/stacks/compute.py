@@ -262,6 +262,8 @@ class ComputeConstruct(Construct):
             "dynamodb:GetItem",
             "dynamodb:UpdateItem",
             "dynamodb:PutItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:BatchWriteItem",
         )
 
         # Uploads enter through pre-signed PUT URLs and are previewed through
@@ -269,3 +271,5 @@ class ComputeConstruct(Construct):
         storage.bucket.grant_put(self.dashboard_api_lambda, "uploads/*")
         storage.bucket.grant_read(self.dashboard_api_lambda, "uploads/*")
         storage.bucket.grant_read(self.dashboard_api_lambda, "processed/*")
+        storage.bucket.grant_delete(self.dashboard_api_lambda, "uploads/*")
+        storage.bucket.grant_delete(self.dashboard_api_lambda, "processed/*")

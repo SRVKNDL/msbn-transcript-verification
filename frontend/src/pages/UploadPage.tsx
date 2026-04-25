@@ -23,7 +23,18 @@ const emptyDraft: ApplicationDraft = {
 
 const applicationIdPattern = /^[A-Za-z0-9._-]+$/;
 
-let _uploadCounter = 0;
+function buildTemporaryApplicantName() {
+  const now = new Date();
+  const stamp = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+    String(now.getHours()).padStart(2, "0"),
+    String(now.getMinutes()).padStart(2, "0"),
+    String(now.getSeconds()).padStart(2, "0"),
+  ].join("");
+  return `User-${stamp}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
+}
 
 export function UploadPage() {
   const t = useT();
@@ -99,10 +110,9 @@ export function UploadPage() {
   };
 
   const startUploads = () => {
-    _uploadCounter += 1;
     const details = {
       ...draft,
-      applicantName: `User#${_uploadCounter}`,
+      applicantName: buildTemporaryApplicantName(),
     };
     void Promise.all(
       files

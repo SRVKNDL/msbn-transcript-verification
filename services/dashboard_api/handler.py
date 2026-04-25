@@ -749,16 +749,27 @@ def _delete_application(app_id: str | None, table) -> dict:
 
         # All processed objects (page images, extraction JSON, aggregation).
         prefix = f"processed/{app_id}/"
-        paginator = _s3.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=_BUCKET_NAME, Prefix=prefix):
-            objects = page.get("Contents") or []
-            if objects:
-                _s3.delete_objects(
-                    Bucket=_BUCKET_NAME,
-                    Delete={
-                        "Objects": [{"Key": obj["Key"]} for obj in objects]
-                    },
+        try:
+            paginator = _s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=_BUCKET_NAME, Prefix=prefix):
+                objects = page.get("Contents") or []
+                if objects:
+                    _s3.delete_objects(
+                        Bucket=_BUCKET_NAME,
+                        Delete={
+                            "Objects": [{"Key": obj["Key"]} for obj in objects]
+                        },
+                    )
+        except ClientError:
+            logger.warning(
+                json.dumps(
+                    {
+                        "action": "s3_processed_delete_failed",
+                        "prefix": prefix,
+                        "applicationId": app_id,
+                    }
                 )
+            )
 
     logger.info(
         json.dumps(

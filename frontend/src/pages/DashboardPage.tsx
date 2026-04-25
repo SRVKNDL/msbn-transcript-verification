@@ -236,7 +236,7 @@ export function DashboardPage({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1.6fr 1fr",
+            gridTemplateColumns: "1.8fr 0.85fr",
             gap: 18,
           }}
         >

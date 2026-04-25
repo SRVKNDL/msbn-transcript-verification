@@ -77,12 +77,12 @@ def _process_record(record: dict) -> dict:
         )
         return {"skipped": True, "s3_key": s3_key}
 
-    # UUID is good enough for the POC; switch to ULID if queue ordering needs it.
-    application_id = str(uuid.uuid4())
     uploaded_at = datetime.now(timezone.utc).isoformat()
 
     table = _dynamodb.Table(_TABLE_NAME)
     upload_metadata = _get_upload_metadata(bucket=bucket, s3_key=s3_key)
+    requested_application_id = upload_metadata.pop("application_id", "")
+    application_id = _clean_application_id(requested_application_id) or str(uuid.uuid4())
     item = {
         "PK": f"APP#{application_id}",
         "SK": "METADATA",
@@ -137,7 +137,9 @@ def _get_upload_metadata(*, bucket: str, s3_key: str) -> dict:
         ),
         "institution": metadata.get("institution") or "",
         "country": metadata.get("country") or "",
-        "program": metadata.get("program") or "",
+        "application_id": (
+            metadata.get("application-id") or metadata.get("application_id") or ""
+        ),
         "program_year": (
             metadata.get("program-year") or metadata.get("program_year") or ""
         ),
@@ -145,6 +147,14 @@ def _get_upload_metadata(*, bucket: str, s3_key: str) -> dict:
             metadata.get("license-number") or metadata.get("license_number") or ""
         ),
     }
+
+
+def _clean_application_id(value) -> str:
+    text = str(value or "").strip()
+    safe = "".join(
+        char if char.isalnum() or char in "._-" else "-" for char in text
+    )
+    return safe.strip(".-_")[:80]
 
 
 def _start_pipeline(*, application_id: str, bucket: str, s3_key: str) -> None:

@@ -226,6 +226,37 @@ def test_options_returns_200(dynamo_table, lambda_context):
     assert resp["statusCode"] == 200
 
 
+# ── POST /uploads ─────────────────────────────────────────────────────────────
+
+
+def test_create_upload_url_includes_application_id_metadata(
+    dynamo_table, lambda_context
+):
+    """Manual application ID must be forwarded as S3 object metadata."""
+    event = _make_event(
+        "POST /uploads",
+        body={
+            "filename": "transcript.pdf",
+            "contentType": "application/pdf",
+            "applicationDetails": {
+                "applicationId": "APP-MANUAL-001",
+                "applicantName": "Jane Smith",
+                "institution": "University of Southern Mississippi",
+                "country": "United States",
+                "program": "Should not be forwarded",
+            },
+        },
+    )
+
+    resp = handler(event, lambda_context)
+    assert resp["statusCode"] == 200
+    body = _parse_response(resp)
+
+    assert body["metadataHeaders"]["x-amz-meta-application_id"] == "APP-MANUAL-001"
+    assert body["metadataHeaders"]["x-amz-meta-applicant_name"] == "Jane Smith"
+    assert "x-amz-meta-program" not in body["metadataHeaders"]
+
+
 # ── GET /applications ─────────────────────────────────────────────────────────
 
 

@@ -263,10 +263,10 @@ export async function uploadTranscript(file: File): Promise<{ s3Key: string }> {
 export async function uploadTranscriptWithDetails(
   file: File,
   details: {
+    applicationId?: string;
     applicantName?: string;
     institution?: string;
     country?: string;
-    program?: string;
   }
 ): Promise<{ s3Key: string }> {
   requireApiBase();

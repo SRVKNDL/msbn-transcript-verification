@@ -14,18 +14,20 @@ interface FileEntry {
 }
 
 interface ApplicationDraft {
+  applicationId: string;
   applicantName: string;
   institution: string;
   country: string;
-  program: string;
 }
 
 const emptyDraft: ApplicationDraft = {
+  applicationId: "",
   applicantName: "",
   institution: "",
   country: "",
-  program: "",
 };
+
+const applicationIdPattern = /^[A-Za-z0-9._-]+$/;
 
 function cleanExtractedValue(value: string | undefined) {
   return (value ?? "")
@@ -62,7 +64,6 @@ async function extractDraftFromPdf(file: File): Promise<Partial<ApplicationDraft
       "university",
     ]),
     country: extractAfterLabel(text, ["country"]),
-    program: extractAfterLabel(text, ["program", "degree", "major"]),
   };
 }
 
@@ -73,6 +74,7 @@ export function UploadPage() {
   const selectedFilesRef = useRef<Record<string, File>>({});
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [draft, setDraft] = useState<ApplicationDraft>(emptyDraft);
+  const [draftExtractionAttempted, setDraftExtractionAttempted] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -100,14 +102,17 @@ export function UploadPage() {
       status: "queued" as const,
     }));
     setFiles((prev) => [...prev, ...newEntries]);
-    void extractDraftFromPdf(pdfFiles[0]).then((extracted) => {
-      setDraft((current) => ({
-        applicantName: current.applicantName || extracted.applicantName || "",
-        institution: current.institution || extracted.institution || "",
-        country: current.country || extracted.country || "",
-        program: current.program || extracted.program || "",
-      }));
-    });
+    setDraftExtractionAttempted(false);
+    void extractDraftFromPdf(pdfFiles[0])
+      .then((extracted) => {
+        setDraft((current) => ({
+          applicationId: current.applicationId,
+          applicantName: current.applicantName || extracted.applicantName || "",
+          institution: current.institution || extracted.institution || "",
+          country: current.country || extracted.country || "",
+        }));
+      })
+      .finally(() => setDraftExtractionAttempted(true));
     newEntries.forEach((entry, index) => {
       const file = pdfFiles[index];
       if (file) selectedFilesRef.current[entry.id] = file;
@@ -159,6 +164,13 @@ export function UploadPage() {
     );
   };
 
+  const applicationIdMissing = draft.applicationId.trim().length === 0;
+  const applicationIdInvalid =
+    !applicationIdMissing && !applicationIdPattern.test(draft.applicationId.trim());
+  const missingExtractedPlaceholder = draftExtractionAttempted
+    ? "Needs manual entry"
+    : "";
+
   return (
     <>
       {toast && (
@@ -209,7 +221,7 @@ export function UploadPage() {
                 ["applicantName", "Applicant name"],
                 ["institution", "Institution"],
                 ["country", "Country"],
-                ["program", "Program"],
+                ["applicationId", "Application ID"],
               ] as const
             ).map(([key, label]) => (
               <label
@@ -233,7 +245,19 @@ export function UploadPage() {
                 </span>
                 <input
                   value={draft[key]}
-                  placeholder="not extracted"
+                  placeholder={
+                    key === "applicationId" ? "" : missingExtractedPlaceholder
+                  }
+                  required={key === "applicationId"}
+                  maxLength={key === "applicationId" ? 80 : undefined}
+                  pattern={
+                    key === "applicationId" ? applicationIdPattern.source : undefined
+                  }
+                  title={
+                    key === "applicationId"
+                      ? "Use letters, numbers, dots, underscores, or hyphens."
+                      : undefined
+                  }
                   onChange={(e) =>
                     setDraft((current) => ({
                       ...current,
@@ -241,7 +265,11 @@ export function UploadPage() {
                     }))
                   }
                   style={{
-                    border: `1px solid ${t.line}`,
+                    border: `1px solid ${
+                      key === "applicationId" && applicationIdInvalid
+                        ? t.high
+                        : t.line
+                    }`,
                     background: t.surfaceAlt,
                     color: t.ink,
                     padding: "9px 10px",
@@ -451,6 +479,8 @@ export function UploadPage() {
             variant="primary"
             disabled={
               files.length === 0 ||
+              applicationIdMissing ||
+              applicationIdInvalid ||
               files.some((f) => f.status === "uploading") ||
               files.every((f) => f.status === "uploaded")
             }

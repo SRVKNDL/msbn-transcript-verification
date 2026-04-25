@@ -99,16 +99,24 @@ def _clean_text(value) -> str:
     return str(value or "").strip()[:120]
 
 
+def _clean_application_id(value) -> str:
+    text = _clean_text(value)
+    safe = "".join(
+        char if char.isalnum() or char in "._-" else "-" for char in text
+    )
+    return safe.strip(".-_")[:80]
+
+
 def _upload_metadata_from_body(body: dict) -> tuple[dict, dict]:
     details = body.get("applicationDetails") or {}
     if not isinstance(details, dict):
         details = {}
 
     fields = {
+        "application_id": _clean_application_id(details.get("applicationId")),
         "applicant_name": _clean_text(details.get("applicantName")),
         "institution": _clean_text(details.get("institution")),
         "country": _clean_text(details.get("country")),
-        "program": _clean_text(details.get("program")),
     }
     metadata = {key: value for key, value in fields.items() if value}
     headers = {f"x-amz-meta-{key}": value for key, value in metadata.items()}

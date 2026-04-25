@@ -149,6 +149,32 @@ def test_response_includes_application_id(dynamodb_table, uploads_s3_event, lamb
     assert app["s3_key"] == "uploads/TRANSCRIPT_sample.pdf"
 
 
+def test_upload_metadata_application_id_becomes_application_id(
+    dynamodb_table, uploads_s3_event, lambda_context
+):
+    """Manual upload application ID must become the DynamoDB application ID."""
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="msbn-transcripts-dev")
+    s3.put_object(
+        Bucket="msbn-transcripts-dev",
+        Key="uploads/TRANSCRIPT_sample.pdf",
+        Body=b"%PDF-1.4",
+        Metadata={
+            "application_id": "APP-MANUAL-001",
+            "applicant_name": "Jane Smith",
+        },
+    )
+
+    response = handler(uploads_s3_event, lambda_context)
+    assert response["statusCode"] == 200
+
+    item = dynamodb_table.get_item(
+        Key={"PK": "APP#APP-MANUAL-001", "SK": "METADATA"}
+    )["Item"]
+    assert item["applicationId"] == "APP-MANUAL-001"
+    assert item["applicant_name"] == "Jane Smith"
+
+
 def test_multiple_records_create_independent_items(dynamodb_table, lambda_context):
     """One invocation with two S3 records must produce two independent METADATA items."""
     multi_event = {

@@ -64,6 +64,8 @@ type RawDetail = {
   metadata?: RawApplication;
   extraction?: unknown;
   transcriptUrl?: string | null;
+  transcriptPreviewStatus?: string;
+  transcriptS3Key?: string | null;
   flags?: RawFlag[];
 };
 
@@ -208,6 +210,8 @@ export async function getApplication(id: string): Promise<{
   flags: Flag[];
   extraction: ExtractionData;
   transcriptUrl: string | null;
+  transcriptPreviewStatus: string;
+  transcriptS3Key: string | null;
 }> {
   const data = await fetchJson<RawDetail>(`/applications/${id}`);
   const metadata = data.application ?? data.metadata ?? { applicationId: data.applicationId };
@@ -219,6 +223,8 @@ export async function getApplication(id: string): Promise<{
     flags: (data.flags ?? []).map(normalizeFlag),
     extraction: normalizeExtraction(data.extraction),
     transcriptUrl: data.transcriptUrl ?? null,
+    transcriptPreviewStatus: data.transcriptPreviewStatus ?? "LEGACY_API_RESPONSE",
+    transcriptS3Key: data.transcriptS3Key ?? null,
   };
 }
 

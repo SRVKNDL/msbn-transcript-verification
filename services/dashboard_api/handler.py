@@ -168,31 +168,36 @@ def _flag_view(flag: dict) -> dict:
     }
 
 
-def _transcript_url(metadata: dict) -> str | None:
+def _transcript_preview(metadata: dict) -> dict:
     s3_key = metadata.get("s3_key")
-    if not _BUCKET_NAME or not s3_key:
-        return None
+    if not _BUCKET_NAME:
+        return {"url": None, "status": "BUCKET_NOT_CONFIGURED", "s3Key": s3_key}
+    if not s3_key:
+        return {"url": None, "status": "MISSING_S3_KEY", "s3Key": None}
 
     try:
         _s3.head_object(Bucket=_BUCKET_NAME, Key=s3_key)
-    except ClientError:
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "UNKNOWN")
         logger.warning(
             json.dumps(
                 {
                     "action": "transcript_preview_missing",
                     "bucket": _BUCKET_NAME,
                     "s3_key": s3_key,
+                    "error_code": error_code,
                 }
             )
         )
-        return None
+        return {"url": None, "status": "S3_OBJECT_MISSING", "s3Key": s3_key}
 
-    return _s3.generate_presigned_url(
+    url = _s3.generate_presigned_url(
         ClientMethod="get_object",
         Params={"Bucket": _BUCKET_NAME, "Key": s3_key},
         ExpiresIn=900,
         HttpMethod="GET",
     )
+    return {"url": url, "status": "AVAILABLE", "s3Key": s3_key}
 
 
 # Router.
@@ -357,6 +362,8 @@ def _get_application(app_id: str | None, table) -> dict:
 
     flags = [_flag_view(f) for f in flag_resp.get("Items", [])]
 
+    transcript_preview = _transcript_preview(metadata)
+
     return _response(
         200,
         {
@@ -364,7 +371,9 @@ def _get_application(app_id: str | None, table) -> dict:
             "application": _application_view(metadata, extraction),
             "metadata": metadata,
             "extraction": extraction,
-            "transcriptUrl": _transcript_url(metadata),
+            "transcriptUrl": transcript_preview["url"],
+            "transcriptPreviewStatus": transcript_preview["status"],
+            "transcriptS3Key": transcript_preview["s3Key"],
             "flags": flags,
         },
     )

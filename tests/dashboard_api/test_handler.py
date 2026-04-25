@@ -420,6 +420,8 @@ def test_get_application_includes_transcript_url(dynamo_table, lambda_context):
     assert parsed.netloc.startswith("msbn-transcripts-test.s3.")
     assert parsed.path.endswith("/uploads/transcript_smith.pdf")
     assert parse_qs(parsed.query)["Expires"]
+    assert body["transcriptPreviewStatus"] == "AVAILABLE"
+    assert body["transcriptS3Key"] == "uploads/transcript_smith.pdf"
 
 
 def test_get_application_missing_transcript_url_is_null(dynamo_table, lambda_context):
@@ -434,6 +436,26 @@ def test_get_application_missing_transcript_url_is_null(dynamo_table, lambda_con
     body = _parse_response(handler(event, lambda_context))
 
     assert body["transcriptUrl"] is None
+    assert body["transcriptPreviewStatus"] == "S3_OBJECT_MISSING"
+    assert body["transcriptS3Key"] == "uploads/transcript_smith.pdf"
+
+
+def test_get_application_missing_s3_key_reports_status(dynamo_table, lambda_context):
+    """Records without upload keys must identify the missing metadata field."""
+    _seed_application(dynamo_table, "APP-D01")
+    dynamo_table.update_item(
+        Key={"PK": "APP#APP-D01", "SK": "METADATA"},
+        UpdateExpression="REMOVE s3_key",
+    )
+
+    event = _make_event(
+        "GET /applications/{id}", path_params={"id": "APP-D01"}
+    )
+    body = _parse_response(handler(event, lambda_context))
+
+    assert body["transcriptUrl"] is None
+    assert body["transcriptPreviewStatus"] == "MISSING_S3_KEY"
+    assert body["transcriptS3Key"] is None
 
 
 def test_get_application_flag_status_pending(dynamo_table, lambda_context):

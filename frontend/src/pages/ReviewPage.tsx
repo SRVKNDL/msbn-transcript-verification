@@ -86,6 +86,21 @@ function hasExtractedSummary(app: Application) {
   return Boolean(app.applicantName.trim() || app.institution.trim());
 }
 
+function transcriptPreviewMessage(status: string, s3Key: string | null) {
+  switch (status) {
+    case "MISSING_S3_KEY":
+      return "Transcript preview is unavailable because this DynamoDB record does not have an s3_key.";
+    case "S3_OBJECT_MISSING":
+      return `Transcript preview is unavailable because the uploaded PDF no longer exists in S3${s3Key ? ` (${s3Key})` : ""}.`;
+    case "BUCKET_NOT_CONFIGURED":
+      return "Transcript preview is unavailable because the dashboard API bucket setting is not configured.";
+    case "LEGACY_API_RESPONSE":
+      return "Transcript preview is unavailable because the deployed dashboard API has not been updated to return transcript preview details.";
+    default:
+      return "Transcript preview is unavailable for this application.";
+  }
+}
+
 function ReviewStateScreen({
   title,
   message,
@@ -380,6 +395,8 @@ export function ReviewPage() {
   const [flags, setFlags] = useState<Flag[]>([]);
   const [extraction, setExtraction] = useState<ExtractionData>({ physical: [], content: [], program: [] });
   const [transcriptUrl, setTranscriptUrl] = useState<string | null>(null);
+  const [transcriptPreviewStatus, setTranscriptPreviewStatus] = useState("LEGACY_API_RESPONSE");
+  const [transcriptS3Key, setTranscriptS3Key] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeFlagIdx, setActiveFlagIdx] = useState(0);
   const [decisions, setDecisions] = useState<Decisions>({});
@@ -439,6 +456,8 @@ export function ReviewPage() {
     setFlags([]);
     setExtraction({ physical: [], content: [], program: [] });
     setTranscriptUrl(null);
+    setTranscriptPreviewStatus("LEGACY_API_RESPONSE");
+    setTranscriptS3Key(null);
     setError(null);
     setActiveFlagIdx(0);
     setDecisions({});
@@ -451,6 +470,8 @@ export function ReviewPage() {
         setFlags(data.flags);
         setExtraction(data.extraction);
         setTranscriptUrl(data.transcriptUrl);
+        setTranscriptPreviewStatus(data.transcriptPreviewStatus);
+        setTranscriptS3Key(data.transcriptS3Key);
       })
       .catch((err: Error) => {
         setError(err.message);
@@ -662,8 +683,7 @@ export function ReviewPage() {
             />
           ) : (
             <span>
-              Transcript preview is unavailable because this application does not
-              have an uploaded S3 object key in DynamoDB.
+              {transcriptPreviewMessage(transcriptPreviewStatus, transcriptS3Key)}
             </span>
           )}
         </div>

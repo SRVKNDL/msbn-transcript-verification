@@ -172,14 +172,19 @@ _CANNED_NOVA_PAGE: dict = {
 
 def _nova_response_body(page_data: dict | None = None) -> bytes:
     """Return a serialised Bedrock Nova invoke_model response body."""
+    return _nova_response_body_from_text(json.dumps(page_data or _CANNED_NOVA_PAGE))
+
+
+def _nova_response_body_from_text(text: str, stop_reason: str = "end_turn") -> bytes:
+    """Return a serialised Bedrock Nova response body with custom text."""
     return json.dumps({
         "output": {
             "message": {
                 "role": "assistant",
-                "content": [{"text": json.dumps(page_data or _CANNED_NOVA_PAGE)}],
+                "content": [{"text": text}],
             }
         },
-        "stopReason": "end_turn",
+        "stopReason": stop_reason,
         "usage": {"inputTokens": 1234, "outputTokens": 567},
     }).encode("utf-8")
 
@@ -189,6 +194,16 @@ def _make_bedrock_mock(page_data: dict | None = None) -> MagicMock:
     on every call (a consumed BytesIO would give empty reads on call 2+)."""
     mock_client = MagicMock()
     body_bytes = _nova_response_body(page_data)
+    mock_client.invoke_model.side_effect = (
+        lambda **kwargs: {"body": BytesIO(body_bytes)}
+    )
+    return mock_client
+
+
+def _make_bedrock_text_mock(text: str, stop_reason: str = "end_turn") -> MagicMock:
+    """Return a MagicMock bedrock client whose text is controlled by the test."""
+    mock_client = MagicMock()
+    body_bytes = _nova_response_body_from_text(text, stop_reason=stop_reason)
     mock_client.invoke_model.side_effect = (
         lambda **kwargs: {"body": BytesIO(body_bytes)}
     )
@@ -305,6 +320,44 @@ def test_invoke_model_body_contains_user_prompt_enums(
         assert token in user_text, (
             f"Vocabulary token '{token}' missing from user prompt"
         )
+
+
+def test_invoke_model_uses_configured_output_cap(
+    s3_with_transcript, bedrock_mock, extract_event, lambda_context
+):
+    """Extractor should request the Nova Pro 5K output budget."""
+    handler(extract_event, lambda_context)
+
+    call_kwargs = bedrock_mock.invoke_model.call_args
+    body = json.loads(call_kwargs.kwargs["body"])
+
+    assert body["inferenceConfig"]["max_new_tokens"] == _mod.BEDROCK_MAX_NEW_TOKENS
+
+
+def test_nova_json_parser_accepts_markdown_fence(
+    s3_with_transcript, extract_event, lambda_context
+):
+    """Nova sometimes wraps valid JSON in markdown despite the prompt."""
+    text = "```json\n" + json.dumps(_CANNED_NOVA_PAGE) + "\n```"
+    mock_client = _make_bedrock_text_mock(text)
+
+    with patch.object(_mod, "_bedrock", mock_client):
+        result = handler(extract_event, lambda_context)
+
+    assert result["applicationId"] == _APP_ID
+
+
+def test_nova_json_parser_accepts_preamble(
+    s3_with_transcript, extract_event, lambda_context
+):
+    """Nova sometimes prefixes valid JSON with a short acknowledgement."""
+    text = "Here is the JSON:\n" + json.dumps(_CANNED_NOVA_PAGE)
+    mock_client = _make_bedrock_text_mock(text)
+
+    with patch.object(_mod, "_bedrock", mock_client):
+        result = handler(extract_event, lambda_context)
+
+    assert result["applicationId"] == _APP_ID
 
 
 def test_invoke_model_body_treats_grad_date_as_completion_indicator(

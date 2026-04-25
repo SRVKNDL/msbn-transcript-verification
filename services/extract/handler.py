@@ -21,6 +21,7 @@ _bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
 
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
+BEDROCK_MAX_NEW_TOKENS = int(os.environ.get("BEDROCK_MAX_NEW_TOKENS", "5000"))
 
 _ARRAY_FIELDS = {
     "security_features_present",
@@ -136,7 +137,7 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
         ],
         "system": [{"text": system_prompt}],
         "inferenceConfig": {
-            "max_new_tokens": 4096,
+            "max_new_tokens": BEDROCK_MAX_NEW_TOKENS,
             "temperature": 0.0,
             "topP": 1.0,
         },
@@ -151,21 +152,66 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
 
     response_body = json.loads(response["body"].read())
     raw_text = response_body["output"]["message"]["content"][0]["text"]
+    stop_reason = response_body.get("stopReason", "unknown")
+    usage = response_body.get("usage") or {}
 
     try:
-        return json.loads(raw_text)
+        return _parse_nova_json(raw_text)
     except json.JSONDecodeError as exc:
         logger.error(
             json.dumps({
                 "event": "nova_json_parse_error",
                 "page_number": page_number,
                 "error": str(exc),
+                "stop_reason": stop_reason,
+                "input_tokens": usage.get("inputTokens"),
+                "output_tokens": usage.get("outputTokens"),
+                "raw_text_length": len(raw_text),
                 "raw_text_preview": raw_text[:500],
             })
         )
         raise ValueError(
             f"Nova response for page {page_number} is not valid JSON"
         ) from exc
+
+
+def _parse_nova_json(raw_text: str) -> dict:
+    """Parse a Nova JSON object even when it is wrapped in prose/fences."""
+    text = raw_text.strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = _parse_json_from_wrapped_text(text)
+
+    if not isinstance(parsed, dict):
+        raise json.JSONDecodeError("Nova response JSON is not an object", text, 0)
+    return parsed
+
+
+def _parse_json_from_wrapped_text(text: str) -> dict:
+    fenced = text
+    if fenced.startswith("```"):
+        fenced = fenced.removeprefix("```json").removeprefix("```").strip()
+        if fenced.endswith("```"):
+            fenced = fenced[:-3].strip()
+        return json.loads(fenced)
+
+    decoder = json.JSONDecoder()
+    for idx, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            parsed, _end_idx = decoder.raw_decode(text[idx:])
+        except json.JSONDecodeError:
+            continue
+        return parsed
+
+    first = text.find("{")
+    last = text.rfind("}")
+    if first >= 0 and last > first:
+        return json.loads(text[first : last + 1])
+
+    raise json.JSONDecodeError("No JSON object found in Nova response", text, 0)
 
 
 def handler(event, context):

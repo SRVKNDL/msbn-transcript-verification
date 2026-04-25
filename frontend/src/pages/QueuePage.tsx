@@ -20,6 +20,17 @@ function hasExtractedSummary(app: Application) {
   return Boolean(app.applicantName.trim() || app.institution.trim());
 }
 
+function isProcessing(app: Application) {
+  return app.status === "PROCESSING" || app.status === "INTAKE_COMPLETE";
+}
+
+function applicationTarget(app: Application) {
+  if (app.status === "READY_FOR_REVIEW" && hasExtractedSummary(app)) {
+    return `/review/${app.applicationId}`;
+  }
+  return null;
+}
+
 export function QueuePage() {
   const t = useT();
   const navigate = useNavigate();
@@ -29,7 +40,7 @@ export function QueuePage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    listApplications({ statuses: ["READY_FOR_REVIEW"] })
+    listApplications({ statuses: ["PROCESSING", "INTAKE_COMPLETE", "READY_FOR_REVIEW"] })
       .then((items) => {
         setApps(items);
         setError(null);
@@ -37,13 +48,14 @@ export function QueuePage() {
       .catch((err: Error) => setError(err.message));
   }, []);
 
-  const reviewableApps = apps
-    .filter((a) => a.status === "READY_FOR_REVIEW")
-    .filter(hasExtractedSummary);
+  const queueApps = apps.filter(
+    (a) => isProcessing(a) || (a.status === "READY_FOR_REVIEW" && hasExtractedSummary(a))
+  );
   const hiddenPendingCount = apps.filter(
     (a) => a.status === "READY_FOR_REVIEW" && !hasExtractedSummary(a)
   ).length;
-  const shown = reviewableApps.filter((a) => {
+  const shown = queueApps.filter((a) => {
+    if (isProcessing(a)) return filter === "all";
     if (filter === "high") return a.highestSeverity === "High";
     if (filter === "clean") return a.flagCount === 0;
     return true;
@@ -66,7 +78,7 @@ export function QueuePage() {
     >
       <PageHeader
         eyebrow="Review queue"
-        title={`${shown.length} applications awaiting review`}
+        title={`${shown.length} applications in queue`}
         subtitle={subtitle}
         actions={
           <div style={{ display: "flex", gap: 6 }}>
@@ -213,9 +225,16 @@ export function QueuePage() {
           {shown.map((app, i) => (
             <div
               key={app.applicationId}
-              onClick={() => navigate(`/review/${app.applicationId}`)}
-              onMouseEnter={(e) => (e.currentTarget.style.background = t.surfaceAlt)}
-              onMouseLeave={(e) => (e.currentTarget.style.background = selected.has(app.applicationId) ? t.surfaceAlt : "transparent")}
+              onClick={() => {
+                const target = applicationTarget(app);
+                if (target) navigate(target);
+              }}
+              onMouseEnter={(e) => {
+                if (applicationTarget(app)) e.currentTarget.style.background = t.surfaceAlt;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = selected.has(app.applicationId) ? t.surfaceAlt : "transparent";
+              }}
               style={{
                 display: "grid",
                 gridTemplateColumns: "24px 14px 1.4fr 1.2fr 100px 140px 100px 90px",
@@ -226,7 +245,7 @@ export function QueuePage() {
                   i < shown.length - 1
                     ? `1px solid ${t.line2}`
                     : "none",
-                cursor: "pointer",
+                cursor: applicationTarget(app) ? "pointer" : "default",
                 fontSize: 13,
                 color: t.ink2,
                 transition: "background 120ms",
@@ -298,9 +317,15 @@ export function QueuePage() {
                     minWidth: 12,
                   }}
                 >
-                  {app.flagCount}
+                  {isProcessing(app) ? "..." : app.flagCount}
                 </span>
-                <SeverityChip severity={app.highestSeverity} />
+                {isProcessing(app) ? (
+                  <span style={{ fontSize: 11, color: t.ink4, fontFamily: t.mono }}>
+                    processing
+                  </span>
+                ) : (
+                  <SeverityChip severity={app.highestSeverity} />
+                )}
               </div>
               <div
                 style={{
@@ -315,6 +340,7 @@ export function QueuePage() {
               </div>
               <div style={{ textAlign: "right" }}>
                 <button
+                  disabled={!applicationTarget(app)}
                   style={{
                     border: `1px solid ${t.line}`,
                     background: t.surfaceAlt,
@@ -322,11 +348,11 @@ export function QueuePage() {
                     fontSize: 11,
                     borderRadius: 2,
                     fontFamily: t.mono,
-                    color: t.ink2,
-                    cursor: "pointer",
+                    color: applicationTarget(app) ? t.ink2 : t.ink4,
+                    cursor: applicationTarget(app) ? "pointer" : "default",
                   }}
                 >
-                  open &rarr;
+                  {isProcessing(app) ? "waiting" : "open \u2192"}
                 </button>
               </div>
             </div>

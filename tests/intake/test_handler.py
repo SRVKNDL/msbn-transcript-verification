@@ -352,9 +352,8 @@ def test_sfn_client_error_logs_and_raises(
     """If Step Functions raises a ClientError, handler must log it and re-raise.
 
     S3 event sources retry failed Lambda invocations, so re-raising is correct.
-    The DynamoDB METADATA item is already written before the SFN call, so
-    re-raising does not risk duplicate DynamoDB writes (put_item is idempotent
-    on the same PK/SK, and the applicationId is generated fresh on each retry).
+    The DynamoDB METADATA item is already written before the SFN call. Duplicate
+    S3 notifications are handled separately via a conditional put guard.
     """
     def _raise(*args, **kwargs):
         raise ClientError(
@@ -376,6 +375,46 @@ def test_sfn_client_error_logs_and_raises(
     assert error_logs, "Expected a structured error log for the SFN failure"
     assert "applicationId" in error_logs[0]
     assert "errorCode" in error_logs[0]
+
+
+def test_duplicate_s3_event_does_not_reset_ready_item_to_processing(
+    dynamodb_table, uploads_s3_event, lambda_context
+):
+    """A duplicate upload event must not overwrite an existing finished item."""
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="msbn-transcripts-dev")
+    s3.put_object(
+        Bucket="msbn-transcripts-dev",
+        Key="uploads/TRANSCRIPT_sample.pdf",
+        Body=b"%PDF-1.4",
+        Metadata={"application_id": "APP-DUP-001"},
+    )
+
+    first = handler(uploads_s3_event, lambda_context)
+    assert first["statusCode"] == 200
+
+    dynamodb_table.update_item(
+        Key={"PK": "APP#APP-DUP-001", "SK": "METADATA"},
+        UpdateExpression="SET #st = :status",
+        ExpressionAttributeNames={"#st": "status"},
+        ExpressionAttributeValues={":status": "READY_FOR_REVIEW"},
+    )
+
+    second = handler(uploads_s3_event, lambda_context)
+    second_body = json.loads(second["body"])
+    assert second["statusCode"] == 200
+    assert second_body["applications"][0]["duplicate"] is True
+
+    item = dynamodb_table.get_item(
+        Key={"PK": "APP#APP-DUP-001", "SK": "METADATA"}
+    )["Item"]
+    assert item["status"] == "READY_FOR_REVIEW"
+
+    sfn_client = boto3.client("stepfunctions", region_name="us-east-1")
+    executions = sfn_client.list_executions(stateMachineArn=_FAKE_SFN_ARN)[
+        "executions"
+    ]
+    assert len(executions) == 1
 
 
 def test_placeholder_folder_object_is_skipped(dynamodb_table, lambda_context):

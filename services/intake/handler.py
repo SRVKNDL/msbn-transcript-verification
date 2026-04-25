@@ -96,7 +96,30 @@ def _process_record(record: dict) -> dict:
         "size_bytes": size_bytes,
         **upload_metadata,
     }
-    table.put_item(Item=item)
+    try:
+        table.put_item(
+            Item=item,
+            ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)",
+        )
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code")
+        if error_code != "ConditionalCheckFailedException":
+            raise
+
+        logger.info(
+            json.dumps(
+                {
+                    "message": "IntakeLambda ignoring duplicate upload event",
+                    "applicationId": application_id,
+                    "s3_key": s3_key,
+                }
+            )
+        )
+        return {
+            "applicationId": application_id,
+            "s3_key": s3_key,
+            "duplicate": True,
+        }
 
     logger.info(
         json.dumps(

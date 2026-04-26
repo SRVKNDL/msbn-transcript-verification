@@ -77,8 +77,8 @@ CrossDocLambda, and the dashboard.
   "s3_raw_key": "uploads/transcript_smith_jane.pdf",
   "s3_extraction_key": "processed/a7f3b2c1-.../extraction_TRANSCRIPT.json",
   "s3_aggregation_key": "processed/a7f3b2c1-.../aggregation.json",
-  "model_id": "amazon.nova-lite-v1:0",
-  "prompt_version": "v1.2",
+  "model_id": "amazon.nova-pro-v1:0",
+  "prompt_version": "4.0",
   "page_count": 4,
   "extracted_at": "2026-04-14T18:35:11+00:00"
 }

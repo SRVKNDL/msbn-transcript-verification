@@ -602,7 +602,7 @@ function ExtractedDataDrawer({ flag, extraction, onClose }: {
           </div>
           <div style={{ fontSize: 16, fontWeight: 600, color: TOKENS.ink, marginBottom: 4, fontFamily: "'Montserrat', system-ui, sans-serif" }}>Bedrock Nova extraction</div>
           <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
-            nova-pro-v1:0 · prompt v1.2 · extracted 2026-04-19 14:24 UTC
+            nova-pro-v1:0 · prompt v4.0 · extracted 2026-04-19 14:24 UTC
           </div>
           {flag && (
             <div style={{

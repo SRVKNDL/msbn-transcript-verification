@@ -21,8 +21,8 @@ _s3 = boto3.client("s3")
 _bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
 
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-haiku-4-5-v1:0")
-BEDROCK_MAX_NEW_TOKENS = int(os.environ.get("BEDROCK_MAX_NEW_TOKENS", "8192"))
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
+BEDROCK_MAX_NEW_TOKENS = int(os.environ.get("BEDROCK_MAX_NEW_TOKENS", "5120"))
 
 _ARRAY_FIELDS = {
     "security_features_present",
@@ -117,32 +117,31 @@ def _validate_and_build_page_record(
 
 
 def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
-    """Run one page through Claude Haiku and parse the JSON response."""
+    """Run one page through Nova Pro and parse the JSON response."""
     system_prompt, user_prompt = build_extraction_prompt()
     b64_image = base64.b64encode(image_bytes).decode("utf-8")
 
     body = json.dumps({
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": BEDROCK_MAX_NEW_TOKENS,
-        "system": system_prompt,
         "messages": [
             {
                 "role": "user",
                 "content": [
                     {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": b64_image,
+                        "image": {
+                            "format": "png",
+                            "source": {"bytes": b64_image},
                         },
                     },
-                    {"type": "text", "text": user_prompt},
+                    {"text": user_prompt},
                 ],
             }
         ],
-        "temperature": 0.0,
-        "top_p": 1.0,
+        "system": [{"text": system_prompt}],
+        "inferenceConfig": {
+            "max_new_tokens": BEDROCK_MAX_NEW_TOKENS,
+            "temperature": 0.0,
+            "top_p": 1.0,
+        },
     })
 
     response = _bedrock.invoke_model(
@@ -153,8 +152,8 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
     )
 
     response_body = json.loads(response["body"].read())
-    raw_text = response_body["content"][0]["text"]
-    stop_reason = response_body.get("stop_reason", "unknown")
+    raw_text = response_body["output"]["message"]["content"][0]["text"]
+    stop_reason = response_body.get("stopReason", "unknown")
     usage = response_body.get("usage") or {}
 
     try:
@@ -166,8 +165,8 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
                 "page_number": page_number,
                 "error": str(exc),
                 "stop_reason": stop_reason,
-                "input_tokens": usage.get("input_tokens"),
-                "output_tokens": usage.get("output_tokens"),
+                "input_tokens": usage.get("inputTokens"),
+                "output_tokens": usage.get("outputTokens"),
                 "raw_text_length": len(raw_text),
                 "raw_text_preview": raw_text[:500],
             })

@@ -1,4 +1,4 @@
-"""Unit tests for ExtractLambda — Bedrock Claude Haiku 4.5 integration.
+"""Unit tests for ExtractLambda — Bedrock Nova Pro integration.
 
 Strategy
 --------
@@ -79,7 +79,7 @@ _TRANSCRIPT_PDF = (
 )
 
 # ── Canned model response ─────────────────────────────────────────────────────
-# Represents a clean Mississippi-domestic single-page transcript as Claude Haiku
+# Represents a clean Mississippi-domestic single-page transcript as Nova Pro
 # would return it.  All enum values are from the extraction-vocabulary.md vocabulary.
 _CANNED_PAGE: dict = {
     # Section 1 — Physical fields
@@ -173,16 +173,16 @@ _CANNED_PAGE: dict = {
 
 
 def _model_response_body(page_data: dict | None = None) -> bytes:
-    """Return a serialised Bedrock Claude invoke_model response body."""
+    """Return a serialised Bedrock Nova Pro invoke_model response body."""
     return _model_response_body_from_text(json.dumps(page_data or _CANNED_PAGE))
 
 
 def _model_response_body_from_text(text: str, stop_reason: str = "end_turn") -> bytes:
-    """Return a serialised Bedrock Claude response body with custom text."""
+    """Return a serialised Bedrock Nova Pro invoke_model response body with custom text."""
     return json.dumps({
-        "content": [{"text": text}],
-        "stop_reason": stop_reason,
-        "usage": {"input_tokens": 1234, "output_tokens": 567},
+        "output": {"message": {"role": "assistant", "content": [{"text": text}]}},
+        "stopReason": stop_reason,
+        "usage": {"inputTokens": 1234, "outputTokens": 567},
     }).encode("utf-8")
 
 
@@ -302,8 +302,10 @@ def test_invoke_model_body_contains_system_prompt_enums(
     call_kwargs = bedrock_mock.invoke_model.call_args
     body = json.loads(call_kwargs.kwargs["body"])
 
-    # Claude format: system is a plain string, not an array.
-    system_text = body["system"]
+    # Nova Pro format: system is an array of {"text": "..."} objects.
+    system_arr = body["system"]
+    assert isinstance(system_arr, list) and len(system_arr) == 1
+    system_text = system_arr[0]["text"]
     assert isinstance(system_text, str)
     # A sample of enum values that must appear in the system prompt.
     for token in ("high", "medium", "low", "source_location", "text_spans"):
@@ -320,7 +322,7 @@ def test_invoke_model_body_contains_user_prompt_enums(
 
     call_kwargs = bedrock_mock.invoke_model.call_args
     body = json.loads(call_kwargs.kwargs["body"])
-    # Claude format: content[1] is {"type": "text", "text": ...}
+    # Nova Pro format: content[1] is {"text": ...}
     user_text = body["messages"][0]["content"][1]["text"]
 
     expected_tokens = [
@@ -346,7 +348,7 @@ def test_invoke_model_uses_configured_output_cap(
     call_kwargs = bedrock_mock.invoke_model.call_args
     body = json.loads(call_kwargs.kwargs["body"])
 
-    assert body["max_tokens"] == _mod.BEDROCK_MAX_NEW_TOKENS
+    assert body["inferenceConfig"]["max_new_tokens"] == _mod.BEDROCK_MAX_NEW_TOKENS
 
 
 def test_model_json_parser_accepts_markdown_fence(

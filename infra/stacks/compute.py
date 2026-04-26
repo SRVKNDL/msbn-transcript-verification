@@ -82,9 +82,8 @@ class ComputeConstruct(Construct):
             log_retention=logs.RetentionDays.ONE_WEEK,
             environment={
                 "BUCKET_NAME": storage.bucket.bucket_name,
-                # Claude Haiku 4.5 is used for multimodal transcript extraction.
-                "BEDROCK_MODEL_ID": "anthropic.claude-haiku-4-5-v1:0",
-                "BEDROCK_MAX_NEW_TOKENS": "8192",
+                "BEDROCK_MODEL_ID": "amazon.nova-pro-v1:0",
+                "BEDROCK_MAX_NEW_TOKENS": "5120",
             },
         )
 
@@ -93,12 +92,11 @@ class ComputeConstruct(Construct):
         # Extract writes rendered pages and extraction JSON.
         storage.bucket.grant_put(self.extract_lambda, "processed/*")
 
-        # Scope Bedrock access to Claude Haiku 4.5 used by the extractor.
         self.extract_lambda.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=[
-                    "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-v1:0",
+                    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
                 ],
             )
         )
@@ -124,7 +122,7 @@ class ComputeConstruct(Construct):
             log_retention=logs.RetentionDays.ONE_WEEK,
             environment={
                 "BUCKET_NAME": storage.bucket.bucket_name,
-                "BEDROCK_MODEL_ID": "anthropic.claude-haiku-4-5-v1:0",
+                "BEDROCK_MODEL_ID": "amazon.nova-pro-v1:0",
             },
         )
 
@@ -134,7 +132,7 @@ class ComputeConstruct(Construct):
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=[
-                    "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-v1:0",
+                    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
                 ],
             )
         )

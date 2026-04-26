@@ -171,7 +171,7 @@ def _seed_document(table, app_id: str) -> None:
             "doc_type": "TRANSCRIPT",
             "status": "EXTRACTED",
             "s3_extraction_key": f"processed/{app_id}/extraction_TRANSCRIPT.json",
-            "model_id": "anthropic.claude-haiku-4-5-v1:0",
+            "model_id": "amazon.nova-pro-v1:0",
             "page_count": 4,
         }
     )

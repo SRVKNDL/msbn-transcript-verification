@@ -10,6 +10,7 @@ PYTHON := $(shell command -v python3.11 2>/dev/null || command -v python3)
 
 # Absolute path to the infra venv — required so VIRTUAL_ENV matches sys.prefix exactly.
 INFRA_VENV := $(abspath infra/.venv)
+JSII_CACHE ?= /tmp/jsii-runtime-package-cache
 
 .PHONY: install synth test lint clean
 
@@ -42,14 +43,14 @@ install:
 synth:
 	@echo "==> cdk synth (no deployment)"
 	@test -d infra/.venv || (echo "ERROR: run 'make install' first" && exit 1)
-	cd infra && VIRTUAL_ENV=$(INFRA_VENV) PATH=$(INFRA_VENV)/bin:$$PATH JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION=1 cdk synth
+	cd infra && VIRTUAL_ENV=$(INFRA_VENV) PATH=$(INFRA_VENV)/bin:$$PATH JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION=1 JSII_RUNTIME_PACKAGE_CACHE=$(JSII_CACHE) cdk synth
 
 # ── test ───────────────────────────────────────────────────────────────────────
 # Run the full pytest suite.  IntakeLambda tests use moto to mock DynamoDB;
 # no real AWS credentials required.
 test:
 	@echo "==> pytest"
-	.venv-test/bin/pytest
+	JSII_RUNTIME_PACKAGE_CACHE=$(JSII_CACHE) .venv-test/bin/pytest
 
 # ── lint ───────────────────────────────────────────────────────────────────────
 # Lint Python with ruff (fast, zero-config) and TypeScript with tsc.

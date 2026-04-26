@@ -131,9 +131,9 @@ _CANNED_PAGE: dict = {
 def _bedrock_mock() -> MagicMock:
     mock = MagicMock()
     body = json.dumps({
-        "content": [{"text": json.dumps(_CANNED_PAGE)}],
-        "stop_reason": "end_turn",
-        "usage": {"input_tokens": 1234, "output_tokens": 567},
+        "output": {"message": {"role": "assistant", "content": [{"text": json.dumps(_CANNED_PAGE)}]}},
+        "stopReason": "end_turn",
+        "usage": {"inputTokens": 1234, "outputTokens": 567},
     }).encode("utf-8")
     mock.invoke_model.side_effect = lambda **kw: {"body": BytesIO(body)}
     return mock

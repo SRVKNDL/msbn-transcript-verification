@@ -2,6 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader, Card } from "../components/Shell";
+import {
+  applicationAuditPath,
+  applicationReviewPath,
+  detailBackStateFor,
+} from "../navigation";
 import { getAuditTrail, listApplications } from "../api";
 import {
   auditStageForEvent,
@@ -98,8 +103,14 @@ function EventRow({ event }: { event: AuditEvent }) {
 export function AuditOverviewPage() {
   const t = useT();
   const navigate = useNavigate();
+  const navigateFromAuditLog = (path: string) => {
+    navigate(path, detailBackStateFor("audit"));
+  };
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "flags_only">("all");
+  const [eventFilter, setEventFilter] = useState<"all" | "flags_only" | "review" | "system">("all");
+  const [severityFilter, setSeverityFilter] = useState<"all" | "high" | "medium" | "low">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "ready" | "reviewed" | "failed" | "processing">("all");
+  const [query, setQuery] = useState("");
   const [apps, setApps] = useState<Application[]>([]);
   const [audits, setAudits] = useState<Record<string, AuditEvent[]>>({});
 
@@ -121,18 +132,58 @@ export function AuditOverviewPage() {
     (sum, app) => sum + (audits[app.applicationId]?.length ?? 0),
     0
   );
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredApps = apps.filter((app) => {
+    if (statusFilter === "ready" && app.status !== "READY_FOR_REVIEW") return false;
+    if (statusFilter === "reviewed" && app.status !== "REVIEWED") return false;
+    if (statusFilter === "failed" && app.status !== "FAILED") return false;
+    if (statusFilter === "processing" && app.status !== "PROCESSING" && app.status !== "INTAKE_COMPLETE") return false;
+    if (severityFilter !== "all" && app.highestSeverity?.toLowerCase() !== severityFilter) return false;
+    if (!normalizedQuery) return true;
+    return [
+      app.applicationId,
+      app.applicantName,
+      app.institution,
+      app.country,
+      app.licenseNumber,
+    ].join(" ").toLowerCase().includes(normalizedQuery);
+  });
+
+  function filterEvents(events: AuditEvent[]) {
+    if (eventFilter === "flags_only") return events.filter((e) => e.event === "FLAG_RAISED");
+    if (eventFilter === "review") return events.filter((e) => /review|decision|approved|denied|returned/i.test(`${e.event} ${e.detail}`));
+    if (eventFilter === "system") return events.filter((e) => e.actor === "system" || /status|processing|intake/i.test(e.event));
+    return events;
+  }
 
   return (
     <>
       <PageHeader
         eyebrow="SP-9 \u00b7 Compliance"
         title="Audit log"
-        subtitle={`${apps.length} documents \u00b7 ${totalEvents} total events`}
+        subtitle={`${filteredApps.length} of ${apps.length} documents \u00b7 ${totalEvents} total events`}
         actions={
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Filter audit log"
+              aria-label="Filter audit log"
+              style={{
+                height: 30,
+                width: 180,
+                border: `1px solid ${t.line}`,
+                background: t.surfaceAlt,
+                color: t.ink2,
+                borderRadius: 3,
+                padding: "0 9px",
+                fontSize: 12,
+                fontFamily: "inherit",
+              }}
+            />
             <select
-              value={filter}
-              onChange={(e) => setFilter(e.target.value as "all" | "flags_only")}
+              value={eventFilter}
+              onChange={(e) => setEventFilter(e.target.value as typeof eventFilter)}
               style={{
                 padding: "6px 10px",
                 background: t.surfaceAlt,
@@ -146,18 +197,56 @@ export function AuditOverviewPage() {
             >
               <option value="all">All events</option>
               <option value="flags_only">Flags only</option>
+              <option value="review">Review events</option>
+              <option value="system">System events</option>
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+              style={{
+                padding: "6px 10px",
+                background: t.surfaceAlt,
+                border: `1px solid ${t.line}`,
+                borderRadius: 3,
+                fontSize: 12,
+                color: t.ink2,
+                fontFamily: t.mono,
+                cursor: "pointer",
+              }}
+            >
+              <option value="all">All statuses</option>
+              <option value="ready">Ready</option>
+              <option value="reviewed">Reviewed</option>
+              <option value="failed">Failed</option>
+              <option value="processing">Processing</option>
+            </select>
+            <select
+              value={severityFilter}
+              onChange={(e) => setSeverityFilter(e.target.value as typeof severityFilter)}
+              style={{
+                padding: "6px 10px",
+                background: t.surfaceAlt,
+                border: `1px solid ${t.line}`,
+                borderRadius: 3,
+                fontSize: 12,
+                color: t.ink2,
+                fontFamily: t.mono,
+                cursor: "pointer",
+              }}
+            >
+              <option value="all">All severities</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
             </select>
           </div>
         }
       />
 
       <div style={{ padding: "20px 34px 40px", maxWidth: 960 }}>
-        {apps.map((app) => {
+        {filteredApps.map((app) => {
           const allEvents = audits[app.applicationId] ?? [];
-          const events =
-            filter === "flags_only"
-              ? allEvents.filter((e) => e.event === "FLAG_RAISED")
-              : allEvents;
+          const events = filterEvents(allEvents);
           const isExpanded = expandedId === app.applicationId;
           const flagCount = allEvents.filter(
             (e) => e.event === "FLAG_RAISED"
@@ -281,7 +370,7 @@ export function AuditOverviewPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          navigate(`/audit/${app.applicationId}`);
+                          navigateFromAuditLog(applicationAuditPath(app));
                         }}
                         style={{
                           background: t.surface,
@@ -299,7 +388,7 @@ export function AuditOverviewPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          navigate(`/review/${app.applicationId}`);
+                          navigateFromAuditLog(applicationReviewPath(app));
                         }}
                         style={{
                           background: t.surface,

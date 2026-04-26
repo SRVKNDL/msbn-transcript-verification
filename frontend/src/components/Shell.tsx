@@ -1,23 +1,50 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useT, useThemeMode } from "../theme";
 import { listApplications } from "../api";
 import { getCurrentUser, signOut } from "../auth";
+import type { Application } from "../types";
+import {
+  APP_ROUTES,
+  applicationAuditPath,
+  applicationReviewPath,
+  detailBackStateFor,
+  isApplicationReviewable,
+  sourceFromSection,
+} from "../navigation";
 
 interface ShellProps {
   page: string;
   onNavigate: (id: string) => void;
   children: React.ReactNode;
+  mode?: "standard" | "detail";
+  contentOverflow?: "auto" | "hidden";
 }
 
-export function Shell({ page, onNavigate, children }: ShellProps) {
+export function Shell({
+  page,
+  onNavigate,
+  children,
+  mode: shellMode = "standard",
+  contentOverflow = "auto",
+}: ShellProps) {
   const t = useT();
+  const navigate = useNavigate();
   const { mode, setMode } = useThemeMode();
   const [pendingCount, setPendingCount] = useState(0);
+  const [searchApps, setSearchApps] = useState<Application[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(shellMode !== "detail");
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
   const user = getCurrentUser();
   const darkMode = mode === "dark";
+
+  useEffect(() => {
+    setSidebarOpen(shellMode !== "detail");
+  }, [shellMode]);
 
   useEffect(() => {
     listApplications({ statuses: ["READY_FOR_REVIEW"] })
@@ -34,15 +61,37 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
   }, []);
 
   useEffect(() => {
-    if (!profileOpen) return;
+    listApplications({
+      statuses: [
+        "PROCESSING",
+        "INTAKE_COMPLETE",
+        "FAILED",
+        "READY_FOR_REVIEW",
+        "REVIEWED",
+        "READY_FOR_LICENSING_REVIEW",
+        "RETURN_TO_APPLICANT",
+        "DEFERRED",
+        "DENIED",
+      ],
+      limit: 300,
+    })
+      .then(setSearchApps)
+      .catch(() => setSearchApps([]));
+  }, []);
+
+  useEffect(() => {
+    if (!profileOpen && !searchOpen) return;
     const handleClick = (event: MouseEvent) => {
       if (!profileMenuRef.current?.contains(event.target as Node)) {
         setProfileOpen(false);
       }
+      if (!searchRef.current?.contains(event.target as Node)) {
+        setSearchOpen(false);
+      }
     };
     window.addEventListener("mousedown", handleClick);
     return () => window.removeEventListener("mousedown", handleClick);
-  }, [profileOpen]);
+  }, [profileOpen, searchOpen]);
 
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: "\u25ce" },
@@ -50,6 +99,29 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
     { id: "upload", label: "Upload transcript", icon: "\u21a5" },
     { id: "audit", label: "Audit log", icon: "\u2261" },
   ];
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const searchMatches = normalizedSearch
+    ? searchApps
+        .filter((app) =>
+          [
+            app.applicationId,
+            app.applicantName,
+            app.institution,
+            app.licenseNumber,
+            app.originalFilename,
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(normalizedSearch)
+        )
+        .slice(0, 6)
+    : [];
+
+  function openSearchTarget(path: string) {
+    navigate(path, detailBackStateFor(sourceFromSection(page)));
+    setSearchOpen(false);
+    setSearchQuery("");
+  }
 
   return (
     <div
@@ -63,6 +135,7 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
         gridTemplateColumns: sidebarOpen ? "220px 1fr" : "0 1fr",
         gridTemplateRows: "60px 1fr",
         overflow: "hidden",
+        transition: "grid-template-columns 180ms ease",
       }}
     >
       {/* Top bar */}
@@ -71,33 +144,71 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
           gridColumn: "1 / -1",
           background: t.primary,
           color: t.primaryInk,
-          display: "flex",
+          display: "grid",
+          gridTemplateColumns: "auto minmax(220px, 1fr) minmax(320px, 520px) minmax(220px, 1fr) auto",
           alignItems: "center",
           padding: "0 22px",
-          gap: 16,
+          columnGap: 14,
           borderBottom: `3px solid ${t.accent}`,
         }}
       >
-        <button
-          onClick={() => setSidebarOpen((open) => !open)}
-          title={sidebarOpen ? "Hide navigation" : "Show navigation"}
-          aria-label={sidebarOpen ? "Hide navigation" : "Show navigation"}
-          style={{
-            width: 32,
-            height: 32,
-            border: "1px solid rgba(255,255,255,0.2)",
-            background: "rgba(255,255,255,0.08)",
-            color: "inherit",
-            borderRadius: 4,
-            cursor: "pointer",
-            fontSize: 18,
-            lineHeight: 1,
-            fontFamily: t.mono,
-          }}
-        >
-          &#9776;
-        </button>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <button
+            onClick={() => setSidebarOpen((open) => !open)}
+            title={sidebarOpen ? "Hide navigation" : "Show navigation"}
+            aria-label={sidebarOpen ? "Hide navigation" : "Show navigation"}
+            style={{
+              width: 32,
+              height: 32,
+              border: "1px solid rgba(255,255,255,0.2)",
+              background: "rgba(255,255,255,0.08)",
+              color: "inherit",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontSize: 18,
+              lineHeight: 1,
+              fontFamily: t.mono,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              position: "relative",
+              overflow: "hidden",
+              transition: "background 180ms, border-color 180ms",
+            }}
+          >
+            {[0, 1, 2].map((line) => (
+              <span
+                key={line}
+                style={{
+                  position: "absolute",
+                  width: 16,
+                  height: 2,
+                  borderRadius: 2,
+                  background: "currentColor",
+                  transform: `translateY(${(line - 1) * 5}px) scaleX(${sidebarOpen ? 1 : 0.72})`,
+                  transition: "transform 180ms ease",
+                }}
+              />
+            ))}
+          </button>
+          <button
+            onClick={() => navigate(APP_ROUTES.dashboard)}
+            title="Home"
+            aria-label="Home"
+            style={{
+              border: "none",
+              background: "transparent",
+              color: "inherit",
+              padding: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              textAlign: "left",
+              minWidth: 0,
+            }}
+          >
           <div
             style={{
               width: 30,
@@ -133,8 +244,145 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
               Transcript Verification
             </div>
           </div>
+          </button>
         </div>
-        <div style={{ flex: 1 }} />
+        <div />
+        <div ref={searchRef} style={{ position: "relative", width: "100%", minWidth: 0 }}>
+          <span
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              left: 11,
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: "rgba(255,255,255,0.62)",
+              fontSize: 13,
+              zIndex: 1,
+              pointerEvents: "none",
+            }}
+          >
+            &#8981;
+          </span>
+          <input
+            value={searchQuery}
+            onChange={(event) => {
+              setSearchQuery(event.target.value);
+              setSearchOpen(true);
+            }}
+            onFocus={() => setSearchOpen(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setSearchOpen(false);
+              if (event.key === "Enter" && searchMatches[0]) {
+                openSearchTarget(
+                  isApplicationReviewable(searchMatches[0])
+                    ? applicationReviewPath(searchMatches[0])
+                    : applicationAuditPath(searchMatches[0])
+                );
+              }
+            }}
+            placeholder="Search application ID, name, institution"
+            aria-label="Search applications"
+            style={{
+              width: "100%",
+              height: 34,
+              border: "1px solid rgba(255,255,255,0.22)",
+              background: "rgba(255,255,255,0.1)",
+              color: "inherit",
+              borderRadius: 4,
+              padding: "0 12px 0 32px",
+              fontFamily: "inherit",
+              fontSize: 12,
+              outline: "none",
+            }}
+          />
+          {searchOpen && searchQuery.trim() && (
+            <div
+              style={{
+                position: "absolute",
+                top: 40,
+                left: 0,
+                right: 0,
+                background: t.surface,
+                color: t.ink,
+                border: `1px solid ${t.line}`,
+                borderTop: `3px solid ${t.accent}`,
+                borderRadius: 4,
+                boxShadow: "0 18px 45px rgba(0,0,0,0.28)",
+                zIndex: 30,
+                overflow: "hidden",
+              }}
+            >
+              {searchMatches.length === 0 && (
+                <div style={{ padding: "14px 16px", color: t.ink4, fontSize: 12 }}>
+                  No matching applications.
+                </div>
+              )}
+              {searchMatches.map((app) => {
+                const reviewable = isApplicationReviewable(app);
+                return (
+                  <div
+                    key={app.applicationId}
+                    style={{
+                      minHeight: 72,
+                      padding: "14px 14px",
+                      borderBottom: `1px solid ${t.line2}`,
+                      display: "grid",
+                      gridTemplateColumns: "minmax(0, 1fr) auto",
+                      gap: 10,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: t.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {app.applicantName || app.originalFilename || "Transcript upload"}
+                      </div>
+                      <div style={{ marginTop: 2, fontSize: 10, color: t.ink4, fontFamily: t.mono, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {app.applicationId} · {app.institution || app.status}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {reviewable && (
+                        <button
+                          onClick={() => openSearchTarget(applicationReviewPath(app))}
+                          style={{
+                            border: `1px solid ${t.accent}`,
+                            background: t.accentBg,
+                            color: t.accent,
+                            borderRadius: 3,
+                            padding: "5px 8px",
+                            cursor: "pointer",
+                            fontFamily: t.mono,
+                            fontSize: 10,
+                            fontWeight: 800,
+                          }}
+                        >
+                          Review
+                        </button>
+                      )}
+                      <button
+                        onClick={() => openSearchTarget(applicationAuditPath(app))}
+                        style={{
+                          border: `1px solid ${t.line}`,
+                          background: t.surfaceAlt,
+                          color: t.ink2,
+                          borderRadius: 3,
+                          padding: "5px 8px",
+                          cursor: "pointer",
+                          fontFamily: t.mono,
+                          fontSize: 10,
+                          fontWeight: 800,
+                        }}
+                      >
+                        Audit
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div />
         <div ref={profileMenuRef} style={{ position: "relative" }}>
           <button
             onClick={() => setProfileOpen((open) => !open)}
@@ -302,10 +550,14 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
           background: t.surface,
           borderRight: sidebarOpen ? `1px solid ${t.line}` : "none",
           padding: sidebarOpen ? "18px 0" : 0,
-          display: sidebarOpen ? "flex" : "none",
+          display: "flex",
           flexDirection: "column",
           gap: 2,
           overflow: "hidden",
+          opacity: sidebarOpen ? 1 : 0,
+          transform: sidebarOpen ? "translateX(0)" : "translateX(-16px)",
+          pointerEvents: sidebarOpen ? "auto" : "none",
+          transition: "opacity 180ms ease, transform 180ms ease",
         }}
       >
         <div
@@ -386,7 +638,7 @@ export function Shell({ page, onNavigate, children }: ShellProps) {
       </div>
 
       {/* Main content */}
-      <div style={{ gridColumn: 2, gridRow: 2, overflow: "auto" }}>{children}</div>
+      <div style={{ gridColumn: 2, gridRow: 2, overflow: contentOverflow }}>{children}</div>
     </div>
   );
 }

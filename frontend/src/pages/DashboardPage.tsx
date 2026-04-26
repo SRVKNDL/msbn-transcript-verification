@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader, Card, Btn } from "../components/Shell";
+import {
+  applicationDetailPath,
+  detailBackStateFor,
+  isApplicationReviewable,
+} from "../navigation";
 import { listApplications, deleteApplication } from "../api";
 import type { Application } from "../types";
 
@@ -35,12 +40,8 @@ function FlagDot({ n, color }: { n: number; color: string }) {
   );
 }
 
-function hasExtractedSummary(app: Application) {
-  return Boolean(app.applicantName.trim() || app.institution.trim());
-}
-
 function isReadyForReview(app: Application) {
-  return app.status === "READY_FOR_REVIEW" && hasExtractedSummary(app);
+  return isApplicationReviewable(app);
 }
 
 function isProcessing(app: Application) {
@@ -96,14 +97,8 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-function applicationTarget(app: Application) {
-  if (isReadyForReview(app)) return `/review/${app.applicationId}`;
-  if (app.status === "FAILED") return `/audit/${app.applicationId}`;
-  if (app.status === "REVIEWED") return `/audit/${app.applicationId}`;
-  return null;
-}
-
-type SortKey = "date_desc" | "date_asc" | "status";
+type SortKey = "application" | "applicant" | "institution" | "status" | "submitted" | "flags";
+type SortDirection = "asc" | "desc";
 
 interface EnabledGroups {
   processing: boolean;
@@ -112,15 +107,28 @@ interface EnabledGroups {
   reviewed: boolean;
 }
 
-// Always fetch the four default statuses so stats cards are never affected by
-// the filter toggles. REVIEWED is only added when that toggle is on.
+const ACTIVE_STATUSES = new Set(["PROCESSING", "INTAKE_COMPLETE", "FAILED", "READY_FOR_REVIEW"]);
+
+const REVIEW_OUTCOME_STATUSES = [
+  "REVIEWED",
+  "READY_FOR_LICENSING_REVIEW",
+  "RETURN_TO_APPLICANT",
+  "DEFERRED",
+  "DENIED",
+  "APPROVED",
+  "CLOSED",
+  "COMPLETED",
+];
+
+// Always fetch active statuses so stats cards are never affected by filters.
+// The reviewed group includes terminal/review-outcome statuses, not only REVIEWED.
 function resolveStatuses(groups: EnabledGroups): string[] {
   return [
     "PROCESSING",
     "INTAKE_COMPLETE",
     "FAILED",
     "READY_FOR_REVIEW",
-    ...(groups.reviewed ? ["REVIEWED"] : []),
+    ...(groups.reviewed ? REVIEW_OUTCOME_STATUSES : []),
   ];
 }
 
@@ -131,6 +139,9 @@ export function DashboardPage({
 }) {
   const t = useT();
   const navigate = useNavigate();
+  const navigateFromDashboard = (path: string) => {
+    navigate(path, detailBackStateFor("dashboard"));
+  };
   const [apps, setApps] = useState<Application[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -142,7 +153,8 @@ export function DashboardPage({
   });
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [sortBy, setSortBy] = useState<SortKey>("date_desc");
+  const [sortBy, setSortBy] = useState<SortKey>("submitted");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [pageSize, setPageSize] = useState(10);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -179,9 +191,12 @@ export function DashboardPage({
     ...(enabledGroups.processing ? ["PROCESSING", "INTAKE_COMPLETE"] : []),
     ...(enabledGroups.failed ? ["FAILED"] : []),
     ...(enabledGroups.ready ? ["READY_FOR_REVIEW"] : []),
-    ...(enabledGroups.reviewed ? ["REVIEWED"] : []),
+    ...(enabledGroups.reviewed ? REVIEW_OUTCOME_STATUSES : []),
   ]);
-  let displayed = apps.filter((a) => activeStatuses.has(a.status));
+  let displayed = apps.filter((a) =>
+    activeStatuses.has(a.status) ||
+    (enabledGroups.reviewed && !ACTIVE_STATUSES.has(a.status))
+  );
   if (dateFrom) {
     displayed = displayed.filter((a) => a.submittedAt >= dateFrom);
   }
@@ -190,13 +205,16 @@ export function DashboardPage({
       (a) => a.submittedAt <= `${dateTo}T23:59:59`
     );
   }
-  if (sortBy === "date_desc") {
-    displayed.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
-  } else if (sortBy === "date_asc") {
-    displayed.sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
-  } else {
-    displayed.sort((a, b) => a.status.localeCompare(b.status));
-  }
+  displayed.sort((a, b) => {
+    let value = 0;
+    if (sortBy === "application") value = a.applicationId.localeCompare(b.applicationId);
+    if (sortBy === "applicant") value = displayApplicant(a).localeCompare(displayApplicant(b));
+    if (sortBy === "institution") value = displayInstitution(a).localeCompare(displayInstitution(b));
+    if (sortBy === "status") value = a.status.localeCompare(b.status);
+    if (sortBy === "submitted") value = a.submittedAt.localeCompare(b.submittedAt);
+    if (sortBy === "flags") value = a.flagCount - b.flagCount;
+    return sortDirection === "asc" ? value : -value;
+  });
   const queue = displayed.slice(0, pageSize);
 
   // Stats are always computed from the unfiltered fetch.
@@ -243,6 +261,15 @@ export function DashboardPage({
 
   function toggleGroup(key: keyof EnabledGroups) {
     setEnabledGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function toggleSort(key: SortKey) {
+    if (sortBy === key) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortBy(key);
+    setSortDirection(key === "submitted" || key === "flags" ? "desc" : "asc");
   }
 
   async function handleDelete() {
@@ -528,13 +555,19 @@ export function DashboardPage({
                   Sort
                 </span>
                 <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as SortKey)}
+                  value={`${sortBy}:${sortDirection}`}
+                  onChange={(e) => {
+                    const [key, direction] = e.target.value.split(":") as [SortKey, SortDirection];
+                    setSortBy(key);
+                    setSortDirection(direction);
+                  }}
                   style={selectStyle}
                 >
-                  <option value="date_desc">Newest first</option>
-                  <option value="date_asc">Oldest first</option>
-                  <option value="status">By status</option>
+                  <option value="submitted:desc">Newest first</option>
+                  <option value="submitted:asc">Oldest first</option>
+                  <option value="status:asc">Status A-Z</option>
+                  <option value="institution:asc">Institution A-Z</option>
+                  <option value="flags:desc">Most flags</option>
                 </select>
               </div>
 
@@ -621,20 +654,20 @@ export function DashboardPage({
                       style={{ cursor: "pointer" }}
                     />
                   </th>
-                  {[
-                    "Application",
-                    "Applicant",
-                    "Institution",
-                    "Status",
-                    "Age",
-                    "Flags",
-                    "",
-                  ].map((h, i) => (
+                  {([
+                    ["application", "Application"],
+                    ["applicant", "Applicant"],
+                    ["institution", "Institution"],
+                    ["status", "Status"],
+                    ["submitted", "Age"],
+                    ["flags", "Flags"],
+                    [null, ""],
+                  ] as const).map(([key, label], i) => (
                     <th
                       key={i}
                       style={{
                         textAlign: "left",
-                        padding: "9px 14px",
+                        padding: "7px 14px",
                         fontSize: 10,
                         letterSpacing: 0.5,
                         textTransform: "uppercase",
@@ -644,7 +677,29 @@ export function DashboardPage({
                         borderBottom: `1px solid ${t.line}`,
                       }}
                     >
-                      {h}
+                      {key ? (
+                        <button
+                          onClick={() => toggleSort(key)}
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: sortBy === key ? t.primary : t.ink3,
+                            padding: "2px 0",
+                            cursor: "pointer",
+                            font: "inherit",
+                            textTransform: "inherit",
+                            letterSpacing: "inherit",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 5,
+                          }}
+                        >
+                          {label}
+                          <span style={{ color: sortBy === key ? t.accent : t.ink4 }}>
+                            {sortBy === key ? (sortDirection === "asc" ? "\u2191" : "\u2193") : "\u2195"}
+                          </span>
+                        </button>
+                      ) : label}
                     </th>
                   ))}
                 </tr>
@@ -666,7 +721,7 @@ export function DashboardPage({
                   </tr>
                 )}
                 {queue.map((r, i) => {
-                  const target = applicationTarget(r);
+                  const target = applicationDetailPath(r, "dashboard");
                   return (
                     <ActivityRow
                       key={r.applicationId}
@@ -682,7 +737,7 @@ export function DashboardPage({
                           return next;
                         });
                       }}
-                      onNavigate={navigate}
+                      onNavigate={navigateFromDashboard}
                     />
                   );
                 })}
@@ -713,16 +768,16 @@ export function DashboardPage({
                   </div>
                 )}
                 {queue.map((a, i) => {
-                  const target = applicationTarget(a);
+                  const target = applicationDetailPath(a, "dashboard");
                   return (
                     <div
                       key={a.applicationId}
-                      onClick={() => target && navigate(target)}
+                      onClick={() => target && navigateFromDashboard(target)}
                       onKeyDown={(e) => {
                         if (!target) return;
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          navigate(target);
+                          navigateFromDashboard(target);
                         }
                       }}
                       tabIndex={target ? 0 : undefined}

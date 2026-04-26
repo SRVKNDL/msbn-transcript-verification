@@ -14,6 +14,7 @@ import { AuditPage } from "./pages/AuditPage";
 import { AuditOverviewPage } from "./pages/AuditOverviewPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { hasAuthSession, isAuthRequired } from "./auth";
+import { appSectionPath } from "./navigation";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   if (isAuthRequired && !hasAuthSession()) {
@@ -27,14 +28,7 @@ function ShellRoute({ page }: { page: string }) {
   const navigate = useNavigate();
 
   const handleNavigate = (id: string) => {
-    const routes: Record<string, string> = {
-      dashboard: "/dashboard",
-      queue: "/queue",
-      upload: "/upload",
-      audit: "/audit",
-      settings: "/settings",
-    };
-    navigate(routes[id] ?? "/dashboard");
+    navigate(appSectionPath(id));
   };
 
   return (
@@ -44,6 +38,33 @@ function ShellRoute({ page }: { page: string }) {
       {page === "upload" && <UploadPage />}
       {page === "audit" && <AuditOverviewPage />}
       {page === "settings" && <SettingsPage />}
+    </Shell>
+  );
+}
+
+function DetailShellRoute({
+  page,
+  children,
+  contentOverflow = "auto",
+}: {
+  page: string;
+  children: ReactNode;
+  contentOverflow?: "auto" | "hidden";
+}) {
+  const navigate = useNavigate();
+
+  const handleNavigate = (id: string) => {
+    navigate(appSectionPath(id));
+  };
+
+  return (
+    <Shell
+      page={page}
+      onNavigate={handleNavigate}
+      mode="detail"
+      contentOverflow={contentOverflow}
+    >
+      {children}
     </Shell>
   );
 }
@@ -75,9 +96,9 @@ function App() {
             <Route path="/upload" element={<RequireAuth><ShellRoute page="upload" /></RequireAuth>} />
             <Route path="/settings" element={<RequireAuth><ShellRoute page="settings" /></RequireAuth>} />
             <Route path="/audit" element={<RequireAuth><ShellRoute page="audit" /></RequireAuth>} />
-            <Route path="/review/:id" element={<RequireAuth><ErrorBoundary><ReviewPage /></ErrorBoundary></RequireAuth>} />
-            <Route path="/reviewed/:id" element={<RequireAuth><ReviewedPage /></RequireAuth>} />
-            <Route path="/audit/:id" element={<RequireAuth><AuditPage /></RequireAuth>} />
+            <Route path="/review/:id" element={<RequireAuth><DetailShellRoute page="queue" contentOverflow="hidden"><ErrorBoundary><ReviewPage embedded /></ErrorBoundary></DetailShellRoute></RequireAuth>} />
+            <Route path="/reviewed/:id" element={<RequireAuth><DetailShellRoute page="queue"><ReviewedPage embedded /></DetailShellRoute></RequireAuth>} />
+            <Route path="/audit/:id" element={<RequireAuth><DetailShellRoute page="audit" contentOverflow="hidden"><AuditPage embedded /></DetailShellRoute></RequireAuth>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>

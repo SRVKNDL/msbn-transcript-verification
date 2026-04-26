@@ -3,6 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader } from "../components/Shell";
 import { SeverityChip } from "../components/SeverityChip";
+import {
+  applicationDetailPath,
+  detailBackStateFor,
+  hasApplicationSummary,
+  isApplicationReviewable,
+} from "../navigation";
 import { listApplications } from "../api";
 import type { Application } from "../types";
 
@@ -16,27 +22,22 @@ function fullTimestamp(hrs: number) {
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-function hasExtractedSummary(app: Application) {
-  return Boolean(app.applicantName.trim() || app.institution.trim());
-}
-
 function isProcessing(app: Application) {
   return app.status === "PROCESSING" || app.status === "INTAKE_COMPLETE";
-}
-
-function applicationTarget(app: Application) {
-  if (app.status === "READY_FOR_REVIEW" && hasExtractedSummary(app)) {
-    return `/review/${app.applicationId}`;
-  }
-  return null;
 }
 
 export function QueuePage() {
   const t = useT();
   const navigate = useNavigate();
+  const navigateFromQueue = (path: string) => {
+    navigate(path, detailBackStateFor("queue"));
+  };
   const [apps, setApps] = useState<Application[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "ready" | "processing">("all");
+  const [severityFilter, setSeverityFilter] = useState<"all" | "high" | "medium" | "low" | "clean">("all");
+  const [sortBy, setSortBy] = useState<"submitted" | "severity" | "flags" | "applicant" | "institution">("severity");
+  const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -61,17 +62,39 @@ export function QueuePage() {
   }, []);
 
   const queueApps = apps.filter(
-    (a) => isProcessing(a) || (a.status === "READY_FOR_REVIEW" && hasExtractedSummary(a))
+    (a) => isProcessing(a) || isApplicationReviewable(a)
   );
   const hiddenPendingCount = apps.filter(
-    (a) => a.status === "READY_FOR_REVIEW" && !hasExtractedSummary(a)
+    (a) => a.status === "READY_FOR_REVIEW" && !hasApplicationSummary(a)
   ).length;
-  const shown = queueApps.filter((a) => {
-    if (isProcessing(a)) return filter === "all";
-    if (filter === "high") return a.highestSeverity === "High";
-    if (filter === "clean") return a.flagCount === 0;
-    return true;
-  });
+  const normalizedQuery = query.trim().toLowerCase();
+  const severityRank = { High: 0, Medium: 1, Low: 2 } as const;
+  const shown = queueApps
+    .filter((a) => {
+      if (statusFilter === "ready" && !isApplicationReviewable(a)) return false;
+      if (statusFilter === "processing" && !isProcessing(a)) return false;
+      if (severityFilter === "high" && a.highestSeverity !== "High") return false;
+      if (severityFilter === "medium" && a.highestSeverity !== "Medium") return false;
+      if (severityFilter === "low" && a.highestSeverity !== "Low") return false;
+      if (severityFilter === "clean" && a.flagCount !== 0) return false;
+      if (!normalizedQuery) return true;
+      return [
+        a.applicationId,
+        a.applicantName,
+        a.institution,
+        a.licenseNumber,
+        a.country,
+      ].join(" ").toLowerCase().includes(normalizedQuery);
+    })
+    .sort((a, b) => {
+      if (sortBy === "submitted") return b.submittedAt.localeCompare(a.submittedAt);
+      if (sortBy === "flags") return b.flagCount - a.flagCount || b.submittedAt.localeCompare(a.submittedAt);
+      if (sortBy === "applicant") return (a.applicantName || a.originalFilename).localeCompare(b.applicantName || b.originalFilename);
+      if (sortBy === "institution") return a.institution.localeCompare(b.institution);
+      return (severityRank[a.highestSeverity ?? "Low"] ?? 3) - (severityRank[b.highestSeverity ?? "Low"] ?? 3)
+        || b.flagCount - a.flagCount
+        || b.submittedAt.localeCompare(a.submittedAt);
+    });
   const subtitle = error
     ? `Unable to load queue: ${error}`
     : hiddenPendingCount > 0
@@ -93,31 +116,55 @@ export function QueuePage() {
         title={`${shown.length} applications in queue`}
         subtitle={subtitle}
         actions={
-          <div style={{ display: "flex", gap: 6 }}>
-            {(
-              [
-                ["all", "All"],
-                ["high", "High severity"],
-                ["clean", "No flags"],
-              ] as const
-            ).map(([k, label]) => (
-              <button
-                key={k}
-                onClick={() => setFilter(k)}
-                style={{
-                  border: `1px solid ${filter === k ? t.primary : t.line}`,
-                  background: filter === k ? t.primary : t.surface,
-                  color: filter === k ? t.primaryInk : t.ink2,
-                  padding: "5px 12px",
-                  fontSize: 12,
-                  borderRadius: 2,
-                  fontFamily: "inherit",
-                  cursor: "pointer",
-                }}
-              >
-                {label}
-              </button>
-            ))}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Filter queue"
+              aria-label="Filter queue"
+              style={{
+                height: 30,
+                width: 180,
+                border: `1px solid ${t.line}`,
+                background: t.surface,
+                color: t.ink2,
+                borderRadius: 3,
+                padding: "0 9px",
+                fontSize: 12,
+                fontFamily: "inherit",
+              }}
+            />
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+              style={{ height: 30, border: `1px solid ${t.line}`, background: t.surface, color: t.ink2, borderRadius: 3, padding: "0 8px", fontSize: 12, fontFamily: t.mono }}
+            >
+              <option value="all">All statuses</option>
+              <option value="ready">Ready</option>
+              <option value="processing">Processing</option>
+            </select>
+            <select
+              value={severityFilter}
+              onChange={(event) => setSeverityFilter(event.target.value as typeof severityFilter)}
+              style={{ height: 30, border: `1px solid ${t.line}`, background: t.surface, color: t.ink2, borderRadius: 3, padding: "0 8px", fontSize: 12, fontFamily: t.mono }}
+            >
+              <option value="all">All severities</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="clean">No flags</option>
+            </select>
+            <select
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value as typeof sortBy)}
+              style={{ height: 30, border: `1px solid ${t.line}`, background: t.surface, color: t.ink2, borderRadius: 3, padding: "0 8px", fontSize: 12, fontFamily: t.mono }}
+            >
+              <option value="severity">Severity</option>
+              <option value="submitted">Newest</option>
+              <option value="flags">Most flags</option>
+              <option value="applicant">Applicant</option>
+              <option value="institution">Institution</option>
+            </select>
           </div>
         }
       />
@@ -234,15 +281,16 @@ export function QueuePage() {
               </div>
             </div>
           )}
-          {shown.map((app, i) => (
+          {shown.map((app, i) => {
+            const target = applicationDetailPath(app, "queue");
+            return (
             <div
               key={app.applicationId}
               onClick={() => {
-                const target = applicationTarget(app);
-                if (target) navigate(target);
+                if (target) navigateFromQueue(target);
               }}
               onMouseEnter={(e) => {
-                if (applicationTarget(app)) e.currentTarget.style.background = t.surfaceAlt;
+                if (target) e.currentTarget.style.background = t.surfaceAlt;
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = selected.has(app.applicationId) ? t.surfaceAlt : "transparent";
@@ -257,7 +305,7 @@ export function QueuePage() {
                   i < shown.length - 1
                     ? `1px solid ${t.line2}`
                     : "none",
-                cursor: applicationTarget(app) ? "pointer" : "default",
+                cursor: target ? "pointer" : "default",
                 fontSize: 13,
                 color: t.ink2,
                 transition: "background 120ms",
@@ -352,7 +400,7 @@ export function QueuePage() {
               </div>
               <div style={{ textAlign: "right" }}>
                 <button
-                  disabled={!applicationTarget(app)}
+                  disabled={!target}
                   style={{
                     border: `1px solid ${t.line}`,
                     background: t.surfaceAlt,
@@ -360,15 +408,16 @@ export function QueuePage() {
                     fontSize: 11,
                     borderRadius: 2,
                     fontFamily: t.mono,
-                    color: applicationTarget(app) ? t.ink2 : t.ink4,
-                    cursor: applicationTarget(app) ? "pointer" : "default",
+                    color: target ? t.ink2 : t.ink4,
+                    cursor: target ? "pointer" : "default",
                   }}
                 >
                   {isProcessing(app) ? "waiting" : "open \u2192"}
                 </button>
               </div>
             </div>
-          ))}
+          );
+          })}
         </div>
       </div>
     </div>

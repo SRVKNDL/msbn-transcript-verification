@@ -1,12 +1,21 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { WheelEvent } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { TOKENS, LAYOUT } from "../tokens";
 import { useT } from "../theme";
 import { SeverityChip } from "../components/SeverityChip";
 import { ConfidenceDot } from "../components/ConfidenceDot";
 import { ProgressBar } from "../components/ProgressBar";
 import { ActionButton } from "../components/ActionButton";
+import { DetailHeader } from "../components/DetailHeader";
+import {
+  APP_ROUTES,
+  applicationReviewPath,
+  applicationReviewedPath,
+  detailBackStateFor,
+  hasApplicationSummary,
+} from "../navigation";
+import type { DetailBackState } from "../navigation";
 import { getApplication, getPageImage, listApplications, submitDecision } from "../api";
 import { getCurrentUser } from "../auth";
 import type { Application, Flag, Decisions, OverallDecision, ExtractionData, ExtractionRow } from "../types";
@@ -233,24 +242,26 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function hasExtractedSummary(app: Application) {
-  return Boolean(app.applicantName.trim() || app.institution.trim());
+  return hasApplicationSummary(app);
 }
 
 function ReviewStateScreen({
   title,
   message,
   onBack,
+  embedded = false,
 }: {
   title: string;
   message: string;
   onBack: () => void;
+  embedded?: boolean;
 }) {
   const t = useT();
 
   return (
     <div style={{
-      width: "100vw",
-      height: "100vh",
+      width: embedded ? "100%" : "100vw",
+      height: embedded ? "100%" : "100vh",
       background: t.bg,
       color: t.ink,
       fontFamily: "'Open Sans', system-ui, sans-serif",
@@ -692,11 +703,16 @@ function buildFallbackExtraction(app: Application): ExtractionData {
 }
 
 // --- Main review page ---
-export function ReviewPage() {
+export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   const t = useT();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const user = getCurrentUser();
+  const routeState = location.state as DetailBackState | null;
+  const reviewedBackState = routeState?.from
+    ? { state: routeState }
+    : detailBackStateFor("queue");
 
   const [app, setApp] = useState<Application | null>(null);
   const [isAppLoading, setIsAppLoading] = useState(true);
@@ -972,7 +988,8 @@ export function ReviewPage() {
       <ReviewStateScreen
         title="Application could not load"
         message={`${error}. This usually means the record is no longer reviewable, the API rejected the request, or the application ID is stale.`}
-        onBack={() => navigate("/queue")}
+        onBack={() => navigate(APP_ROUTES.queue)}
+        embedded={embedded}
       />
     );
   }
@@ -1008,7 +1025,8 @@ export function ReviewPage() {
       <ReviewStateScreen
         title="Flag details are not available"
         message={`${app.applicantName || app.applicationId} is listed with ${app.flagCount} flag${app.flagCount === 1 ? "" : "s"}, but the detail API returned no flag records. This usually means the queue row is stale or processing has not finished writing the flag items.`}
-        onBack={() => navigate("/queue")}
+        onBack={() => navigate(APP_ROUTES.queue)}
+        embedded={embedded}
       />
     );
   }
@@ -1042,26 +1060,25 @@ export function ReviewPage() {
       setToast(`Submit error: ${msg}. Navigating anyway for review.`);
       setIsSubmitting(false);
       setSubmitModalOpen(false);
-      setTimeout(() => navigate(`/reviewed/${id}`), 2200);
+      setTimeout(() => navigate(applicationReviewedPath(id), reviewedBackState), 2200);
       return;
     }
     setIsSubmitting(false);
     setSubmitModalOpen(false);
     setToast(`Decision recorded for ${app?.applicantName || app?.applicationId || id}.`);
-    setTimeout(() => navigate(`/reviewed/${id}`), 1800);
+    setTimeout(() => navigate(applicationReviewedPath(id), reviewedBackState), 1800);
   };
 
   return (
     <div style={{
-      width: "100vw", height: "100vh", position: "relative",
+      width: embedded ? "100%" : "100vw", height: embedded ? "100%" : "100vh", position: "relative",
       background: t.bg, fontFamily: "'Open Sans', system-ui, sans-serif", color: t.ink,
       display: "grid",
       gridTemplateColumns: queueOpen ? "220px 1fr 320px" : "0 1fr 320px",
-      gridTemplateRows: "60px 1fr",
+      gridTemplateRows: embedded ? "1fr" : "60px 1fr",
       overflow: "hidden",
     }}>
-      {/* Top bar */}
-      <div style={{
+      {!embedded && <div style={{
         gridColumn: "1 / -1", borderBottom: `3px solid ${t.accent}`,
         background: t.primary, display: "flex", alignItems: "center", padding: "0 22px", gap: 16,
         color: t.primaryInk,
@@ -1081,7 +1098,7 @@ export function ReviewPage() {
         }} title={queueOpen ? "Hide review queue (B)" : "Show review queue (B)"} aria-label={queueOpen ? "Hide review queue" : "Show review queue"}>
           &#9776;
         </button>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => navigate("/dashboard")}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => navigate(APP_ROUTES.dashboard)}>
           <div style={{
             width: 30,
             height: 30,
@@ -1113,7 +1130,7 @@ export function ReviewPage() {
           </div>
         </div>
         <div style={{ height: 20, width: 1, background: "rgba(255,255,255,0.16)" }} />
-        <button onClick={() => navigate("/dashboard")} style={{
+        <button onClick={() => navigate(APP_ROUTES.dashboard)} style={{
           border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)",
           padding: "4px 10px", fontSize: 11, borderRadius: 2, cursor: "pointer",
           fontFamily: "'IBM Plex Mono', ui-monospace, monospace", color: "rgba(255,255,255,0.82)",
@@ -1152,12 +1169,12 @@ export function ReviewPage() {
             {user?.initials ?? "U"}
           </span>
         </div>
-      </div>
+      </div>}
 
       {/* Queue sidebar */}
       <div style={{
         gridColumn: 1,
-        gridRow: 2,
+        gridRow: embedded ? 1 : 2,
         borderRight: queueOpen ? `1px solid ${t.line}` : "none",
         background: `linear-gradient(180deg, ${t.surface} 0%, ${t.surfaceAlt} 100%)`,
         overflow: "hidden",
@@ -1223,7 +1240,7 @@ export function ReviewPage() {
         <div style={{ flex: 1, overflow: "auto" }}>
           {reviewableQueueApps.map((a, index) => (
             <QueueRow key={a.applicationId} app={a} active={a.applicationId === id} shaded={index % 2 === 1}
-              onClick={() => navigate(`/review/${a.applicationId}`)} />
+              onClick={() => navigate(applicationReviewPath(a), detailBackStateFor("queue"))} />
           ))}
         </div>
       </div>
@@ -1249,7 +1266,7 @@ export function ReviewPage() {
       {/* PDF pane — TranscriptPageViewer */}
       <div id="transcript-preview-pane" ref={transcriptPaneRef} style={{
         gridColumn: 2,
-        gridRow: 2,
+        gridRow: embedded ? 1 : 2,
         background: t.surfaceAlt,
         overflow: "hidden",
         minHeight: 0,
@@ -1436,30 +1453,70 @@ export function ReviewPage() {
       </div>
 
       {/* Flag list */}
-      <div style={{ gridColumn: 3, gridRow: 2, background: t.surfaceAlt, borderLeft: `1px solid ${t.line}`, overflow: "auto", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "16px 16px 14px", borderBottom: `1px solid ${t.line}`, background: `linear-gradient(180deg, ${t.surface} 0%, ${t.surfaceAlt} 100%)`, boxShadow: "0 8px 24px rgba(15,23,42,0.06)" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, fontFamily: "'Montserrat', system-ui, sans-serif" }}>{app?.applicantName || "Loading application"}</div>
-            <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>#{app?.applicationId || id}</div>
-          </div>
-          <div style={{ fontSize: 12, color: TOKENS.ink3, marginTop: 3 }}>
-            {app ? `${app.institution} · license ${app.licenseNumber}` : "Loading application details"}
-          </div>
-          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-            <Stat label="flags" value={`${flags.length}`} />
-            <Stat label="high" value={`${flags.filter((f) => f.severity === "High").length}`} />
-            <Stat label="pages" value={`${app?.pageCount ?? 0}`} />
-            <Stat label="uploaded" value={app?.submittedAt ? new Date(app.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Not available"} />
-          </div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 14, paddingTop: 12, borderTop: `1px solid ${t.line2}` }}>
-            <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, letterSpacing: 0.5, textTransform: "uppercase" }}>
-              Review controls
+      <div style={{ gridColumn: 3, gridRow: embedded ? 1 : 2, background: t.surfaceAlt, borderLeft: `1px solid ${t.line}`, overflow: "auto", display: "flex", flexDirection: "column" }}>
+        <DetailHeader
+          compact
+          backLabel="Review Queue"
+          backTo="/queue"
+          eyebrow="Review detail"
+          title={app?.applicantName || "Loading application"}
+          subtitle={app ? `${app.institution} · license ${app.licenseNumber}` : "Loading application details"}
+          style={{
+            background: `linear-gradient(180deg, ${t.surface} 0%, ${t.surfaceAlt} 100%)`,
+            boxShadow: "0 8px 24px rgba(15,23,42,0.06)",
+          }}
+          statusSummary={
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+              <Stat label="flags" value={`${flags.length}`} />
+              <Stat label="high" value={`${flags.filter((f) => f.severity === "High").length}`} />
+              <Stat label="pages" value={`${app?.pageCount ?? 0}`} />
+              <Stat label="uploaded" value={app?.submittedAt ? new Date(app.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Not available"} />
             </div>
-            <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono }}>
-              {allDecided ? "ready to submit" : `${flags.length - resolvedCount} remaining`}
+          }
+          secondaryActions={
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {flags.length > 0 && <ProgressBar total={flags.length} resolved={resolvedCount} />}
+              <div style={{ display: "flex", gap: 8 }}>
+                <a href="https://www.nursys.com" target="_blank" rel="noopener noreferrer" style={{
+                  border: `1px solid ${t.line}`,
+                  background: t.surface,
+                  color: t.ink2,
+                  padding: "5px 9px",
+                  fontSize: 10,
+                  borderRadius: 3,
+                  fontFamily: t.mono,
+                  textDecoration: "none",
+                  cursor: "pointer",
+                }}>Nursys &#8599;</a>
+                <button onClick={() => setShowShortcuts(true)} style={{
+                  border: `1px solid ${t.line}`,
+                  background: t.surface,
+                  color: t.ink3,
+                  width: 26,
+                  height: 26,
+                  fontSize: 13,
+                  borderRadius: 3,
+                  cursor: "pointer",
+                  fontFamily: t.mono,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                }} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+              </div>
             </div>
-          </div>
-        </div>
+          }
+          primaryActions={
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, paddingTop: 12, borderTop: `1px solid ${t.line2}` }}>
+              <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, letterSpacing: 0.5, textTransform: "uppercase" }}>
+                Review controls
+              </div>
+              <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono }}>
+                {allDecided ? "ready to submit" : `${flags.length - resolvedCount} remaining`}
+              </div>
+            </div>
+          }
+        />
 
         <div style={{ flex: 1, overflow: "auto", padding: "14px 14px 84px" }}>
           <div style={{ marginBottom: 12 }}>

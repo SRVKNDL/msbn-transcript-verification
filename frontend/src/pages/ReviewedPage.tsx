@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useT } from "../theme";
+import { DetailHeader } from "../components/DetailHeader";
 import { SeverityChip } from "../components/SeverityChip";
 import { getApplication, getAuditTrail } from "../api";
 import type { Application, Flag, AuditEvent } from "../types";
 
-export function ReviewedPage() {
+export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const t = useT();
 
   const [app, setApp] = useState<Application | null>(null);
@@ -25,7 +25,7 @@ export function ReviewedPage() {
 
   if (!app) return (
     <div style={{
-      width: "100vw", height: "100vh", background: t.bg,
+      width: embedded ? "100%" : "100vw", height: embedded ? "100%" : "100vh", background: t.bg,
       display: "flex", alignItems: "center", justifyContent: "center",
       fontFamily: t.sans, color: t.ink3,
     }}>
@@ -73,42 +73,26 @@ export function ReviewedPage() {
   const overriddenCount = Object.values(flagDecisionMap).filter(d => d.decision === "OVERRIDE").length;
 
   return (
-    <div style={{ minHeight: "100vh", background: t.bg, color: t.ink, fontFamily: t.sans }}>
-      {/* Header */}
-      <div style={{
-        padding: "24px 34px 20px", borderBottom: `1px solid ${t.line}`,
-        background: t.surface, display: "flex", alignItems: "center", gap: 16,
-      }}>
-        <button onClick={() => navigate("/queue")} style={{
-          border: `1px solid ${t.line}`, background: t.surfaceAlt,
-          padding: "6px 12px", fontSize: 12, borderRadius: 6,
-          cursor: "pointer", fontFamily: t.mono, color: t.ink3,
-          marginRight: 4,
-        }}>&#8592; Back</button>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, color: t.accent, letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 4, fontFamily: t.mono, fontWeight: 600 }}>
-            Reviewed{submittedAt ? ` · ${new Date(submittedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}` : ""}
+    <div style={{ minHeight: embedded ? "100%" : "100vh", background: t.bg, color: t.ink, fontFamily: t.sans, overflow: embedded ? "auto" : "visible" }}>
+      <DetailHeader
+        backLabel="Review Queue"
+        backTo="/queue"
+        eyebrow={`Reviewed${submittedAt ? ` · ${new Date(submittedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}` : ""}`}
+        title={app.applicantName}
+        subtitle={`${app.institution} · ${app.country} · ${app.applicationId}`}
+        statusSummary={
+          <div style={{
+            background: decisionBg, color: decisionColor,
+            border: `1px solid ${decisionColor}`,
+            padding: "10px 20px", borderRadius: 8,
+            fontSize: 12, fontWeight: 700, fontFamily: t.mono,
+            textTransform: "uppercase", letterSpacing: 0.5, textAlign: "center",
+          }}>
+            <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 3, letterSpacing: 0.8 }}>Decision</div>
+            {overallDecision.replaceAll("_", " ")}
           </div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: t.ink, fontFamily: t.serif }}>
-            {app.applicantName}
-          </div>
-          <div style={{ fontSize: 13, color: t.ink3, marginTop: 3 }}>
-            {app.institution} · {app.country} · {app.applicationId}
-          </div>
-        </div>
-
-        {/* Overall decision badge */}
-        <div style={{
-          background: decisionBg, color: decisionColor,
-          border: `1px solid ${decisionColor}`,
-          padding: "10px 20px", borderRadius: 8,
-          fontSize: 12, fontWeight: 700, fontFamily: t.mono,
-          textTransform: "uppercase", letterSpacing: 0.5, textAlign: "center",
-        }}>
-          <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 3, letterSpacing: 0.8 }}>Decision</div>
-          {overallDecision.replaceAll("_", " ")}
-        </div>
-      </div>
+        }
+      />
 
       <div style={{ padding: "28px 34px 48px", display: "grid", gridTemplateColumns: "1fr 340px", gap: 24, maxWidth: 1100 }}>
 

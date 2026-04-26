@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { CSSProperties } from "react";
 import { getApplication, getAuditTrail } from "../api";
 import { getCurrentUser } from "../auth";
@@ -11,6 +11,9 @@ import {
   humanizeAuditEvent,
   type AuditStage,
 } from "../auditUi";
+import { DetailHeader } from "../components/DetailHeader";
+import { APP_ROUTES, applicationReviewPath } from "../navigation";
+import type { DetailBackState } from "../navigation";
 import { useT } from "../theme";
 import type { Application, AuditEvent, Flag } from "../types";
 
@@ -169,11 +172,14 @@ function severityColor(severity: Flag["severity"], t: ReturnType<typeof useT>) {
   return { tone: t.low, bg: t.lowBg };
 }
 
-export function AuditPage() {
+export function AuditPage({ embedded = false }: { embedded?: boolean }) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const t = useT();
   const user = getCurrentUser();
+  const routeState = location.state as DetailBackState | null;
+  const reviewRouteState = routeState?.from ? { state: routeState } : undefined;
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
   const [app, setApp] = useState<Application | null>(null);
@@ -624,8 +630,8 @@ export function AuditPage() {
   return (
     <div
       style={{
-        width: "100vw",
-        height: "100vh",
+        width: embedded ? "100%" : "100vw",
+        height: embedded ? "100%" : "100vh",
         background: t.bg,
         color: t.ink,
         fontFamily: t.sans,
@@ -634,7 +640,7 @@ export function AuditPage() {
         overflow: "hidden",
       }}
     >
-      <header
+      {!embedded && <header
         style={{
           height: 60,
           flexShrink: 0,
@@ -648,7 +654,7 @@ export function AuditPage() {
         }}
       >
         <button
-          onClick={() => navigate("/audit")}
+          onClick={() => navigate(APP_ROUTES.audit)}
           title="Back to audit log"
           aria-label="Back to audit log"
           style={{
@@ -708,7 +714,7 @@ export function AuditPage() {
           }}
         />
         <button
-          onClick={() => navigate("/dashboard")}
+          onClick={() => navigate(APP_ROUTES.dashboard)}
           style={{
             border: "1px solid rgba(255,255,255,0.18)",
             background: "rgba(255,255,255,0.08)",
@@ -742,91 +748,98 @@ export function AuditPage() {
         >
           {user?.initials ?? "U"}
         </span>
-      </header>
+      </header>}
 
       <main style={{ flex: 1, overflow: "auto", padding: "24px 34px 44px" }}>
-        <section
+        <DetailHeader
+          backLabel="Audit Log"
+          backTo="/audit"
+          eyebrow="SP-9 Compliance Trail"
+          title={app?.applicantName ?? "Application"}
+          subtitle={`#${id}${app?.institution ? ` · ${app.institution}` : ""}`}
           style={{
             maxWidth: 1180,
             margin: "0 auto 16px",
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) auto",
-            gap: 18,
-            alignItems: "end",
+            border: `1px solid ${t.line}`,
+            borderRadius: 6,
           }}
-        >
-          <div>
+          statusSummary={
             <div
               style={{
-                fontFamily: t.mono,
-                fontSize: 11,
-                color: t.ink4,
-                letterSpacing: 1,
-                textTransform: "uppercase",
-                marginBottom: 6,
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                justifyContent: "flex-end",
               }}
             >
-              SP-9 Compliance Trail
-            </div>
-            <h1
-              style={{
-                margin: 0,
-                fontFamily: t.serif,
-                fontSize: 24,
-                letterSpacing: 0,
-                lineHeight: 1.2,
-                color: t.ink,
-              }}
-            >
-              {app?.applicantName ?? "Application"}
-            </h1>
-            <div style={{ marginTop: 5, color: t.ink3, fontSize: 13 }}>
-              #{id} {app?.institution ? `- ${app.institution}` : ""}
-            </div>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              justifyContent: "flex-end",
-            }}
-          >
-            {legendStages.map((stage) => {
-              const stageStyle = auditStageStyle(stage, t);
-              return (
-                <span
-                  key={stage}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    border: `1px solid ${stageStyle.border}`,
-                    background: stageStyle.background,
-                    color: stageStyle.color,
-                    borderRadius: 999,
-                    padding: "5px 9px",
-                    fontFamily: t.mono,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    textTransform: "uppercase",
-                    letterSpacing: 0.4,
-                  }}
-                >
+              {legendStages.map((stage) => {
+                const stageStyle = auditStageStyle(stage, t);
+                return (
                   <span
+                    key={stage}
                     style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: 4,
-                      background: stageStyle.color,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      border: `1px solid ${stageStyle.border}`,
+                      background: stageStyle.background,
+                      color: stageStyle.color,
+                      borderRadius: 999,
+                      padding: "5px 9px",
+                      fontFamily: t.mono,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.4,
                     }}
-                  />
-                  {stageStyle.label}
-                </span>
-              );
-            })}
-          </div>
-        </section>
+                  >
+                    <span
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: 4,
+                        background: stageStyle.color,
+                      }}
+                    />
+                    {stageStyle.label}
+                  </span>
+                );
+              })}
+            </div>
+          }
+          secondaryActions={
+            <button
+              onClick={handleDownloadAuditTrail}
+              disabled={isLoading || !app || isPrinting}
+              title="Download audit trail"
+              aria-label="Download audit trail"
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 5,
+                border: `1px solid ${t.line}`,
+                background: t.surfaceAlt,
+                color: isLoading || !app || isPrinting ? t.ink4 : t.ink2,
+                cursor: isLoading || !app || isPrinting ? "not-allowed" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 0,
+                boxShadow: "0 6px 16px rgba(15, 23, 42, 0.06)",
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M7 8V4H17V8M7 14H17V20H7V14ZM5 8H19C20.1046 8 21 8.89543 21 10V15H17V12H7V15H3V10C3 8.89543 3.89543 8 5 8Z"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          }
+        />
 
         <section
           style={{
@@ -858,36 +871,6 @@ export function AuditPage() {
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <button
-                onClick={handleDownloadAuditTrail}
-                disabled={isLoading || !app || isPrinting}
-                title="Download audit trail"
-                aria-label="Download audit trail"
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 5,
-                  border: `1px solid ${t.line}`,
-                  background: t.surfaceAlt,
-                  color: isLoading || !app || isPrinting ? t.ink4 : t.ink2,
-                  cursor: isLoading || !app || isPrinting ? "not-allowed" : "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: 0,
-                  boxShadow: "0 6px 16px rgba(15, 23, 42, 0.06)",
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path
-                    d="M7 8V4H17V8M7 14H17V20H7V14ZM5 8H19C20.1046 8 21 8.89543 21 10V15H17V12H7V15H3V10C3 8.89543 3.89543 8 5 8Z"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
               <div
                 style={{
                   fontFamily: t.mono,
@@ -969,7 +952,7 @@ export function AuditPage() {
                       />
                       <div
                         onClick={() => {
-                          if (opensReview && id) navigate(`/review/${id}`);
+                          if (opensReview && id) navigate(applicationReviewPath(id), reviewRouteState);
                         }}
                         title={opensReview ? "Open review page" : undefined}
                         style={{
@@ -1060,7 +1043,7 @@ export function AuditPage() {
                   />
                   <div
                     onClick={() => {
-                      if (id) navigate(`/review/${id}`);
+                      if (id) navigate(applicationReviewPath(id), reviewRouteState);
                     }}
                     title="Open review page"
                     style={{
@@ -1134,7 +1117,7 @@ export function AuditPage() {
               Event Details
             </div>
             <button
-              onClick={() => navigate(`/review/${id}`)}
+              onClick={() => id && navigate(applicationReviewPath(id), reviewRouteState)}
               style={{
                 background: t.surfaceAlt,
                 border: `1px solid ${t.line}`,

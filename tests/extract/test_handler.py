@@ -393,6 +393,31 @@ def test_invoke_model_body_guides_conservative_watermark_detection(
     assert "can confidently conclude no listed feature is visible." in user_text
 
 
+def test_prompt_excludes_document_level_fields(
+    s3_with_transcript, bedrock_mock, extract_event, lambda_context
+):
+    """document_page_count, seal_present_on_pages, and print_technology_per_page
+    must NOT appear in the per-page prompt: they are whole-document fields
+    that the model cannot reliably determine from a single page image."""
+    handler(extract_event, lambda_context)
+
+    call_kwargs = bedrock_mock.invoke_model.call_args
+    body = json.loads(call_kwargs.kwargs["body"])
+    user_text = body["messages"][0]["content"][1]["text"]
+    system_text = body["system"][0]["text"]
+    combined = user_text + system_text
+
+    assert "document_page_count" not in user_text, (
+        "document_page_count must not be requested from the model per page"
+    )
+    assert "seal_present_on_pages" not in combined, (
+        "seal_present_on_pages must not appear in the prompt (derived deterministically)"
+    )
+    assert "print_technology_per_page" not in combined, (
+        "print_technology_per_page must not appear in the prompt (derived deterministically)"
+    )
+
+
 # ── (c) response parsed into the correct field structure ──────────────────────
 
 

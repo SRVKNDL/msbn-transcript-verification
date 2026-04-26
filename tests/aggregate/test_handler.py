@@ -344,3 +344,248 @@ def test_missing_extraction_raises(s3_bucket, lambda_context):
 
     with pytest.raises(Exception):
         handler(event, lambda_context)
+
+
+# ── Tampering boolean: any-true aggregation ───────────────────────────────────
+
+
+def test_tampering_bool_any_true_propagates(s3_bucket, lambda_context):
+    """If page 1 says overlapping_text_detected=False (high) and page 2 says
+    True (medium), the aggregated value must be True — not suppressed by the
+    higher-confidence False."""
+    pages = [
+        {
+            "page_number": 1,
+            "overlapping_text_detected": False,
+            "overlapping_text_detected_confidence": "high",
+        },
+        {
+            "page_number": 2,
+            "overlapping_text_detected": True,
+            "overlapping_text_detected_confidence": "medium",
+        },
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-TB1", pages)
+
+    handler(_make_event("APP-TB1", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-TB1/aggregation.json")
+    assert agg["overlapping_text_detected"] is True
+
+
+def test_tampering_bool_all_false_stays_false(s3_bucket, lambda_context):
+    """When no page reports True for a tampering boolean, result is False."""
+    pages = [
+        {
+            "page_number": 1,
+            "mixed_fonts_detected": False,
+            "mixed_fonts_detected_confidence": "high",
+        },
+        {
+            "page_number": 2,
+            "mixed_fonts_detected": False,
+            "mixed_fonts_detected_confidence": "medium",
+        },
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-TB2", pages)
+
+    handler(_make_event("APP-TB2", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-TB2/aggregation.json")
+    assert agg["mixed_fonts_detected"] is False
+
+
+def test_tampering_bool_source_from_true_page(s3_bucket, lambda_context):
+    """When True propagates, the source metadata comes from the True page."""
+    pages = [
+        {
+            "page_number": 1,
+            "compressed_numbers_detected": False,
+            "compressed_numbers_detected_confidence": "high",
+            "compressed_numbers_detected_source": {
+                "page_number": 1, "text_spans": ["GPA 3.0"],
+            },
+        },
+        {
+            "page_number": 2,
+            "compressed_numbers_detected": True,
+            "compressed_numbers_detected_confidence": "medium",
+            "compressed_numbers_detected_source": {
+                "page_number": 2, "text_spans": ["credit hours column"],
+            },
+        },
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-TB3", pages)
+
+    handler(_make_event("APP-TB3", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-TB3/aggregation.json")
+    assert agg["compressed_numbers_detected"] is True
+    assert agg["compressed_numbers_detected_source"]["page_number"] == 2
+
+
+def test_all_tampering_fields_use_any_true(s3_bucket, lambda_context):
+    """Verify all six tampering boolean fields propagate True correctly."""
+    tampering_fields = [
+        "overlapping_text_detected",
+        "compressed_numbers_detected",
+        "mixed_fonts_detected",
+        "correction_artifacts_present",
+        "obliteration_marks_detected",
+        "mixed_ink_colors_in_field",
+    ]
+    for field in tampering_fields:
+        pages = [
+            {"page_number": 1, field: False, f"{field}_confidence": "high"},
+            {"page_number": 2, field: True, f"{field}_confidence": "low"},
+        ]
+        extraction_key = _put_extraction(s3_bucket, f"APP-TAF-{field[:6]}", pages)
+        handler(_make_event(f"APP-TAF-{field[:6]}", extraction_key), lambda_context)
+        agg = _read_aggregation(
+            s3_bucket, f"processed/APP-TAF-{field[:6]}/aggregation.json"
+        )
+        assert agg[field] is True, (
+            f"{field}: expected True when any page reports True, got {agg[field]}"
+        )
+
+
+# ── document_page_count from extraction metadata ─────────────────────────────
+
+
+def test_document_page_count_from_extraction_metadata(s3_bucket, lambda_context):
+    """document_page_count in aggregation must equal page_count from extraction
+    metadata, not any value the model returned per page."""
+    pages = [
+        {"page_number": 1, "seal_type": "embossed"},
+        {"page_number": 2, "seal_type": "absent"},
+        {"page_number": 3, "seal_type": "absent"},
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-PC1", pages)
+
+    handler(_make_event("APP-PC1", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-PC1/aggregation.json")
+    assert agg["document_page_count"] == 3
+
+
+def test_document_page_count_overrides_stale_model_value(s3_bucket, lambda_context):
+    """Even if a page record contains a model-extracted document_page_count,
+    the aggregation must use the authoritative metadata value."""
+    pages = [
+        {
+            "page_number": 1,
+            "document_page_count": 99,        # stale model output
+            "document_page_count_confidence": "high",
+        },
+        {"page_number": 2, "seal_type": "laser"},
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-PC2", pages)
+
+    handler(_make_event("APP-PC2", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-PC2/aggregation.json")
+    # extraction metadata has page_count=2 (len(pages)); model's 99 is ignored.
+    assert agg["document_page_count"] == 2
+
+
+# ── seal_present_on_pages derived deterministically ──────────────────────────
+
+
+def test_seal_present_on_pages_derived_from_seal_type(s3_bucket, lambda_context):
+    """seal_present_on_pages must list only pages where seal_type is a positive
+    value (embossed / stamped_ink / printed_flat / sticker_foil)."""
+    pages = [
+        {"page_number": 1, "seal_type": "embossed"},
+        {"page_number": 2, "seal_type": "absent"},
+        {"page_number": 3, "seal_type": "stamped_ink"},
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-SP1", pages)
+
+    handler(_make_event("APP-SP1", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-SP1/aggregation.json")
+    assert agg["seal_present_on_pages"] == [1, 3]
+
+
+def test_seal_present_on_pages_empty_when_no_seal(s3_bucket, lambda_context):
+    """When no page has a positive seal_type, seal_present_on_pages is []."""
+    pages = [
+        {"page_number": 1, "seal_type": "absent"},
+        {"page_number": 2, "seal_type": "unclear"},
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-SP2", pages)
+
+    handler(_make_event("APP-SP2", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-SP2/aggregation.json")
+    assert agg["seal_present_on_pages"] == []
+
+
+def test_seal_present_on_pages_ignores_stale_model_array(s3_bucket, lambda_context):
+    """If per-page data contains a stale seal_present_on_pages from the model,
+    the aggregation must ignore it and derive the value from seal_type."""
+    pages = [
+        {
+            "page_number": 1,
+            "seal_type": "absent",
+            "seal_present_on_pages": [1, 2, 3],  # stale model output
+        },
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-SP3", pages)
+
+    handler(_make_event("APP-SP3", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-SP3/aggregation.json")
+    # seal_type is absent → derived result is [], not the stale [1, 2, 3].
+    assert agg["seal_present_on_pages"] == []
+
+
+# ── print_technology_per_page derived deterministically ──────────────────────
+
+
+def test_print_technology_per_page_derived_from_pages(s3_bucket, lambda_context):
+    """print_technology_per_page must be built from each page's print_technology
+    in page order, not taken from a model-supplied array."""
+    pages = [
+        {"page_number": 1, "print_technology": "laser"},
+        {"page_number": 2, "print_technology": "inkjet"},
+        {"page_number": 3, "print_technology": "laser"},
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-PT1", pages)
+
+    handler(_make_event("APP-PT1", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-PT1/aggregation.json")
+    assert agg["print_technology_per_page"] == ["laser", "inkjet", "laser"]
+
+
+def test_print_technology_per_page_unclear_fallback(s3_bucket, lambda_context):
+    """If a page has no print_technology, its slot uses 'unclear'."""
+    pages = [
+        {"page_number": 1, "print_technology": "laser"},
+        {"page_number": 2},   # no print_technology key
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-PT2", pages)
+
+    handler(_make_event("APP-PT2", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-PT2/aggregation.json")
+    assert agg["print_technology_per_page"] == ["laser", "unclear"]
+
+
+def test_print_technology_per_page_ignores_stale_model_array(s3_bucket, lambda_context):
+    """If per-page data has a stale print_technology_per_page array from the
+    model, the aggregation must derive the value from per-page print_technology."""
+    pages = [
+        {
+            "page_number": 1,
+            "print_technology": "laser",
+            "print_technology_per_page": ["typewriter", "photocopy"],  # stale
+        },
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-PT3", pages)
+
+    handler(_make_event("APP-PT3", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-PT3/aggregation.json")
+    assert agg["print_technology_per_page"] == ["laser"]

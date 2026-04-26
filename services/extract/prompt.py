@@ -1,6 +1,6 @@
 """Prompt text and enum vocabulary for transcript extraction."""
 
-PROMPT_VERSION = "4.0"
+PROMPT_VERSION = "4.1"
 
 # Enum values the handler accepts from the extraction model.
 # Only scalar enum fields appear here; boolean, free-text, array-of-objects,
@@ -92,7 +92,7 @@ Return every requested field in this structure:
 
 Rules:
 - For array-valued fields (security_features_present, suspicious_course_names, \
-seal_present_on_pages, print_technology_per_page, suspected_alteration_fields), \
+suspected_alteration_fields), \
 "value" MUST be a JSON array. \
 Use an empty array [] if nothing is found. Do not use null.
 - For object-array fields (courses, semesters, programs, \
@@ -143,11 +143,6 @@ program_year
   Value: free text graduation/completion/program year, or null if absent
   Description: The graduation year, completion year, or program year printed on the transcript.
 
-document_page_count
-  Value: integer (total number of pages in this document), or null if not determinable
-  Description: The total page count of the entire document (e.g., from "Page 1 of 3" notation
-               or physical count). Used to verify that institution seals appear on all pages.
-
 === SECTION 1: Physical Document Fields (PHYS_001 – PHYS_005) ===
 
 --- PHYS_001: Seal Authenticity ---
@@ -164,11 +159,6 @@ seal_visible_text
   Value: string (any readable text from the seal or watermark), or null if not readable
   Description: Verbatim text visible in the institution seal or watermark impression.
                Return null if the seal contains no readable text or text is illegible.
-
-seal_present_on_pages
-  Value: JSON array of integers (page numbers where the institution seal is visible)
-  Description: List every page number on which a seal or watermark is clearly visible.
-               Use [] if the seal is not visible on any page of this document.
 
 security_features_present
   Value: JSON array containing zero or more of: watermark, micro_printing, hologram, serial_number
@@ -222,12 +212,6 @@ registrar_block
 print_technology
   Allowed: typewriter | dot_matrix | laser | inkjet | photocopy | unclear
   Description: The apparent machinery used to print the document text.
-
-print_technology_per_page
-  Value: JSON array of strings (one print_technology enum value per page of the document,
-         in page order). Use the same allowed values as print_technology.
-  Description: Per-page print technology assessment. A single-page document returns a
-               one-element array. Use "unclear" for pages that cannot be assessed.
 
 reissue_markers_detected
   Value: boolean (true if the document contains "reissued", "certified copy", "duplicate",

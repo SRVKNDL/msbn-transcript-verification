@@ -7,6 +7,7 @@ import {
   signIn,
 } from "../auth";
 import { useT } from "../theme";
+import { useViewport } from "../useViewport";
 
 function LoginField({
   label,
@@ -66,6 +67,7 @@ function LoginField({
 
 export function LoginPage() {
   const t = useT();
+  const { isPhone } = useViewport();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -111,15 +113,17 @@ export function LoginPage() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        padding: 16,
+        boxSizing: "border-box",
       }}
     >
       <div
         style={{
-          width: 420,
+          width: "min(420px, 100%)",
           background: t.surface,
           border: `1px solid ${t.line}`,
           borderTop: `3px solid ${t.accent}`,
-          padding: "40px 44px",
+          padding: isPhone ? "28px 20px" : "40px 44px",
           borderRadius: 3,
         }}
       >

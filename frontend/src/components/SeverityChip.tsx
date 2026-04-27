@@ -1,10 +1,4 @@
-import { TOKENS } from "../tokens";
-
-const MAP = {
-  High: { fg: TOKENS.high, bg: TOKENS.highBg, label: "High" },
-  Medium: { fg: TOKENS.med, bg: TOKENS.medBg, label: "Medium" },
-  Low: { fg: TOKENS.low, bg: TOKENS.lowBg, label: "Low" },
-} as const;
+import { useT } from "../theme";
 
 export function SeverityChip({
   severity,
@@ -13,12 +7,13 @@ export function SeverityChip({
   severity: "High" | "Medium" | "Low" | null;
   size?: "sm" | "lg";
 }) {
+  const t = useT();
   if (!severity)
     return (
       <span
         style={{
           fontSize: 11,
-          color: TOKENS.ink4,
+          color: t.ink4,
           fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
           letterSpacing: 0.3,
         }}
@@ -27,7 +22,12 @@ export function SeverityChip({
       </span>
     );
 
-  const s = MAP[severity];
+  const map = {
+    High: { fg: t.high, bg: t.highBg, label: "High" },
+    Medium: { fg: t.med, bg: t.medBg, label: "Medium" },
+    Low: { fg: t.low, bg: t.lowBg, label: "Low" },
+  } as const;
+  const s = map[severity];
   const isLg = size === "lg";
   return (
     <span

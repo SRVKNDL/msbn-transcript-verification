@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useT, useThemeMode } from "../theme";
 import { listApplications } from "../api";
 import { getCurrentUser, signOut } from "../auth";
+import { useViewport } from "../useViewport";
 import type { Application } from "../types";
 import {
   APP_ROUTES,
@@ -41,10 +42,12 @@ export function Shell({
   const searchRef = useRef<HTMLDivElement>(null);
   const user = getCurrentUser();
   const darkMode = mode === "dark";
+  const { isPhone, isTablet, isNarrow } = useViewport();
+  const compactHeader = isNarrow;
 
   useEffect(() => {
-    setSidebarOpen(shellMode !== "detail");
-  }, [shellMode]);
+    setSidebarOpen(shellMode !== "detail" && !isTablet);
+  }, [isTablet, shellMode]);
 
   useEffect(() => {
     listApplications({ statuses: ["READY_FOR_REVIEW"] })
@@ -133,7 +136,7 @@ export function Shell({
         fontFamily: t.sans,
         display: "grid",
         gridTemplateColumns: sidebarOpen ? "220px 1fr" : "0 1fr",
-        gridTemplateRows: "60px 1fr",
+        gridTemplateRows: "auto 1fr",
         overflow: "hidden",
         transition: "grid-template-columns 180ms ease",
       }}
@@ -144,15 +147,17 @@ export function Shell({
           gridColumn: "1 / -1",
           background: t.primary,
           color: t.primaryInk,
-          display: "grid",
-          gridTemplateColumns: "auto minmax(220px, 1fr) minmax(320px, 520px) minmax(220px, 1fr) auto",
+          display: isPhone ? "flex" : "grid",
+          flexWrap: isPhone ? "wrap" : undefined,
+          gridTemplateColumns: isPhone ? undefined : "minmax(280px, auto) minmax(360px, 1fr) auto",
           alignItems: "center",
-          padding: "0 22px",
-          columnGap: 14,
+          justifyContent: isPhone ? "flex-start" : undefined,
+          padding: compactHeader ? "10px 16px" : "10px 22px",
+          gap: 12,
           borderBottom: `3px solid ${t.accent}`,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: isPhone ? "1 1 100%" : "0 1 auto" }}>
           <button
             onClick={() => setSidebarOpen((open) => !open)}
             title={sidebarOpen ? "Hide navigation" : "Show navigation"}
@@ -214,7 +219,7 @@ export function Shell({
               width: 30,
               height: 30,
               borderRadius: 6,
-              background: "#2563eb",
+              background: t.accent,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -246,8 +251,18 @@ export function Shell({
           </div>
           </button>
         </div>
-        <div />
-        <div ref={searchRef} style={{ position: "relative", width: "100%", minWidth: 0 }}>
+        <div
+          ref={searchRef}
+          style={{
+            position: "relative",
+            flex: isPhone ? "1 1 100%" : undefined,
+            width: isPhone ? "100%" : "auto",
+            maxWidth: isPhone ? "100%" : "100%",
+            minWidth: 0,
+            marginLeft: 0,
+            order: isPhone ? 3 : 0,
+          }}
+        >
           <span
             aria-hidden="true"
             style={{
@@ -382,8 +397,13 @@ export function Shell({
             </div>
           )}
         </div>
-        <div />
-        <div ref={profileMenuRef} style={{ position: "relative" }}>
+        <div
+          ref={profileMenuRef}
+          style={{
+            position: "relative",
+            marginLeft: 0,
+          }}
+        >
           <button
             onClick={() => setProfileOpen((open) => !open)}
             style={{
@@ -584,15 +604,15 @@ export function Shell({
                 gap: 12,
                 padding: "9px 18px",
                 margin: "0 10px",
-                border: "none",
                 cursor: "pointer",
                 background: active ? t.accentBg : "transparent",
-                color: active ? t.primary : t.ink2,
+                color: active ? t.ink : t.ink2,
                 fontSize: 13,
                 fontWeight: active ? 600 : 500,
                 fontFamily: "inherit",
                 textAlign: "left",
                 borderRadius: 6,
+                border: active ? `1px solid ${t.accent}` : "1px solid transparent",
               }}
             >
               <span
@@ -657,14 +677,16 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   const t = useT();
+  const { isPhone, isTablet } = useViewport();
   return (
     <div
       style={{
-        padding: "26px 34px 20px",
+        padding: isPhone ? "20px 16px 16px" : isTablet ? "24px 24px 18px" : "26px 34px 20px",
         borderBottom: `1px solid ${t.line}`,
         background: t.surface,
         display: "flex",
-        alignItems: "flex-end",
+        flexDirection: isTablet ? "column" : "row",
+        alignItems: isTablet ? "stretch" : "flex-end",
         gap: 16,
       }}
     >
@@ -685,7 +707,7 @@ export function PageHeader({
         )}
         <div
           style={{
-            fontSize: 26,
+            fontSize: isPhone ? 22 : 26,
             fontWeight: 600,
             fontFamily: t.serif,
             letterSpacing: -0.3,
@@ -700,7 +722,7 @@ export function PageHeader({
           </div>
         )}
       </div>
-      {actions}
+      {actions && <div style={{ width: isTablet ? "100%" : "auto" }}>{actions}</div>}
     </div>
   );
 }

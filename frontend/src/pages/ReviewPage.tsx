@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { WheelEvent } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { TOKENS, LAYOUT } from "../tokens";
 import { useT } from "../theme";
+import { useViewport } from "../useViewport";
 import { SeverityChip } from "../components/SeverityChip";
 import { ConfidenceDot } from "../components/ConfidenceDot";
 import { ProgressBar } from "../components/ProgressBar";
@@ -233,10 +233,11 @@ function timeAgo(hrs: number) {
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
+  const t = useT();
   return (
     <div>
-      <div style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.4, textTransform: "uppercase" }}>{label}</div>
-      <div style={{ fontSize: 14, color: TOKENS.ink, fontWeight: 600, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{value}</div>
+      <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, letterSpacing: 0.4, textTransform: "uppercase" }}>{label}</div>
+      <div style={{ fontSize: 14, color: t.ink, fontWeight: 600, fontFamily: t.mono }}>{value}</div>
     </div>
   );
 }
@@ -326,6 +327,7 @@ function TranscriptPageViewer({
   flags: Flag[];
   pdfScale: number;
 }) {
+  const t = useT();
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
 
@@ -346,17 +348,17 @@ function TranscriptPageViewer({
   if (status === "loading") return (
     <div style={{
       width: Math.round(560 * pdfScale), minHeight: Math.round(720 * pdfScale),
-      background: TOKENS.paper,
-      border: `1px solid ${TOKENS.line}`, borderRadius: 2,
+      background: t.surface,
+      border: `1px solid ${t.line}`, borderRadius: 2,
       boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
       display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16,
     }}>
       <div style={{
         width: 36, height: 36, borderRadius: "50%",
-        border: `3px solid ${TOKENS.line}`, borderTopColor: LAYOUT.accent,
+        border: `3px solid ${t.line}`, borderTopColor: t.accent,
         animation: "txSpin 0.8s linear infinite",
       }} />
-      <div style={{ fontSize: 12, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', monospace" }}>
+      <div style={{ fontSize: 12, color: t.ink4, fontFamily: t.mono }}>
         Fetching page {page} from S3…
       </div>
       <style>{`@keyframes txSpin { to { transform: rotate(360deg); } }`}</style>
@@ -365,8 +367,8 @@ function TranscriptPageViewer({
 
   if (status === "loaded" && imgUrl) return (
     <div style={{
-      width: Math.round(560 * pdfScale), background: TOKENS.paper,
-      border: `1px solid ${TOKENS.line}`, borderRadius: 2,
+      width: Math.round(560 * pdfScale), background: t.surface,
+      border: `1px solid ${t.line}`, borderRadius: 2,
       boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
       position: "relative", overflow: "hidden",
     }}>
@@ -379,11 +381,11 @@ function TranscriptPageViewer({
       {flags.filter(f => f.sourceLocation.page === page).map(f => (
         <div key={f.ruleCode} style={{
           position: "absolute", bottom: 12, left: 12,
-          background: f.severity === "High" ? TOKENS.highBg : f.severity === "Medium" ? TOKENS.medBg : TOKENS.lowBg,
-          border: `1px solid ${f.severity === "High" ? TOKENS.high : f.severity === "Medium" ? TOKENS.med : TOKENS.low}`,
+          background: f.severity === "High" ? t.highBg : f.severity === "Medium" ? t.medBg : t.lowBg,
+          border: `1px solid ${f.severity === "High" ? t.high : f.severity === "Medium" ? t.med : t.low}`,
           borderRadius: 4, padding: "4px 10px",
-          fontSize: 10, fontFamily: "'IBM Plex Mono', monospace",
-          color: f.severity === "High" ? TOKENS.high : f.severity === "Medium" ? TOKENS.med : TOKENS.low,
+          fontSize: 10, fontFamily: t.mono,
+          color: f.severity === "High" ? t.high : f.severity === "Medium" ? t.med : t.low,
           fontWeight: 600,
         }}>&#9873; {f.ruleCode} · {f.severity}</div>
       ))}
@@ -393,14 +395,14 @@ function TranscriptPageViewer({
   return (
     <div style={{
       width: Math.round(560 * pdfScale), minHeight: Math.round(720 * pdfScale),
-      background: TOKENS.paper,
-      border: `1px solid ${TOKENS.line}`,
+      background: t.surface,
+      border: `1px solid ${t.line}`,
       boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
       padding: "36px 42px", boxSizing: "border-box",
       display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-      textAlign: "center", color: TOKENS.ink3,
+      textAlign: "center", color: t.ink3,
     }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: TOKENS.ink, fontFamily: "'Montserrat', system-ui, sans-serif", marginBottom: 8 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: t.ink, fontFamily: t.serif, marginBottom: 8 }}>
         Transcript page unavailable
       </div>
       <div style={{ fontSize: 12, lineHeight: 1.6, maxWidth: 380 }}>
@@ -418,8 +420,8 @@ function QueueRow({ app, active, onClick, shaded }: { app: Application; active: 
     : app.highestSeverity === "Medium" ? t.med
     : app.highestSeverity === "Low" ? t.low
     : t.ink4;
-  const rowBackground = active ? t.accentBg : shaded ? "#eef4fb" : t.surface;
-  const rowBorder = active ? "rgba(0, 94, 162, 0.28)" : shaded ? "#dbe7f4" : "transparent";
+  const rowBackground = active ? t.accentBg : shaded ? t.surfaceAlt : t.surface;
+  const rowBorder = active ? t.accent : shaded ? t.line : "transparent";
   const metaText = [app.country, app.programYear].filter(Boolean).join(" · ") || timeAgo(app.ageHours);
 
   return (
@@ -435,7 +437,7 @@ function QueueRow({ app, active, onClick, shaded }: { app: Application; active: 
       background: rowBackground,
       cursor: "pointer",
       fontSize: 13,
-      color: active ? t.primary : t.ink2,
+      color: active ? t.ink : t.ink2,
       boxShadow: active ? "0 8px 18px rgba(0,94,162,0.11)" : "none",
       minHeight: 86,
       boxSizing: "border-box",
@@ -444,7 +446,7 @@ function QueueRow({ app, active, onClick, shaded }: { app: Application; active: 
       <div style={{ minWidth: 0, display: "grid", gridTemplateRows: "20px 16px 16px", alignContent: "start" }}>
         <div style={{
           fontWeight: active ? 600 : 500,
-          color: active ? t.primary : t.ink2,
+          color: active ? t.ink : t.ink2,
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -492,63 +494,64 @@ function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpen
   onJumpTo: () => void; onOpenData: () => void;
   active: boolean; onClick: () => void; shaded?: boolean;
 }) {
+  const t = useT();
   const resolved = !!decision;
-  const cardBackground = resolved ? LAYOUT.line2 : shaded ? "#eef4fb" : TOKENS.paper;
+  const cardBackground = resolved ? t.surfaceAlt : shaded ? t.surfaceAlt : t.surface;
   return (
     <div onClick={onClick} style={{
-      border: `1px solid ${active ? TOKENS.ink3 : TOKENS.line}`,
-      borderLeft: `3px solid ${flag.severity === "High" ? TOKENS.high : flag.severity === "Medium" ? TOKENS.med : TOKENS.low}`,
+      border: `1px solid ${active ? t.accent : t.line}`,
+      borderLeft: `3px solid ${flag.severity === "High" ? t.high : flag.severity === "Medium" ? t.med : t.low}`,
       background: cardBackground,
       opacity: resolved && !active ? 0.72 : 1,
       borderRadius: 2, padding: "12px 14px", cursor: "pointer", marginBottom: 8,
       transition: "background 140ms, opacity 140ms",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 12, fontWeight: 600, color: TOKENS.ink }}>{flag.ruleCode}</span>
+        <span style={{ fontFamily: t.mono, fontSize: 12, fontWeight: 600, color: t.ink }}>{flag.ruleCode}</span>
         <SeverityChip severity={flag.severity} />
         {resolved && (
           <span style={{
-            fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 10, fontWeight: 600,
-            color: decision === "CONFIRM" ? TOKENS.high : TOKENS.ok,
-            background: decision === "CONFIRM" ? TOKENS.highBg : TOKENS.okBg,
+            fontFamily: t.mono, fontSize: 10, fontWeight: 600,
+            color: decision === "CONFIRM" ? t.high : t.ok,
+            background: decision === "CONFIRM" ? t.highBg : t.okBg,
             padding: "2px 7px", borderRadius: 2, letterSpacing: 0.3,
           }}>
             {decision === "CONFIRM" ? "\u2713 CONFIRMED" : "\u2713 OVERRIDDEN"}
           </span>
         )}
-        <span style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", marginLeft: "auto" }}>
+        <span style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, marginLeft: "auto" }}>
           {flag.safePractice}
         </span>
       </div>
-      <div style={{ fontSize: 12, color: TOKENS.ink2, fontWeight: 500, marginBottom: 4 }}>
+      <div style={{ fontSize: 12, color: t.ink2, fontWeight: 500, marginBottom: 4 }}>
         {flag.ruleName.replaceAll("_", " ").toLowerCase()}
       </div>
-      <div style={{ fontSize: 12, color: TOKENS.ink3, lineHeight: 1.55, marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: t.ink3, lineHeight: 1.55, marginBottom: 10 }}>
         {flag.rationale}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: TOKENS.ink4, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: t.ink4, flexWrap: "wrap" }}>
         <button onClick={(e) => { e.stopPropagation(); onJumpTo(); }} style={{
-          border: `1px solid ${TOKENS.line}`, background: TOKENS.bg,
+          border: `1px solid ${t.line}`, background: t.surface,
           fontSize: 10, padding: "3px 8px", borderRadius: 2, cursor: "pointer",
-          fontFamily: "'IBM Plex Mono', ui-monospace, monospace", color: TOKENS.ink2,
+          fontFamily: t.mono, color: t.ink2,
         }}>
           &darr; page {flag.sourceLocation.page}
         </button>
         <button onClick={(e) => { e.stopPropagation(); onOpenData(); }} style={{
-          border: `1px solid ${TOKENS.line}`, background: TOKENS.bg,
+          border: `1px solid ${t.line}`, background: t.surface,
           fontSize: 10, padding: "3px 8px", borderRadius: 2, cursor: "pointer",
-          fontFamily: "'IBM Plex Mono', ui-monospace, monospace", color: TOKENS.ink2,
+          fontFamily: t.mono, color: t.ink2,
         }}>
           # data
         </button>
-        <span style={{ fontSize: 10, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
+        <span style={{ fontSize: 10, fontFamily: t.mono }}>
           "{flag.sourceLocation.spans[0]}"
         </span>
       </div>
 
       {active && (
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px dashed ${TOKENS.line}` }}>
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px dashed ${t.line}` }}>
           <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
             <ActionButton active={decision === "CONFIRM"} onClick={(e) => { e.stopPropagation(); onDecision("CONFIRM"); }} variant="confirm">Confirm flag</ActionButton>
             <ActionButton active={decision === "OVERRIDE"} onClick={(e) => { e.stopPropagation(); onDecision("OVERRIDE"); }} variant="override">Override</ActionButton>
@@ -559,9 +562,9 @@ function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpen
               placeholder="Notes required when overriding a flag..."
               style={{
                 width: "100%", minHeight: 60, boxSizing: "border-box",
-                border: `1px solid ${TOKENS.line}`, borderRadius: 2,
-                padding: 8, fontSize: 12, fontFamily: "inherit", color: TOKENS.ink2,
-                background: TOKENS.bg, resize: "vertical",
+                border: `1px solid ${t.line}`, borderRadius: 2,
+                padding: 8, fontSize: 12, fontFamily: "inherit", color: t.ink2,
+                background: t.surface, resize: "vertical",
               }} />
           )}
         </div>
@@ -574,6 +577,7 @@ function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpen
 function ExtractedDataDrawer({ flag, extraction, onClose }: {
   flag: Flag | null; extraction: ExtractionData; onClose: () => void;
 }) {
+  const t = useT();
   const [tab, setTab] = useState<"physical" | "content" | "program">("physical");
   const fieldMap: Record<string, string[]> = {
     CONT_005: ["gpa_arithmetic_consistency"],
@@ -597,48 +601,48 @@ function ExtractedDataDrawer({ flag, extraction, onClose }: {
     }}>
       <div onClick={onClose} style={{ flex: 1 }} />
       <div style={{
-        width: 500, background: TOKENS.paper, height: "100%",
-        borderLeft: `1px solid ${LAYOUT.line}`, display: "flex", flexDirection: "column",
+        width: "min(500px, 100vw)", background: t.surface, height: "100%",
+        borderLeft: `1px solid ${t.line}`, display: "flex", flexDirection: "column",
         boxShadow: "-20px 0 50px rgba(0,0,0,0.18)",
         animation: "drawerSlide 220ms cubic-bezier(.2,.7,.3,1)",
       }}>
-        <div style={{ padding: "18px 22px 12px", borderBottom: `1px solid ${TOKENS.line}` }}>
+        <div style={{ padding: "18px 22px 12px", borderBottom: `1px solid ${t.line}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-            <span style={{ fontSize: 10, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", color: TOKENS.ink4, letterSpacing: 0.5, textTransform: "uppercase" }}>Extracted fields</span>
+            <span style={{ fontSize: 10, fontFamily: t.mono, color: t.ink4, letterSpacing: 0.5, textTransform: "uppercase" }}>Extracted fields</span>
             <div style={{ flex: 1 }} />
             <button onClick={onClose} style={{
               border: "none", background: "transparent", cursor: "pointer",
-              color: TOKENS.ink3, fontSize: 16, padding: 0, lineHeight: 1,
+              color: t.ink3, fontSize: 16, padding: 0, lineHeight: 1,
             }}>&times;</button>
           </div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: TOKENS.ink, marginBottom: 4, fontFamily: "'Montserrat', system-ui, sans-serif" }}>Bedrock Nova extraction</div>
-          <div style={{ fontSize: 11, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: t.ink, marginBottom: 4, fontFamily: t.serif }}>Bedrock Nova extraction</div>
+          <div style={{ fontSize: 11, color: t.ink4, fontFamily: t.mono }}>
             nova-pro-v1:0 · prompt v4.0 · extracted 2026-04-19 14:24 UTC
           </div>
           {flag && (
             <div style={{
               marginTop: 12, padding: "7px 10px",
-              background: TOKENS.highBg, border: `1px solid ${TOKENS.highBgStrong}`,
-              borderRadius: 2, fontSize: 11, color: TOKENS.ink2,
-              fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+              background: t.highBg, border: `1px solid ${t.high}`,
+              borderRadius: 2, fontSize: 11, color: t.ink2,
+              fontFamily: t.mono,
             }}>
-              showing fields related to <b style={{ color: TOKENS.high }}>{flag.ruleCode}</b>
+              showing fields related to <b style={{ color: t.high }}>{flag.ruleCode}</b>
             </div>
           )}
         </div>
 
         {/* Tabs */}
-        <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${TOKENS.line}`, padding: "0 22px" }}>
-          {TABS.map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)} style={{
+        <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${t.line}`, padding: "0 22px" }}>
+          {TABS.map((tabOption) => (
+            <button key={tabOption.key} onClick={() => setTab(tabOption.key)} style={{
               border: "none", background: "transparent", cursor: "pointer",
               padding: "10px 14px 10px 0", marginRight: 18,
-              fontSize: 12, fontWeight: tab === t.key ? 600 : 400,
-              color: tab === t.key ? TOKENS.ink : TOKENS.ink3,
-              borderBottom: `2px solid ${tab === t.key ? LAYOUT.accent : "transparent"}`,
+              fontSize: 12, fontWeight: tab === tabOption.key ? 600 : 400,
+              color: tab === tabOption.key ? t.ink : t.ink3,
+              borderBottom: `2px solid ${tab === tabOption.key ? t.accent : "transparent"}`,
               marginBottom: -1, fontFamily: "inherit",
             }}>
-              {t.label} <span style={{ color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontSize: 11 }}>{t.count}</span>
+              {tabOption.label} <span style={{ color: t.ink4, fontFamily: t.mono, fontSize: 11 }}>{tabOption.count}</span>
             </button>
           ))}
         </div>
@@ -651,22 +655,22 @@ function ExtractedDataDrawer({ flag, extraction, onClose }: {
               <div key={i} style={{
                 display: "grid", gridTemplateColumns: "1fr 1fr auto",
                 gap: 12, alignItems: "baseline", padding: "9px 22px",
-                background: hi ? TOKENS.highBg : "transparent",
-                borderLeft: hi ? `3px solid ${TOKENS.high}` : "3px solid transparent",
-                borderBottom: `1px solid ${TOKENS.line2}`,
+                background: hi ? t.highBg : "transparent",
+                borderLeft: hi ? `3px solid ${t.high}` : "3px solid transparent",
+                borderBottom: `1px solid ${t.line2}`,
               }}>
                 <div style={{
-                  fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
-                  fontSize: 11, color: hi ? TOKENS.ink : TOKENS.ink3, fontWeight: hi ? 600 : 400,
+                  fontFamily: t.mono,
+                  fontSize: 11, color: hi ? t.ink : t.ink3, fontWeight: hi ? 600 : 400,
                 }}>{row.field}</div>
-                <div style={{ fontSize: 12, color: TOKENS.ink2, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>{row.value}</div>
+                <div style={{ fontSize: 12, color: t.ink2, fontFamily: t.mono }}>{row.value}</div>
                 <ConfidenceDot level={row.confidence} />
               </div>
             );
           })}
         </div>
 
-        <div style={{ padding: "12px 22px", borderTop: `1px solid ${TOKENS.line}`, fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace" }}>
+        <div style={{ padding: "12px 22px", borderTop: `1px solid ${t.line}`, fontSize: 10, color: t.ink4, fontFamily: t.mono }}>
           {totalFields} fields · GET /applications/{"{id}"}/extraction
         </div>
       </div>
@@ -705,6 +709,7 @@ function buildFallbackExtraction(app: Application): ExtractionData {
 // --- Main review page ---
 export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   const t = useT();
+  const { isPhone, isTablet, isNarrow } = useViewport();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -1042,6 +1047,19 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   const canSubmit = allDecided && allOverridesNoted && !isAppLoading && !!app;
   const jumpTo = (flag: Flag) => setCurrentPage(flag.sourceLocation.page);
   const openDrawer = (flag: Flag | null) => { setDrawerFlag(flag); setDrawerOpen(true); };
+  const showQueueSidebar = queueOpen && !isTablet && !isPhone;
+  const reviewGridTemplateColumns = isPhone
+    ? "1fr"
+    : showQueueSidebar
+      ? "220px minmax(0, 1fr) minmax(280px, 340px)"
+      : "minmax(0, 1fr) minmax(280px, 360px)";
+  const reviewGridTemplateRows = embedded
+    ? isPhone
+      ? "minmax(320px, 48vh) minmax(0, 1fr)"
+      : "1fr"
+    : isPhone
+      ? "auto minmax(320px, 48vh) minmax(0, 1fr)"
+      : "auto 1fr";
 
   const handleSubmit = async () => {
     if (!canSubmit || !id || !overallDecision) return;
@@ -1074,13 +1092,13 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
       width: embedded ? "100%" : "100vw", height: embedded ? "100%" : "100vh", position: "relative",
       background: t.bg, fontFamily: "'Open Sans', system-ui, sans-serif", color: t.ink,
       display: "grid",
-      gridTemplateColumns: queueOpen ? "220px 1fr 320px" : "0 1fr 320px",
-      gridTemplateRows: embedded ? "1fr" : "60px 1fr",
+      gridTemplateColumns: reviewGridTemplateColumns,
+      gridTemplateRows: reviewGridTemplateRows,
       overflow: "hidden",
     }}>
       {!embedded && <div style={{
         gridColumn: "1 / -1", borderBottom: `3px solid ${t.accent}`,
-        background: t.primary, display: "flex", alignItems: "center", padding: "0 22px", gap: 16,
+        background: t.primary, display: "flex", alignItems: "center", flexWrap: "wrap", padding: isPhone ? "10px 16px" : "10px 22px", gap: 12,
         color: t.primaryInk,
       }}>
         <button onClick={() => setQueueOpen((open) => !open)} style={{
@@ -1103,7 +1121,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
             width: 30,
             height: 30,
             borderRadius: 6,
-            background: "#2563eb",
+            background: t.accent,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -1133,21 +1151,22 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
         <button onClick={() => navigate(APP_ROUTES.dashboard)} style={{
           border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)",
           padding: "4px 10px", fontSize: 11, borderRadius: 2, cursor: "pointer",
-          fontFamily: "'IBM Plex Mono', ui-monospace, monospace", color: "rgba(255,255,255,0.82)",
+          fontFamily: t.mono, color: "rgba(255,255,255,0.82)",
         }}>&larr; Dashboard</button>
-        <div style={{ height: 20, width: 1, background: "rgba(255,255,255,0.16)" }} />
-        {flags.length > 0 && <ProgressBar total={flags.length} resolved={resolvedCount} />}
+        {!isPhone && <div style={{ height: 20, width: 1, background: "rgba(255,255,255,0.16)" }} />}
+        {!isNarrow && flags.length > 0 && <ProgressBar total={flags.length} resolved={resolvedCount} />}
         <div style={{ flex: 1 }} />
+        {isNarrow && flags.length > 0 && <div style={{ fontSize: 11, fontFamily: t.mono }}>{resolvedCount}/{flags.length} resolved</div>}
         <a href={`https://www.nursys.com`} target="_blank" rel="noopener noreferrer" style={{
           border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)",
           color: "rgba(255,255,255,0.82)", padding: "5px 12px", fontSize: 11, borderRadius: 2,
-          fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+          fontFamily: t.mono,
           textDecoration: "none", cursor: "pointer",
         }}>Check Nursys &#8599;</a>
         <button onClick={() => setShowShortcuts(true)} style={{
           border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)",
           color: "rgba(255,255,255,0.7)", width: 24, height: 24, fontSize: 13, borderRadius: 2,
-          cursor: "pointer", fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+          cursor: "pointer", fontFamily: t.mono,
           display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
         }} title="Keyboard shortcuts (?)">?</button>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1175,12 +1194,12 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
       <div style={{
         gridColumn: 1,
         gridRow: embedded ? 1 : 2,
-        borderRight: queueOpen ? `1px solid ${t.line}` : "none",
+        borderRight: showQueueSidebar ? `1px solid ${t.line}` : "none",
         background: `linear-gradient(180deg, ${t.surface} 0%, ${t.surfaceAlt} 100%)`,
         overflow: "hidden",
-        display: queueOpen ? "flex" : "none",
+        display: showQueueSidebar ? "flex" : "none",
         flexDirection: "column",
-        padding: queueOpen ? "18px 0" : 0,
+        padding: showQueueSidebar ? "18px 0" : 0,
       }}>
         <div style={{ padding: "0 18px 10px", borderBottom: `1px solid ${t.line2}`, marginBottom: 8 }}>
           <div style={{
@@ -1265,7 +1284,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
 
       {/* PDF pane — TranscriptPageViewer */}
       <div id="transcript-preview-pane" ref={transcriptPaneRef} style={{
-        gridColumn: 2,
+        gridColumn: isPhone ? 1 : showQueueSidebar ? 2 : 1,
         gridRow: embedded ? 1 : 2,
         background: t.surfaceAlt,
         overflow: "hidden",
@@ -1288,9 +1307,9 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
             {pages.map((p) => (
               <button key={p} onClick={() => setCurrentPage(p)} style={{
-                border: `1px solid ${currentPage === p ? TOKENS.ink2 : TOKENS.line}`,
-                background: currentPage === p ? TOKENS.ink : TOKENS.paper,
-                color: currentPage === p ? "#fff" : TOKENS.ink3,
+                border: `1px solid ${currentPage === p ? t.ink2 : t.line}`,
+                background: currentPage === p ? t.ink : t.surface,
+                color: currentPage === p ? "#fff" : t.ink3,
                 width: 24, height: 22, fontSize: 11, cursor: "pointer", borderRadius: 2, fontFamily: "inherit",
               }}>{p}</button>
             ))}
@@ -1375,7 +1394,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
             gap: 8,
             padding: "8px 5px",
             boxSizing: "border-box",
-            background: "rgba(255, 255, 255, 0.9)",
+            background: t.surface,
             border: `1px solid ${t.line}`,
             borderRadius: 3,
             boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
@@ -1436,7 +1455,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
             height: 38,
             borderRadius: 4,
             border: `1px solid ${t.line}`,
-            background: "rgba(255,255,255,0.94)",
+            background: t.surface,
             color: t.ink2,
             boxShadow: "0 10px 24px rgba(15,23,42,0.16)",
             display: "flex",
@@ -1453,7 +1472,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
       </div>
 
       {/* Flag list */}
-      <div style={{ gridColumn: 3, gridRow: embedded ? 1 : 2, background: t.surfaceAlt, borderLeft: `1px solid ${t.line}`, overflow: "auto", display: "flex", flexDirection: "column" }}>
+      <div style={{ gridColumn: isPhone ? 1 : showQueueSidebar ? 3 : 2, gridRow: embedded ? (isPhone ? 2 : 1) : (isPhone ? 3 : 2), background: t.surfaceAlt, borderLeft: isPhone ? "none" : `1px solid ${t.line}`, borderTop: isPhone ? `1px solid ${t.line}` : "none", overflow: "auto", display: "flex", flexDirection: "column" }}>
         <DetailHeader
           compact
           backLabel="Review Queue"
@@ -1521,7 +1540,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
         <div style={{ flex: 1, overflow: "auto", padding: "14px 14px 84px" }}>
           <div style={{ marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
-              <div style={{ fontSize: 10, color: TOKENS.ink4, fontFamily: "'IBM Plex Mono', ui-monospace, monospace", letterSpacing: 0.5, textTransform: "uppercase" }}>
+              <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, letterSpacing: 0.5, textTransform: "uppercase" }}>
                 Flags raised — {resolvedCount} / {flags.length} resolved
               </div>
               <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, textTransform: "uppercase", letterSpacing: 0.4 }}>
@@ -1533,7 +1552,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
               aria-label="Sort flags"
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                gridTemplateColumns: isPhone ? "repeat(2, minmax(0, 1fr))" : "repeat(4, minmax(0, 1fr))",
                 gap: 6,
               }}
             >
@@ -1583,8 +1602,8 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
               key={group.ruleCode}
               style={{
                 marginBottom: 12,
-                background: group.groupIndex % 2 === 1 ? "#eaf2fb" : "transparent",
-                border: `1px solid ${group.groupIndex % 2 === 1 ? "#d9e7f5" : "transparent"}`,
+                background: group.groupIndex % 2 === 1 ? t.surfaceAlt : "transparent",
+                border: `1px solid ${group.groupIndex % 2 === 1 ? t.line : "transparent"}`,
                 borderRadius: 6,
                 padding: group.groupIndex % 2 === 1 ? "8px 7px 2px" : "0",
               }}
@@ -1635,9 +1654,9 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
           ))}
           <button onClick={() => openDrawer(null)} style={{
             width: "100%", marginTop: 4, padding: "9px 12px",
-            background: TOKENS.paper, border: `1px dashed ${TOKENS.line}`,
-            fontSize: 11, color: TOKENS.ink3, cursor: "pointer",
-            borderRadius: 2, fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+            background: t.surface, border: `1px dashed ${t.line}`,
+            fontSize: 11, color: t.ink3, cursor: "pointer",
+            borderRadius: 2, fontFamily: t.mono,
           }}>
             View all extraction fields ({totalFields}) &rarr;
           </button>

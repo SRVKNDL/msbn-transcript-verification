@@ -1,4 +1,4 @@
-import { TOKENS } from "../tokens";
+import { useT } from "../theme";
 
 export function ActionButton({
   children,
@@ -13,17 +13,18 @@ export function ActionButton({
   variant: "confirm" | "override";
   big?: boolean;
 }) {
+  const t = useT();
   const palette =
     variant === "confirm"
-      ? { fg: TOKENS.high, bg: TOKENS.highBg, bgActive: TOKENS.high, fgActive: "#fff" }
-      : { fg: TOKENS.ink2, bg: TOKENS.bg, bgActive: TOKENS.ink, fgActive: "#fff" };
+      ? { fg: t.high, bg: t.highBg, bgActive: t.high, fgActive: "#fff" }
+      : { fg: t.ink2, bg: t.surfaceAlt, bgActive: t.ink, fgActive: "#fff" };
 
   return (
     <button
       onClick={onClick}
       style={{
         flex: big ? 1 : undefined,
-        border: `${big ? "1.5px" : "1px"} solid ${active ? palette.bgActive : TOKENS.line}`,
+        border: `${big ? "1.5px" : "1px"} solid ${active ? palette.bgActive : t.line}`,
         background: active ? palette.bgActive : palette.bg,
         color: active ? palette.fgActive : palette.fg,
         padding: big ? "10px 14px" : "5px 10px",

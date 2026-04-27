@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { TOKENS, LAYOUT } from "../tokens";
+import { ThemeCtx, type Theme } from "../theme";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -10,6 +10,8 @@ interface ErrorBoundaryState {
 }
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  static contextType = ThemeCtx;
+  declare context: Theme;
   state: ErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
@@ -22,14 +24,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   render() {
     if (!this.state.error) return this.props.children;
+    const t = this.context;
 
     return (
       <div
         style={{
           width: "100vw",
           height: "100vh",
-          background: LAYOUT.bg,
-          color: TOKENS.ink,
+          background: t.bg,
+          color: t.ink,
           fontFamily: "'Open Sans', system-ui, sans-serif",
           display: "flex",
           alignItems: "center",
@@ -41,9 +44,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         <div
           style={{
             width: "min(560px, 100%)",
-            background: TOKENS.paper,
-            border: `1px solid ${TOKENS.line}`,
-            borderTop: `3px solid ${TOKENS.high}`,
+            background: t.surface,
+            border: `1px solid ${t.line}`,
+            borderTop: `3px solid ${t.high}`,
             borderRadius: 3,
             padding: "24px 28px",
             boxShadow: "0 18px 45px rgba(0,0,0,0.16)",
@@ -52,7 +55,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           <div
             style={{
               fontSize: 11,
-              color: TOKENS.ink4,
+              color: t.ink4,
               fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
               letterSpacing: 0.6,
               textTransform: "uppercase",
@@ -64,7 +67,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 10, fontFamily: "'Montserrat', system-ui, sans-serif" }}>
             This review page could not render
           </div>
-          <div style={{ fontSize: 13, color: TOKENS.ink2, lineHeight: 1.6, marginBottom: 18 }}>
+          <div style={{ fontSize: 13, color: t.ink2, lineHeight: 1.6, marginBottom: 18 }}>
             {this.state.error.message || "An unknown rendering error occurred."}
           </div>
           <button
@@ -73,7 +76,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             }}
             style={{
               border: "none",
-              background: TOKENS.ink,
+              background: t.primary,
               color: "#fff",
               padding: "9px 14px",
               fontSize: 12,

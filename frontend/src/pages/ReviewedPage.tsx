@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useT } from "../theme";
+import { useViewport } from "../useViewport";
 import { DetailHeader } from "../components/DetailHeader";
 import { SeverityChip } from "../components/SeverityChip";
 import { getApplication, getAuditTrail } from "../api";
@@ -9,6 +10,7 @@ import type { Application, Flag, AuditEvent } from "../types";
 export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
   const { id } = useParams<{ id: string }>();
   const t = useT();
+  const { isPhone, isTablet } = useViewport();
 
   const [app, setApp] = useState<Application | null>(null);
   const [flags, setFlags] = useState<Flag[]>([]);
@@ -94,7 +96,15 @@ export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
         }
       />
 
-      <div style={{ padding: "28px 34px 48px", display: "grid", gridTemplateColumns: "1fr 340px", gap: 24, maxWidth: 1100 }}>
+      <div
+        style={{
+          padding: isPhone ? "20px 16px 32px" : isTablet ? "24px 24px 40px" : "28px 34px 48px",
+          display: "grid",
+          gridTemplateColumns: isTablet ? "minmax(0, 1fr)" : "minmax(0, 1fr) 340px",
+          gap: 24,
+          maxWidth: 1100,
+        }}
+      >
 
         {/* Left — flags with decisions */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -118,7 +128,7 @@ export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
                 background: t.surface, border: `1px solid ${t.line}`,
                 borderLeft: `4px solid ${flag.severity === "High" ? t.high : flag.severity === "Medium" ? t.med : t.low}`,
                 borderRadius: 8, padding: "16px 20px",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                boxShadow: "0 8px 22px rgba(15,23,42,0.08)",
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
                   <span style={{ fontFamily: t.mono, fontSize: 12, fontWeight: 600, color: t.ink }}>{flag.ruleCode}</span>
@@ -161,7 +171,7 @@ export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
           <div style={{
             background: t.surface, border: `1px solid ${t.line}`,
             borderRadius: 8, overflow: "hidden",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+            boxShadow: "0 8px 22px rgba(15,23,42,0.08)",
           }}>
             <div style={{ padding: "12px 16px", background: t.surfaceAlt, borderBottom: `1px solid ${t.line}` }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: t.ink, fontFamily: t.serif }}>Application Details</div>
@@ -187,7 +197,7 @@ export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
           <div style={{
             background: t.surface, border: `1px solid ${t.line}`,
             borderRadius: 8, overflow: "hidden",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+            boxShadow: "0 8px 22px rgba(15,23,42,0.08)",
           }}>
             <div style={{ padding: "12px 16px", background: t.surfaceAlt, borderBottom: `1px solid ${t.line}` }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: t.ink, fontFamily: t.serif }}>Review Metadata</div>
@@ -212,7 +222,7 @@ export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
           <div style={{
             background: t.surface, border: `1px solid ${t.line}`,
             borderRadius: 8, overflow: "hidden",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+            boxShadow: "0 8px 22px rgba(15,23,42,0.08)",
           }}>
             <div style={{ padding: "12px 16px", background: t.surfaceAlt, borderBottom: `1px solid ${t.line}` }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: t.ink, fontFamily: t.serif }}>Audit Trail</div>

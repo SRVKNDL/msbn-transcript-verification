@@ -1,13 +1,13 @@
-import { TOKENS } from "../tokens";
-
-const MAP = {
-  high: { color: TOKENS.ok, filled: 3, label: "High (>90%)" },
-  medium: { color: TOKENS.med, filled: 2, label: "Medium (70\u201390%)" },
-  low: { color: TOKENS.ink4, filled: 1, label: "Low (<70%)" },
-} as const;
+import { useT } from "../theme";
 
 export function ConfidenceDot({ level }: { level: "high" | "medium" | "low" }) {
-  const c = MAP[level] ?? MAP.low;
+  const t = useT();
+  const map = {
+    high: { color: t.ok, filled: 3, label: "High (>90%)" },
+    medium: { color: t.med, filled: 2, label: "Medium (70\u201390%)" },
+    low: { color: t.ink4, filled: 1, label: "Low (<70%)" },
+  } as const;
+  const c = map[level] ?? map.low;
   return (
     <span
       style={{ display: "inline-flex", gap: 2, cursor: "help" }}
@@ -20,7 +20,7 @@ export function ConfidenceDot({ level }: { level: "high" | "medium" | "low" }) {
             width: 5,
             height: 5,
             borderRadius: 3,
-            background: i < c.filled ? c.color : TOKENS.line,
+            background: i < c.filled ? c.color : t.line,
           }}
         />
       ))}

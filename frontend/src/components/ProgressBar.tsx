@@ -1,4 +1,4 @@
-import { TOKENS, LAYOUT } from "../tokens";
+import { useT } from "../theme";
 
 export function ProgressBar({
   total,
@@ -7,6 +7,7 @@ export function ProgressBar({
   total: number;
   resolved: number;
 }) {
+  const t = useT();
   const pct = Math.round((resolved / total) * 100);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 280 }}>
@@ -14,7 +15,7 @@ export function ProgressBar({
         style={{
           fontSize: 10,
           fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
-          color: TOKENS.ink4,
+          color: t.ink4,
           letterSpacing: 0.5,
           textTransform: "uppercase",
         }}
@@ -25,7 +26,7 @@ export function ProgressBar({
         style={{
           flex: 1,
           height: 6,
-          background: TOKENS.line2,
+          background: t.line2,
           borderRadius: 3,
           overflow: "hidden",
         }}
@@ -34,7 +35,7 @@ export function ProgressBar({
           style={{
             height: "100%",
             width: `${pct}%`,
-            background: resolved === total ? TOKENS.ok : LAYOUT.accent,
+            background: resolved === total ? t.ok : t.accent,
             transition: "width 200ms ease",
           }}
         />
@@ -43,7 +44,7 @@ export function ProgressBar({
         style={{
           fontSize: 11,
           fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
-          color: TOKENS.ink2,
+          color: t.ink2,
           fontWeight: 600,
           minWidth: 32,
         }}

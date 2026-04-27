@@ -22,7 +22,7 @@ _bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
 
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
-BEDROCK_MAX_NEW_TOKENS = int(os.environ.get("BEDROCK_MAX_NEW_TOKENS", "5120"))
+BEDROCK_MAX_NEW_TOKENS = int(os.environ.get("BEDROCK_MAX_NEW_TOKENS", "5000"))
 
 _ARRAY_FIELDS = {
     "security_features_present",
@@ -34,18 +34,18 @@ _ARRAY_FIELDS = {
 
 
 def _validate_and_build_page_record(
-    model_response: dict,
+    nova_response: dict,
     page_number: int,
     width: int,
     height: int,
 ) -> dict:
-    """Flatten model output and warn on enum drift without failing the run."""
+    """Flatten Nova output and warn on enum drift without failing the run."""
     record: dict = {
         "page_number": page_number,
         "image_dimensions": {"width": width, "height": height},
     }
 
-    for field, meta in model_response.items():
+    for field, meta in nova_response.items():
         if not isinstance(meta, dict):
             logger.warning(
                 json.dumps({
@@ -117,11 +117,12 @@ def _validate_and_build_page_record(
 
 
 def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
-    """Run one page through Nova Pro and parse the JSON response."""
+    """Run one page through Nova and parse the JSON response."""
     system_prompt, user_prompt = build_extraction_prompt()
     b64_image = base64.b64encode(image_bytes).decode("utf-8")
 
     body = json.dumps({
+        "schemaVersion": "messages-v1",
         "messages": [
             {
                 "role": "user",
@@ -130,7 +131,7 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
                         "image": {
                             "format": "png",
                             "source": {"bytes": b64_image},
-                        },
+                        }
                     },
                     {"text": user_prompt},
                 ],
@@ -140,7 +141,7 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
         "inferenceConfig": {
             "max_new_tokens": BEDROCK_MAX_NEW_TOKENS,
             "temperature": 0.0,
-            "top_p": 1.0,
+            "topP": 1.0,
         },
     })
 
@@ -157,11 +158,11 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
     usage = response_body.get("usage") or {}
 
     try:
-        return _parse_model_json(raw_text)
+        return _parse_nova_json(raw_text)
     except json.JSONDecodeError as exc:
         logger.error(
             json.dumps({
-                "event": "model_json_parse_error",
+                "event": "nova_json_parse_error",
                 "page_number": page_number,
                 "error": str(exc),
                 "stop_reason": stop_reason,
@@ -172,12 +173,12 @@ def _call_bedrock_for_page(image_bytes: bytes, page_number: int) -> dict:
             })
         )
         raise ValueError(
-            f"Model response for page {page_number} is not valid JSON"
+            f"Nova response for page {page_number} is not valid JSON"
         ) from exc
 
 
-def _parse_model_json(raw_text: str) -> dict:
-    """Parse a model JSON object even when it is wrapped in prose/fences."""
+def _parse_nova_json(raw_text: str) -> dict:
+    """Parse a Nova JSON object even when it is wrapped in prose/fences."""
     text = str(raw_text or "").lstrip("\ufeff").strip()
     try:
         parsed = json.loads(text)
@@ -185,7 +186,7 @@ def _parse_model_json(raw_text: str) -> dict:
         parsed = _parse_json_from_wrapped_text(text)
 
     if not isinstance(parsed, dict):
-        raise json.JSONDecodeError("Model response JSON is not an object", text, 0)
+        raise json.JSONDecodeError("Nova response JSON is not an object", text, 0)
     return parsed
 
 
@@ -207,7 +208,7 @@ def _parse_json_from_wrapped_text(text: str) -> dict:
             continue
         logger.warning(
             json.dumps({
-                "event": "model_json_recovered",
+                "event": "nova_json_recovered",
                 "recovery": "embedded_object",
             })
         )
@@ -218,18 +219,18 @@ def _parse_json_from_wrapped_text(text: str) -> dict:
     if first >= 0 and last > first:
         logger.warning(
             json.dumps({
-                "event": "model_json_recovered",
+                "event": "nova_json_recovered",
                 "recovery": "brace_slice",
             })
         )
         return json.loads(text[first : last + 1])
 
-    raise json.JSONDecodeError("No JSON object found in model response", text, 0)
+    raise json.JSONDecodeError("No JSON object found in Nova response", text, 0)
 
 
-def _parse_model_json_object(raw_text: str) -> dict:
-    """Alias kept for backward compatibility with callers using the old helper name."""
-    return _parse_model_json(raw_text)
+def _parse_nova_json_object(raw_text: str) -> dict:
+    """Backward-compatible alias for tests and callers using the old helper name."""
+    return _parse_nova_json(raw_text)
 
 
 def handler(event, context):
@@ -257,7 +258,7 @@ def handler(event, context):
         )
         raise
 
-    # Render once up front so each page can be stored and sent to the model.
+    # Render once up front so each page can be stored and sent to Nova.
     try:
         images = convert_from_path(local_pdf)
     except Exception as exc:
@@ -291,11 +292,11 @@ def handler(event, context):
             os.unlink(tmp_path)
 
         # Extract the page into the prompt schema.
-        model_raw = _call_bedrock_for_page(image_bytes, page_idx)
+        nova_raw = _call_bedrock_for_page(image_bytes, page_idx)
 
-        # Convert the model's nested field records into the downstream page shape.
+        # Convert Nova's nested field records into the downstream page shape.
         page_record = _validate_and_build_page_record(
-            model_raw, page_idx, width, height
+            nova_raw, page_idx, width, height
         )
         page_extractions.append(page_record)
 

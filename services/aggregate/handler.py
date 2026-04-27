@@ -34,36 +34,8 @@ _OBJECT_ARRAY_FIELDS = frozenset({
     "leave_of_absence_markers",
 })
 
-# Tampering boolean fields: aggregated with "any true" so that a single page
-# reporting True cannot be suppressed by False values on other pages.
-_TAMPERING_BOOL_FIELDS = frozenset({
-    "overlapping_text_detected",
-    "compressed_numbers_detected",
-    "mixed_fonts_detected",
-    "correction_artifacts_present",
-    "obliteration_marks_detected",
-    "mixed_ink_colors_in_field",
-})
-
-# Fields derived deterministically after the main flatten loop.
-# Skipped in the normal per-page merge to prevent stale model output from
-# overriding the computed values.
-#   seal_present_on_pages      — derived from per-page seal_type
-#   print_technology_per_page  — derived from per-page print_technology
-#   document_page_count        — injected from extraction metadata in handler()
-_SKIP_IN_FLATTEN_FIELDS = frozenset({
-    "seal_present_on_pages",
-    "print_technology_per_page",
-    "document_page_count",
-})
-
 # Per-page bookkeeping, not extraction fields.
 _PAGE_META_KEYS = frozenset({"page_number", "image_dimensions"})
-
-# seal_type values that indicate the seal is actually present on a page.
-_SEAL_PRESENT_VALUES = frozenset({
-    "embossed", "stamped_ink", "printed_flat", "sticker_foil",
-})
 
 
 def handler(event, context):
@@ -88,12 +60,6 @@ def handler(event, context):
     # Collapse page-level values into one document-level record.
     aggregation = _flatten_pages(pages)
     aggregation["applicationId"] = application_id
-
-    # document_page_count comes from extraction metadata, not per-page model
-    # output. The extractor already knows the true count from len(images).
-    page_count = extraction.get("page_count")
-    if page_count is not None:
-        aggregation["document_page_count"] = page_count
 
     # Store the RuleEngineLambda input under the application prefix.
     aggregation_key = f"processed/{application_id}/aggregation.json"
@@ -131,21 +97,12 @@ def _flatten_pages(pages: list[dict]) -> dict:
 
     out: dict = {}
     for field in sorted(field_names):
-        if field in _SKIP_IN_FLATTEN_FIELDS:
-            # Derived deterministically below; skip any per-page model value.
-            continue
-        if field in _TAMPERING_BOOL_FIELDS:
-            _merge_any_true_bool(field, pages, out)
-        elif field in _ARRAY_FIELDS:
+        if field in _ARRAY_FIELDS:
             _merge_array_field(field, pages, out)
         elif field in _OBJECT_ARRAY_FIELDS:
             _merge_object_array_field(field, pages, out)
         else:
             _pick_highest_confidence(field, pages, out)
-
-    # Derive document-level physical fields from per-page observations.
-    _derive_seal_present_on_pages(pages, out)
-    _derive_print_technology_per_page(pages, out)
 
     _apply_field_aliases(out)
     return out
@@ -172,44 +129,6 @@ def _pick_highest_confidence(field: str, pages: list[dict], out: dict) -> None:
     if confidence is not None:
         out[f"{field}_confidence"] = confidence
     source = best_page.get(f"{field}_source")
-    if source is not None:
-        out[f"{field}_source"] = source
-
-
-def _merge_any_true_bool(field: str, pages: list[dict], out: dict) -> None:
-    """Aggregate a tampering boolean: any page True propagates to document level.
-
-    The source metadata is taken from the first True page; if no page is True,
-    falls back to the highest-confidence False page.
-    """
-    true_page: dict | None = None
-    best_false_page: dict | None = None
-    best_false_rank = -1
-
-    for page in pages:
-        if field not in page:
-            continue
-        value = page[field]
-        confidence = page.get(f"{field}_confidence")
-        rank = _CONFIDENCE_RANK.get(confidence, 0)
-
-        if value is True:
-            if true_page is None:
-                true_page = page  # first True page wins for source metadata
-        else:
-            if rank > best_false_rank:
-                best_false_rank = rank
-                best_false_page = page
-
-    winner = true_page if true_page is not None else best_false_page
-    if winner is None:
-        return
-
-    out[field] = true_page is not None
-    confidence = winner.get(f"{field}_confidence")
-    if confidence is not None:
-        out[f"{field}_confidence"] = confidence
-    source = winner.get(f"{field}_source")
     if source is not None:
         out[f"{field}_source"] = source
 
@@ -278,33 +197,6 @@ def _merge_object_array_field(field: str, pages: list[dict], out: dict) -> None:
                     })
                 merged.append(entry)
     out[field] = merged
-
-
-def _derive_seal_present_on_pages(pages: list[dict], out: dict) -> None:
-    """Derive seal_present_on_pages from per-page seal_type observations.
-
-    A seal is considered present when seal_type is one of the positive enum
-    values (embossed, stamped_ink, printed_flat, sticker_foil). Pages with
-    absent or unclear seal_type do not contribute.
-    """
-    pages_with_seal: list[int] = []
-    for page in sorted(pages, key=lambda p: p.get("page_number") or 0):
-        page_num = page.get("page_number")
-        if page_num is not None and page.get("seal_type") in _SEAL_PRESENT_VALUES:
-            pages_with_seal.append(page_num)
-    out["seal_present_on_pages"] = pages_with_seal
-
-
-def _derive_print_technology_per_page(pages: list[dict], out: dict) -> None:
-    """Derive print_technology_per_page from per-page print_technology values.
-
-    Pages are emitted in page_number order. If a page has no print_technology,
-    "unclear" is used as the fallback to keep the list length equal to page count.
-    """
-    sorted_pages = sorted(pages, key=lambda p: p.get("page_number") or 0)
-    out["print_technology_per_page"] = [
-        (page.get("print_technology") or "unclear") for page in sorted_pages
-    ]
 
 
 def _apply_field_aliases(out: dict) -> None:

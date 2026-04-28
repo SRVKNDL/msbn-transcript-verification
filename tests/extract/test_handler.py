@@ -182,7 +182,14 @@ _CANNED_TEXTRACT: dict = {
     "pages": [
         {
             "page_number": 1,
-            "raw_text": "Copiah-Lincoln Community College\nOfficial Transcript",
+            "raw_text": (
+                "Copiah-Lincoln Community College\n"
+                "Official Transcript\n"
+                "Practical Nursing\n"
+                "Grade Point: A=4.0, B=3.0, C=2.0, D=1.0, F=0.0\n"
+                "Cumulative GPA: 4.00\n"
+                "Total Credits: 16"
+            ),
             "lines": [
                 {
                     "text": "Copiah-Lincoln Community College",
@@ -197,7 +204,12 @@ _CANNED_TEXTRACT: dict = {
                     "entity_types": ["STRUCTURED_TABLE"],
                     "confidence": 98.0,
                     "geometry": {},
-                    "rows": [["Course", "Grade"], ["PNV 1116", "A"]],
+                    "rows": [
+                        ["Course", "Title", "Credit Hours", "Grade", "Quality Points"],
+                        ["PNV 1116", "Practical Nursing Foundations", "16", "A", "64"],
+                        ["Cumulative GPA", "4.00", "", "", ""],
+                        ["Total Credits", "16", "", "", ""],
+                    ],
                     "cells": [],
                     "titles": [],
                     "footers": [],
@@ -401,21 +413,44 @@ def patched_textract_analysis():
         yield
 
 
+def _bedrock_bodies(mock_client: MagicMock) -> list[dict]:
+    return [
+        json.loads(call_kwargs.kwargs["body"])
+        for call_kwargs in mock_client.invoke_model.call_args_list
+    ]
+
+
+def _visual_bedrock_body(mock_client: MagicMock) -> dict:
+    for body in _bedrock_bodies(mock_client):
+        content = body["messages"][0]["content"]
+        if any("image" in item for item in content):
+            return body
+    raise AssertionError("No image-based Nova invocation found")
+
+
+def _textract_structuring_body(mock_client: MagicMock) -> dict:
+    for body in _bedrock_bodies(mock_client):
+        content = body["messages"][0]["content"]
+        if content and all("image" not in item for item in content):
+            return body
+    raise AssertionError("No Textract-only Nova invocation found")
+
+
 # ── (a) invoke_model called once per page ─────────────────────────────────────
 
 
 def test_invoke_model_called_once_per_page(
     s3_with_transcript, bedrock_mock, extract_event, lambda_context
 ):
-    """invoke_model must be called exactly once for a single-page transcript."""
+    """Each page gets one visual call and one Textract-only structuring call."""
     handler(extract_event, lambda_context)
-    assert bedrock_mock.invoke_model.call_count == 1
+    assert bedrock_mock.invoke_model.call_count == 2
 
 
 def test_invoke_model_called_per_page_multi(
     s3_with_transcript, extract_event, lambda_context
 ):
-    """invoke_model call count must match the number of pages (2-page case)."""
+    """invoke_model call count must match visual + structuring calls per page."""
     fake_images = [
         Image.new("RGB", (850, 1100), color="white"),
         Image.new("RGB", (850, 1100), color="white"),
@@ -425,7 +460,7 @@ def test_invoke_model_called_per_page_multi(
          patch.object(_mod, "convert_from_path", return_value=fake_images):
         handler(extract_event, lambda_context)
 
-    assert mock_client.invoke_model.call_count == 2
+    assert mock_client.invoke_model.call_count == 4
 
 
 # ── (b) system prompt contains vocabulary enum values ─────────────────────────
@@ -437,8 +472,7 @@ def test_invoke_model_body_contains_system_prompt_enums(
     """The body sent to invoke_model must embed vocabulary enum strings."""
     handler(extract_event, lambda_context)
 
-    call_kwargs = bedrock_mock.invoke_model.call_args
-    body = json.loads(call_kwargs.kwargs["body"])
+    body = _visual_bedrock_body(bedrock_mock)
 
     # Nova Pro format: system is an array of {"text": "..."} objects.
     system_arr = body["system"]
@@ -455,26 +489,25 @@ def test_invoke_model_body_contains_system_prompt_enums(
 def test_invoke_model_body_contains_user_prompt_enums(
     s3_with_transcript, bedrock_mock, extract_event, lambda_context
 ):
-    """The user message text must include vocabulary values from all 3 sections."""
+    """The user message text must include only visual/physical extraction fields."""
     handler(extract_event, lambda_context)
 
-    call_kwargs = bedrock_mock.invoke_model.call_args
-    body = json.loads(call_kwargs.kwargs["body"])
+    body = _visual_bedrock_body(bedrock_mock)
     # Nova Pro format: content[1] is {"text": ...}
     user_text = body["messages"][0]["content"][1]["text"]
 
+    prompt_text = user_text.split("=== TEXTRACT_CONTEXT_JSON ===", 1)[0]
     expected_tokens = [
-        # Section 1
         "embossed", "stamped_ink", "laser", "us_letter",
-        # Section 2
-        "letter_grade_us", "claimed_degree_type", "enrollment_implausibly_early",
-        # Section 3
-        "ms_practical_nursing", "program_type",
+        "overlapping_text_detected", "identity_redaction_detected",
+        "suspected_alteration_fields",
     ]
     for token in expected_tokens:
-        assert token in user_text, (
+        assert token in prompt_text, (
             f"Vocabulary token '{token}' missing from user prompt"
         )
+    for token in ("courses", "final_cum_gpa_stated", "total_credit_hours"):
+        assert token not in prompt_text
 
 
 def test_invoke_model_uses_configured_output_cap(
@@ -483,8 +516,7 @@ def test_invoke_model_uses_configured_output_cap(
     """Extractor should request the configured max_tokens budget."""
     handler(extract_event, lambda_context)
 
-    call_kwargs = bedrock_mock.invoke_model.call_args
-    body = json.loads(call_kwargs.kwargs["body"])
+    body = _visual_bedrock_body(bedrock_mock)
 
     assert body["inferenceConfig"]["max_new_tokens"] == _mod.BEDROCK_MAX_NEW_TOKENS
 
@@ -522,8 +554,7 @@ def test_invoke_model_body_guides_conservative_watermark_detection(
     """Prompt should tell the model to avoid guessing on faint security features."""
     handler(extract_event, lambda_context)
 
-    call_kwargs = bedrock_mock.invoke_model.call_args
-    body = json.loads(call_kwargs.kwargs["body"])
+    body = _visual_bedrock_body(bedrock_mock)
     user_text = body["messages"][0]["content"][1]["text"]
 
     assert 'prefer security_features_assessable = "no"' in user_text
@@ -537,14 +568,33 @@ def test_invoke_model_body_contains_textract_context(
     """The prompt should include Textract evidence for the current page."""
     handler(extract_event, lambda_context)
 
-    call_kwargs = bedrock_mock.invoke_model.call_args
-    body = json.loads(call_kwargs.kwargs["body"])
+    body = _visual_bedrock_body(bedrock_mock)
     user_text = body["messages"][0]["content"][1]["text"]
 
     assert "TEXTRACT_CONTEXT_JSON" in user_text
     assert "Copiah-Lincoln Community College" in user_text
     assert "STRUCTURED_TABLE" in user_text
     assert "SIGNATURES" in user_text
+
+
+def test_textract_structuring_call_is_text_only_and_academic(
+    s3_with_transcript, bedrock_mock, extract_event, lambda_context
+):
+    """The second Nova call uses Textract JSON only to structure academic data."""
+    handler(extract_event, lambda_context)
+
+    body = _textract_structuring_body(bedrock_mock)
+    content = body["messages"][0]["content"]
+    assert len(content) == 1
+    assert "image" not in content[0]
+
+    system_text = body["system"][0]["text"]
+    user_text = content[0]["text"]
+    assert "Do NOT use page-image visual reasoning" in system_text
+    assert "courses" in user_text
+    assert "final_cum_gpa_stated" in user_text
+    assert "TEXTRACT_CONTEXT_JSON" in user_text
+    assert "Copiah-Lincoln Community College" in user_text
 
 
 def test_textract_context_for_nova_omits_token_heavy_fields():
@@ -604,6 +654,190 @@ def test_textract_query_answers_are_verified_against_page_evidence():
     assert context["queries"][1]["answers"] == []
 
 
+def test_issuing_institution_prefers_header_over_issued_to_recipient():
+    page = {
+        "raw_text": (
+            "NORTHEAST\n"
+            "MISSISSIPPI COMMUNITY COLLEGE\n"
+            "ADMISSIONS AND RECORDS\n"
+            "Issued To: MISSISSIPPI BOARD OF NURSING\n"
+            "RIDGELAND, MS 39157"
+        ),
+        "lines": [
+            {"text": "NORTHEAST", "confidence": 99.0},
+            {"text": "MISSISSIPPI COMMUNITY COLLEGE", "confidence": 99.0},
+            {"text": "ADMISSIONS AND RECORDS", "confidence": 99.0},
+            {"text": "Issued To: MISSISSIPPI BOARD OF NURSING", "confidence": 99.0},
+            {"text": "RIDGELAND, MS 39157", "confidence": 99.0},
+        ],
+        "tables": [],
+        "forms": [],
+        "layouts": [],
+        "queries": [
+            {
+                "alias": "institution",
+                "answers": [
+                    {
+                        "text": "MISSISSIPPI BOARD OF NURSING",
+                        "confidence": 76.0,
+                        "verified": True,
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert _mod._extract_issuing_institution_from_textract(page) == (
+        "Northeast Mississippi Community College",
+        "NORTHEAST MISSISSIPPI COMMUNITY COLLEGE",
+    )
+    assert _mod._is_recipient_institution_answer(
+        page,
+        "MISSISSIPPI BOARD OF NURSING",
+    ) is True
+
+
+def test_textract_backed_fields_use_header_institution_not_recipient_query():
+    page = {
+        "page_number": 1,
+        "raw_text": (
+            "NORTHEAST\n"
+            "MISSISSIPPI COMMUNITY COLLEGE\n"
+            "Issued To: MISSISSIPPI BOARD OF NURSING"
+        ),
+        "lines": [
+            {"text": "NORTHEAST", "confidence": 99.0},
+            {"text": "MISSISSIPPI COMMUNITY COLLEGE", "confidence": 99.0},
+            {"text": "Issued To: MISSISSIPPI BOARD OF NURSING", "confidence": 99.0},
+        ],
+        "tables": [],
+        "forms": [],
+        "layouts": [],
+        "queries": [
+            {
+                "alias": "institution",
+                "answers": [
+                    {
+                        "text": "MISSISSIPPI BOARD OF NURSING",
+                        "confidence": 76.0,
+                        "verified": True,
+                    }
+                ],
+            }
+        ],
+        "signatures": [],
+    }
+    record = {"page_number": 1}
+
+    _mod._apply_textract_backed_page_fields(
+        record,
+        {"pages": [page]},
+        1,
+        Image.new("RGB", (850, 1100), color="white"),
+    )
+
+    assert record["institution"] == "Northeast Mississippi Community College"
+    assert record["institution_source"]["text_spans"] == [
+        "NORTHEAST MISSISSIPPI COMMUNITY COLLEGE"
+    ]
+
+
+def test_nova_textract_academic_response_requires_textract_evidence():
+    page = _CANNED_TEXTRACT["pages"][0]
+    normalized = _mod._normalize_nova_academic_response_shape(
+        {
+            "final_cum_gpa_stated": {
+                "value": 3.2,
+                "confidence": "high",
+                "source_location": {
+                    "page_number": 1,
+                    "text_spans": ["Final GPA: 3.20"],
+                },
+            }
+        },
+        page,
+        1,
+    )
+
+    assert normalized == {}
+
+
+def test_nova_textract_academic_response_can_fill_deterministic_gap():
+    page = _CANNED_TEXTRACT["pages"][0]
+    normalized = _mod._normalize_nova_academic_response_shape(
+        {
+            "courses": {
+                "value": [
+                    {
+                        "code": "PNV 1116",
+                        "course_code": "PNV 1116",
+                        "name": "Practical Nursing Foundations",
+                        "course_title": "Practical Nursing Foundations",
+                        "credit_hours": 16,
+                        "grade": "A",
+                        "grade_points": 64,
+                        "semester": 1,
+                        "retake_marker": False,
+                        "transfer_marker": False,
+                        "source_location": {
+                            "page_number": 1,
+                            "text_spans": [
+                                "PNV 1116 Practical Nursing Foundations 16 A 64"
+                            ],
+                        },
+                    }
+                ],
+                "confidence": "high",
+                "source_location": {
+                    "page_number": 1,
+                    "text_spans": [
+                        "PNV 1116 Practical Nursing Foundations 16 A 64"
+                    ],
+                },
+            }
+        },
+        page,
+        1,
+    )
+    record = {"page_number": 1}
+
+    _mod._apply_nova_textract_academic_fields(record, normalized, 1)
+
+    assert record["courses"][0]["code"] == "PNV 1116"
+    assert record["courses_confidence"] == "medium"
+    assert record["courses_source"]["method"] == "nova_textract_interpreter"
+
+
+def test_nova_textract_academic_conflict_is_preserved_for_review():
+    page = _CANNED_TEXTRACT["pages"][0]
+    normalized = _mod._normalize_nova_academic_response_shape(
+        {
+            "final_cum_gpa_stated": {
+                "value": 4.0,
+                "confidence": "high",
+                "source_location": {
+                    "page_number": 1,
+                    "text_spans": ["Cumulative GPA: 4.00"],
+                },
+            }
+        },
+        page,
+        1,
+    )
+    record = {
+        "page_number": 1,
+        "final_cum_gpa_stated": 3.2,
+        "final_cum_gpa_stated_confidence": "high",
+    }
+
+    _mod._apply_nova_textract_academic_fields(record, normalized, 1)
+
+    assert record["final_cum_gpa_stated"] == 3.2
+    conflict = record["academic_extraction_conflicts"][0]
+    assert conflict["field"] == "final_cum_gpa_stated"
+    assert conflict["nova_textract_value"] == 4
+
+
 def test_nova_response_wrapper_is_unwrapped():
     normalized = _mod._normalize_nova_response_shape(
         {
@@ -643,7 +877,7 @@ def test_identity_redaction_bar_detection():
 def test_extraction_fields_parsed_from_nova_response(
     s3_with_transcript, bedrock_mock, extract_event, lambda_context
 ):
-    """Fields from the canned Nova response must appear in the extraction JSON."""
+    """Visual fields come from Nova; academic rows come from Textract tables."""
     handler(extract_event, lambda_context)
 
     s3 = boto3.client("s3", region_name="us-east-1")
@@ -656,11 +890,13 @@ def test_extraction_fields_parsed_from_nova_response(
     page = extraction["pages"][0]
 
     assert page["seal_type"] == "embossed"
-    assert page["grading_scale_format"] == "letter_grade_us"
-    assert page["accreditation_claim"] == "ACEN"
-    assert page["required_nursing_domains_present"] == [
-        "adult_med_surg", "obstetrics", "pediatrics", "psychiatric"
-    ]
+    assert page["courses"][0]["code"] == "PNV 1116"
+    assert page["courses"][0]["credit_hours"] == 16
+    assert page["courses"][0]["grade"] == "A"
+    assert page["final_cum_gpa_stated"] == 4
+    assert page["total_credit_hours"] == 16
+    assert page["program_type"] == "ms_practical_nursing"
+    assert "accreditation_claim" not in page
 
 
 def test_confidence_stored_per_field(
@@ -679,8 +915,9 @@ def test_confidence_stored_per_field(
     page = extraction["pages"][0]
 
     assert page.get("seal_type_confidence") == "high"
-    assert page.get("grading_scale_format_confidence") == "high"
-    assert page.get("gpa_arithmetic_consistency_confidence") == "medium"
+    assert page.get("courses_confidence") == "high"
+    assert page.get("final_cum_gpa_stated_confidence") == "high"
+    assert page.get("total_credit_hours_confidence") == "high"
 
 
 def test_source_location_stored_per_field(
@@ -704,10 +941,10 @@ def test_source_location_stored_per_field(
     assert len(src["text_spans"]) > 0
 
 
-def test_accreditation_claim_location_mirrored_as_source(
+def test_nova_non_visual_fields_are_ignored(
     s3_with_transcript, bedrock_mock, extract_event, lambda_context
 ):
-    """accreditation_claim_location must also appear as accreditation_claim_source."""
+    """Nova output cannot author academic/program fields."""
     handler(extract_event, lambda_context)
 
     s3 = boto3.client("s3", region_name="us-east-1")
@@ -719,8 +956,9 @@ def test_accreditation_claim_location_mirrored_as_source(
     )
     page = extraction["pages"][0]
 
-    assert page.get("accreditation_claim_source") is not None
-    assert page["accreditation_claim_source"] == page["accreditation_claim_location"]
+    assert "accreditation_claim" not in page
+    assert "accreditation_claim_source" not in page
+    assert "required_nursing_domains_present" not in page
 
 
 # ── (d) invalid enum values trigger WARNING, not a crash ─────────────────────
@@ -852,7 +1090,9 @@ def test_textract_json_written_to_s3(
 
     assert textract_doc["job_id"] == "textract-job-123"
     assert textract_doc["pages"][0]["raw_text"]
-    assert textract_doc["pages"][0]["tables"][0]["rows"][1] == ["PNV 1116", "A"]
+    assert textract_doc["pages"][0]["tables"][0]["rows"][1] == [
+        "PNV 1116", "Practical Nursing Foundations", "16", "A", "64"
+    ]
     assert textract_doc["pages"][0]["signatures"][0]["id"] == "sig-1"
 
 
@@ -975,7 +1215,7 @@ def test_extraction_json_top_level_shape(
 def test_extraction_json_page_has_all_section_fields(
     s3_with_transcript, bedrock_mock, extract_event, lambda_context
 ):
-    """Every Section 1/2/3 field must be present in the page record."""
+    """Page records combine Nova visual findings with Textract academic fields."""
     handler(extract_event, lambda_context)
 
     s3 = boto3.client("s3", region_name="us-east-1")
@@ -988,24 +1228,23 @@ def test_extraction_json_page_has_all_section_fields(
     page = extraction["pages"][0]
 
     expected_fields = [
-        # Section 1
         "seal_type", "seal_quality", "print_technology", "paper_size_format",
         "text_alignment", "document_provenance_appearance",
         "security_features_present", "security_features_assessable",
-        # Section 2
-        "grading_scale_format", "language_of_issue", "course_relevance",
-        "duplicate_courses_detected", "suspicious_course_names",
-        "gpa_arithmetic_consistency", "dates_chronology_ok",
-        "dates_chronology_issue", "program_duration_consistency",
-        # Section 3
-        "accreditation_claim", "accreditation_claim_location",
-        "diploma_mill_language_detected", "diploma_mill_phrases_found",
-        "institution_address_present", "institution_phone_present",
-        "institution_website_present", "graduation_confirmation_present",
-        "required_nursing_domains_present",
+        "courses", "final_cum_gpa_stated", "total_credit_hours",
+        "program_type", "grading_scale_format",
     ]
     for field in expected_fields:
         assert field in page, f"Missing field in page record: {field}"
+
+    for field in (
+        "course_relevance",
+        "duplicate_courses_detected",
+        "gpa_arithmetic_consistency",
+        "accreditation_claim",
+        "required_nursing_domains_present",
+    ):
+        assert field not in page
 
 
 # ── Retained from Session 1: S3 mechanics and error handling ─────────────────

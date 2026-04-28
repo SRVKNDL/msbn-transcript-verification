@@ -14,7 +14,12 @@ import boto3
 from botocore.exceptions import ClientError
 from pdf2image import convert_from_path
 
-from prompt import PROMPT_VERSION, VOCABULARY, build_extraction_prompt
+from prompt import (
+    PROMPT_VERSION,
+    VOCABULARY,
+    build_extraction_prompt,
+    build_textract_structuring_prompt,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -29,6 +34,10 @@ BUCKET_NAME = os.environ.get("BUCKET_NAME", "")
 TABLE_NAME = os.environ.get("TABLE_NAME", "")
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
 BEDROCK_MAX_NEW_TOKENS = int(os.environ.get("BEDROCK_MAX_NEW_TOKENS", "5000"))
+NOVA_TEXTRACT_INTERPRETER_ENABLED = (
+    os.environ.get("NOVA_TEXTRACT_INTERPRETER_ENABLED", "true").lower()
+    not in {"0", "false", "no"}
+)
 TEXTRACT_FEATURE_TYPES = [
     item.strip()
     for item in os.environ.get(
@@ -51,14 +60,8 @@ NOVA_TEXTRACT_MAX_FORMS = int(os.environ.get("NOVA_TEXTRACT_MAX_FORMS", "80"))
 NOVA_TEXTRACT_MAX_LAYOUTS = int(os.environ.get("NOVA_TEXTRACT_MAX_LAYOUTS", "120"))
 NOVA_TEXTRACT_MAX_LINES = int(os.environ.get("NOVA_TEXTRACT_MAX_LINES", "250"))
 _GENERIC_FIELD_RECORD_KEYS = {"value", "confidence", "source_location"}
-_EXPECTED_EXTRACTION_FIELDS = {
-    "applicant_name",
+_NOVA_VISUAL_FIELDS = frozenset({
     "applicant_name_visible",
-    "institution",
-    "country",
-    "license_number",
-    "program_year",
-    "document_page_count",
     "seal_type",
     "seal_quality",
     "seal_visible_text",
@@ -66,20 +69,66 @@ _EXPECTED_EXTRACTION_FIELDS = {
     "security_features_assessable",
     "registrar_block",
     "print_technology",
+    "print_technology_per_page",
+    "paper_size_format",
     "text_alignment",
+    "compressed_numbers_detected",
+    "mixed_fonts_detected",
+    "correction_artifacts_present",
+    "obliteration_marks_detected",
+    "mixed_ink_colors_in_field",
+    "printer_quality_consistency",
+    "document_provenance_appearance",
     "suspected_alteration_fields",
     "identity_redaction_detected",
     "overlapping_text_detected",
-    "degree_conferral_statement_present",
-    "degree_conferred_date",
-    "date_of_birth",
-    "programs",
+})
+_NOVA_ACADEMIC_FIELDS = frozenset({
     "courses",
     "semesters",
-    "grading_scale_format",
     "final_cum_gpa_stated",
-    "program_type",
+    "total_credit_hours_stated",
     "total_credit_hours",
+    "total_quality_points_stated",
+    "program_type",
+    "claimed_degree_type",
+    "grading_scale_format",
+    "grading_scale_maximum",
+    "degree_conferral_statement_present",
+})
+_NOVA_ACADEMIC_ARRAY_FIELDS = frozenset({"courses", "semesters"})
+_NOVA_ACADEMIC_NUMERIC_FIELDS = frozenset({
+    "final_cum_gpa_stated",
+    "total_credit_hours_stated",
+    "total_credit_hours",
+    "total_quality_points_stated",
+    "grading_scale_maximum",
+})
+
+_COURSE_CODE_RE = re.compile(r"\b([A-Z]{2,5})\s*-?\s*(\d{3,4}[A-Z]?)\b")
+_GRADE_RE = re.compile(r"\b(A[+-]?|B[+-]?|C[+-]?|D[+-]?|F|P|PASS|S|U|W|WF|I|TR)\b", re.I)
+_TERM_RE = re.compile(
+    r"\b((?:fall|spring|summer|winter)\s+\d{4}|"
+    r"\d{4}\s+(?:fall|spring|summer|winter)|"
+    r"(?:semester|term)\s*[#:]?\s*\d+)\b",
+    re.I,
+)
+_PNV_CODE_RE = re.compile(r"\bPNV\s*-?\s*\d{3,4}[A-Z]?\b", re.I)
+
+_LETTER_GRADE_POINTS = {
+    "A+": 4.0,
+    "A": 4.0,
+    "A-": 3.7,
+    "B+": 3.3,
+    "B": 3.0,
+    "B-": 2.7,
+    "C+": 2.3,
+    "C": 2.0,
+    "C-": 1.7,
+    "D+": 1.3,
+    "D": 1.0,
+    "D-": 0.7,
+    "F": 0.0,
 }
 
 _TEXTRACT_QUERIES = [
@@ -637,13 +686,23 @@ def _validate_and_build_page_record(
     width: int,
     height: int,
 ) -> dict:
-    """Flatten Nova output and warn on enum drift without failing the run."""
+    """Flatten Nova visual findings and warn on unsupported fields."""
     record: dict = {
         "page_number": page_number,
         "image_dimensions": {"width": width, "height": height},
     }
 
     for field, meta in nova_response.items():
+        if field not in _NOVA_VISUAL_FIELDS:
+            logger.warning(
+                json.dumps({
+                    "event": "nova_non_visual_field_ignored",
+                    "field": field,
+                    "page_number": page_number,
+                })
+            )
+            continue
+
         if not isinstance(meta, dict):
             logger.warning(
                 json.dumps({
@@ -715,7 +774,7 @@ def _validate_and_build_page_record(
 
 
 def _normalize_nova_response_shape(nova_response: dict, page_number: int) -> dict:
-    """Accept known wrappers, but reject generic single-field records."""
+    """Accept known wrappers, but keep only visual/physical evidence fields."""
     for wrapper_key in ("fields", "extracted_fields", "extraction", "data"):
         wrapped = nova_response.get(wrapper_key)
         if isinstance(wrapped, dict):
@@ -730,7 +789,20 @@ def _normalize_nova_response_shape(nova_response: dict, page_number: int) -> dic
         }))
         return {}
 
-    if not (_EXPECTED_EXTRACTION_FIELDS & set(nova_response.keys())):
+    visual_response = {
+        key: value
+        for key, value in nova_response.items()
+        if key in _NOVA_VISUAL_FIELDS
+    }
+    ignored_fields = sorted(set(nova_response.keys()) - set(visual_response.keys()))
+    for field in ignored_fields:
+        logger.warning(json.dumps({
+            "event": "nova_non_visual_field_ignored",
+            "field": field,
+            "page_number": page_number,
+        }))
+
+    if not visual_response:
         logger.warning(json.dumps({
             "event": "nova_unexpected_schema_ignored",
             "page_number": page_number,
@@ -738,7 +810,416 @@ def _normalize_nova_response_shape(nova_response: dict, page_number: int) -> dic
         }))
         return {}
 
-    return nova_response
+    return visual_response
+
+
+def _normalize_nova_academic_response_shape(
+    nova_response: dict,
+    page: dict,
+    page_number: int,
+) -> dict:
+    """Keep only Textract-supported academic fields from Nova's text-only pass."""
+    for wrapper_key in ("fields", "extracted_fields", "extraction", "data"):
+        wrapped = nova_response.get(wrapper_key)
+        if isinstance(wrapped, dict):
+            nova_response = wrapped
+            break
+
+    evidence_text = "\n".join(_page_text_evidence(page))
+    evidence_norm = _normalize_query_text(evidence_text)
+    accepted: dict = {}
+
+    for field, meta in nova_response.items():
+        if field not in _NOVA_ACADEMIC_FIELDS:
+            logger.warning(json.dumps({
+                "event": "nova_textract_non_academic_field_ignored",
+                "field": field,
+                "page_number": page_number,
+            }))
+            continue
+        if not isinstance(meta, dict):
+            logger.warning(json.dumps({
+                "event": "nova_textract_unexpected_field_shape",
+                "field": field,
+                "page_number": page_number,
+            }))
+            continue
+
+        value = meta.get("value")
+        if value in (None, "", [], "unclear"):
+            continue
+        confidence = meta.get("confidence")
+        if confidence not in VOCABULARY["_confidence"]:
+            confidence = "medium"
+        source_location = _validated_source_location(
+            meta.get("source_location"),
+            evidence_norm,
+            page_number,
+        )
+
+        if field in _NOVA_ACADEMIC_ARRAY_FIELDS:
+            value = _validated_nova_academic_array(
+                field,
+                value,
+                evidence_norm,
+                page_number,
+            )
+            if not value:
+                continue
+            if source_location is None:
+                source_location = _source_from_nested_academic_items(value, page_number)
+        elif source_location is None and not _value_supported_by_textract(
+            value,
+            evidence_norm,
+        ):
+            logger.warning(json.dumps({
+                "event": "nova_textract_unsupported_value_ignored",
+                "field": field,
+                "page_number": page_number,
+                "value_preview": str(value)[:200],
+            }))
+            continue
+
+        value = _coerce_nova_academic_value(field, value)
+        if value in (None, "", [], "unclear"):
+            continue
+
+        accepted[field] = {
+            "value": value,
+            "confidence": confidence,
+            "source_location": source_location or {
+                "page_number": page_number,
+                "text_spans": [str(value)],
+            },
+        }
+
+    return accepted
+
+
+def _validated_source_location(
+    source_location,
+    evidence_norm: str,
+    page_number: int,
+) -> dict | None:
+    if not isinstance(source_location, dict):
+        return None
+    spans = [
+        str(span).strip()
+        for span in source_location.get("text_spans") or []
+        if str(span or "").strip()
+    ]
+    supported = [
+        span for span in spans
+        if _text_span_supported(span, evidence_norm)
+    ]
+    if not supported:
+        return None
+    source_page = source_location.get("page_number")
+    if not isinstance(source_page, int):
+        source_page = page_number
+    return {
+        "page_number": source_page,
+        "text_spans": supported,
+    }
+
+
+def _validated_nova_academic_array(
+    field: str,
+    value,
+    evidence_norm: str,
+    page_number: int,
+) -> list:
+    if not isinstance(value, list):
+        return []
+    if field == "courses":
+        return [
+            course for course in (
+                _validated_nova_course(item, evidence_norm, page_number)
+                for item in value
+            )
+            if course
+        ]
+    if field == "semesters":
+        return [
+            semester for semester in (
+                _validated_nova_semester(item, evidence_norm, page_number)
+                for item in value
+            )
+            if semester
+        ]
+    return []
+
+
+def _validated_nova_course(item, evidence_norm: str, page_number: int) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    source_location = _validated_source_location(
+        item.get("source_location"),
+        evidence_norm,
+        page_number,
+    )
+    row_text = " ".join(source_location["text_spans"]) if source_location else ""
+    code = _find_course_code(item.get("code") or item.get("course_code") or row_text)
+    name = _clean_text(item.get("name") or item.get("course_title"))
+    if not code and not name:
+        return None
+    if not source_location and not _value_supported_by_textract(code or name, evidence_norm):
+        return None
+
+    credit_hours = _coerce_numeric(item.get("credit_hours"), max_value=80.0)
+    grade_points = _coerce_numeric(item.get("grade_points"), max_value=500.0)
+    semester = _coerce_int(item.get("semester"), min_value=1, max_value=20)
+    grade = _extract_grade(item.get("grade"))
+
+    return {
+        "name": name or code,
+        "code": code,
+        "course_code": code,
+        "course_title": name,
+        "credit_hours": credit_hours,
+        "grade": grade,
+        "grade_points": grade_points,
+        "semester": semester,
+        "start_date": _clean_text(item.get("start_date")),
+        "end_date": _clean_text(item.get("end_date")),
+        "retake_marker": bool(item.get("retake_marker")),
+        "transfer_marker": bool(item.get("transfer_marker")),
+        "source_location": source_location or {
+            "page_number": page_number,
+            "text_spans": [code or name],
+        },
+    }
+
+
+def _validated_nova_semester(item, evidence_norm: str, page_number: int) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    source_location = _validated_source_location(
+        item.get("source_location"),
+        evidence_norm,
+        page_number,
+    )
+    term = _clean_text(item.get("term"))
+    if not term:
+        return None
+    if not source_location and not _value_supported_by_textract(term, evidence_norm):
+        return None
+    term_type = _clean_text(item.get("term_type"))
+    if term_type not in {"fall", "spring", "summer", "winter"}:
+        term_type = _term_type(term)
+    courses = [
+        str(course).strip()
+        for course in item.get("courses") or []
+        if str(course or "").strip()
+    ]
+    return {
+        "term": term,
+        "term_type": term_type,
+        "start_date": _clean_text(item.get("start_date")),
+        "end_date": _clean_text(item.get("end_date")),
+        "courses": courses,
+        "term_gpa_stated": _coerce_numeric(item.get("term_gpa_stated"), max_value=5.0),
+        "term_credit_hours_stated": _coerce_numeric(
+            item.get("term_credit_hours_stated"),
+            max_value=120.0,
+        ),
+        "cum_gpa_stated_after_term": _coerce_numeric(
+            item.get("cum_gpa_stated_after_term"),
+            max_value=5.0,
+        ),
+        "cum_credit_hours_stated": _coerce_numeric(
+            item.get("cum_credit_hours_stated"),
+            max_value=300.0,
+        ),
+        "cum_quality_points_stated": _coerce_numeric(
+            item.get("cum_quality_points_stated"),
+            max_value=1500.0,
+        ),
+        "source_location": source_location or {
+            "page_number": page_number,
+            "text_spans": [term],
+        },
+    }
+
+
+def _source_from_nested_academic_items(items: list[dict], page_number: int) -> dict:
+    spans: list[str] = []
+    source_page = page_number
+    for item in items:
+        source = item.get("source_location") if isinstance(item, dict) else None
+        if not isinstance(source, dict):
+            continue
+        if isinstance(source.get("page_number"), int):
+            source_page = source["page_number"]
+        for span in source.get("text_spans") or []:
+            if span not in spans:
+                spans.append(span)
+    return {"page_number": source_page, "text_spans": spans}
+
+
+def _coerce_nova_academic_value(field: str, value):
+    if field in _NOVA_ACADEMIC_NUMERIC_FIELDS:
+        max_value = 5.0 if "gpa" in field else 1500.0
+        return _coerce_numeric(value, max_value=max_value)
+    if field == "program_type":
+        return value if value in VOCABULARY["program_type"] else None
+    if field == "claimed_degree_type":
+        return value if value in VOCABULARY["claimed_degree_type"] else None
+    if field == "grading_scale_format":
+        return value if value in VOCABULARY["grading_scale_format"] else None
+    if field == "degree_conferral_statement_present":
+        return True if value is True else None
+    return value
+
+
+def _text_span_supported(span: str, evidence_norm: str) -> bool:
+    span_norm = _normalize_query_text(span)
+    if not span_norm:
+        return False
+    if span_norm in evidence_norm:
+        return True
+    tokens = [token for token in span_norm.split() if len(token) > 1]
+    if len(tokens) < 3:
+        return all(token in evidence_norm.split() for token in tokens)
+    present = sum(1 for token in tokens if token in evidence_norm.split())
+    return present / len(tokens) >= 0.85
+
+
+def _value_supported_by_textract(value, evidence_norm: str) -> bool:
+    if isinstance(value, (int, float, bool)):
+        return str(value).lower() in evidence_norm
+    if isinstance(value, str):
+        return _text_span_supported(value, evidence_norm)
+    return False
+
+
+def _clean_text(value) -> str | None:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text or None
+
+
+def _coerce_numeric(value, *, max_value: float | None = None) -> float | int | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = float(value)
+    else:
+        parsed = _parse_number(str(value or ""), max_value=max_value)
+        return parsed
+    if max_value is not None and number > max_value:
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def _coerce_int(value, *, min_value: int, max_value: int) -> int | None:
+    number = _coerce_numeric(value, max_value=max_value)
+    if number is None:
+        return None
+    integer = int(number)
+    if integer < min_value or integer > max_value:
+        return None
+    return integer
+
+
+def _apply_nova_textract_academic_fields(
+    record: dict,
+    nova_academic: dict,
+    page_number: int,
+) -> None:
+    """Fill deterministic gaps from supported Nova interpretation and log conflicts."""
+    for field, meta in nova_academic.items():
+        value = meta.get("value")
+        confidence = meta.get("confidence") or "medium"
+        source = meta.get("source_location") or {
+            "page_number": page_number,
+            "text_spans": [str(value)],
+        }
+
+        if field not in record:
+            _set_from_textract(
+                record,
+                field,
+                value,
+                confidence="medium" if confidence == "high" else confidence,
+                page_number=source.get("page_number") or page_number,
+                spans=source.get("text_spans") or [str(value)],
+            )
+            record[f"{field}_source"]["method"] = "nova_textract_interpreter"
+            continue
+
+        if _academic_values_equivalent(record.get(field), value, field):
+            record.setdefault(f"{field}_agreement", "deterministic_and_nova_textract")
+            continue
+
+        conflict = {
+            "field": field,
+            "deterministic_value": _json_safe_preview(record.get(field)),
+            "nova_textract_value": _json_safe_preview(value),
+            "source_location": source,
+        }
+        record.setdefault("academic_extraction_conflicts", []).append(conflict)
+        logger.warning(json.dumps({
+            "event": "academic_extraction_conflict",
+            "page_number": page_number,
+            "field": field,
+            "deterministic_value": conflict["deterministic_value"],
+            "nova_textract_value": conflict["nova_textract_value"],
+        }))
+
+
+def _academic_values_equivalent(left, right, field: str) -> bool:
+    if field in _NOVA_ACADEMIC_NUMERIC_FIELDS:
+        try:
+            return abs(float(left) - float(right)) < 0.001
+        except (TypeError, ValueError):
+            return False
+    if field == "courses":
+        return _course_signature_set(left) == _course_signature_set(right)
+    if field == "semesters":
+        return _semester_signature_set(left) == _semester_signature_set(right)
+    return left == right
+
+
+def _course_signature_set(value) -> set[tuple]:
+    if not isinstance(value, list):
+        return set()
+    signatures = set()
+    for course in value:
+        if not isinstance(course, dict):
+            continue
+        signatures.add((
+            str(course.get("code") or course.get("course_code") or "").upper(),
+            _number_signature(course.get("credit_hours")),
+            str(course.get("grade") or "").upper(),
+        ))
+    return signatures
+
+
+def _semester_signature_set(value) -> set[tuple]:
+    if not isinstance(value, list):
+        return set()
+    signatures = set()
+    for semester in value:
+        if not isinstance(semester, dict):
+            continue
+        signatures.add((
+            str(semester.get("term") or "").lower(),
+            _number_signature(semester.get("term_gpa_stated")),
+            _number_signature(semester.get("cum_gpa_stated_after_term")),
+        ))
+    return signatures
+
+
+def _number_signature(value) -> float | None:
+    try:
+        return round(float(value), 3)
+    except (TypeError, ValueError):
+        return None
+
+
+def _json_safe_preview(value):
+    text = json.dumps(value, default=str, sort_keys=True)
+    if len(text) <= 500:
+        return json.loads(text)
+    return text[:500] + "...[TRUNCATED]"
 
 
 def _apply_textract_backed_page_fields(
@@ -753,14 +1234,14 @@ def _apply_textract_backed_page_fields(
 
     applicant_answer = _verified_query_answer(page, "applicant_name")
     if applicant_answer:
-        _set_if_missing(
+        _set_from_textract(
             record,
             "applicant_name",
             applicant_answer,
             confidence="high",
             page_number=page_number,
         )
-        _set_if_missing(
+        _set_from_textract(
             record,
             "applicant_name_visible",
             "yes",
@@ -769,7 +1250,7 @@ def _apply_textract_backed_page_fields(
             spans=[applicant_answer],
         )
     elif page_number == 1 and _looks_like_transcript_identity_area(page):
-        _set_if_missing(
+        _set_from_textract(
             record,
             "applicant_name_visible",
             "no",
@@ -778,18 +1259,29 @@ def _apply_textract_backed_page_fields(
             spans=["No readable applicant name found in transcript identity area"],
         )
 
+    institution = _extract_issuing_institution_from_textract(page)
+    if institution:
+        institution_name, institution_source = institution
+        _set_from_textract(
+            record,
+            "institution",
+            institution_name,
+            confidence="high",
+            page_number=page_number,
+            spans=[institution_source],
+        )
+
     for alias, field in (
-        ("institution", "institution"),
+        ("country", "country"),
+        ("license_number", "license_number"),
         ("program_year", "program_year"),
         ("document_issue_date", "document_issue_date"),
         ("degree_conferred_date", "degree_conferred_date"),
-        ("final_cum_gpa_stated", "final_cum_gpa_stated"),
-        ("total_credit_hours", "total_credit_hours"),
         ("seal_visible_text", "seal_visible_text"),
     ):
         answer = _verified_query_answer(page, alias)
         if answer:
-            _set_if_missing(
+            _set_from_textract(
                 record,
                 field,
                 _coerce_query_value(field, answer),
@@ -798,10 +1290,23 @@ def _apply_textract_backed_page_fields(
                 spans=[answer],
             )
 
+    if "institution" not in record:
+        institution_answer = _verified_query_answer(page, "institution")
+        if institution_answer and not _is_recipient_institution_answer(page, institution_answer):
+            _set_from_textract(
+                record,
+                "institution",
+                institution_answer,
+                confidence="medium",
+                page_number=page_number,
+                spans=[institution_answer],
+            )
+
+    _apply_textract_academic_fields(record, page, page_number)
     _apply_registrar_from_textract(record, page, page_number)
 
     if _detect_identity_redaction_marks(image):
-        _set_if_missing(
+        _set_from_textract(
             record,
             "identity_redaction_detected",
             True,
@@ -809,7 +1314,7 @@ def _apply_textract_backed_page_fields(
             page_number=page_number,
             spans=["Black redaction mark in applicant/student identity area"],
         )
-        _set_if_missing(
+        _set_from_textract(
             record,
             "applicant_name_visible",
             "no",
@@ -833,6 +1338,571 @@ def _apply_textract_backed_page_fields(
         )
 
 
+def _apply_textract_academic_fields(record: dict, page: dict, page_number: int) -> None:
+    """Authoritative academic extraction from Textract text/table structure."""
+    table_result = _extract_academic_tables(page, page_number)
+    courses = table_result["courses"]
+    semesters = table_result["semesters"]
+
+    if courses:
+        _set_from_textract(
+            record,
+            "courses",
+            courses,
+            confidence="high",
+            page_number=page_number,
+            spans=[course["source_location"]["text_spans"][0] for course in courses[:5]],
+        )
+
+    if semesters:
+        _set_from_textract(
+            record,
+            "semesters",
+            semesters,
+            confidence="high",
+            page_number=page_number,
+            spans=[
+                sem.get("source_location", {}).get("text_spans", [""])[0]
+                for sem in semesters[:5]
+                if sem.get("source_location")
+            ],
+        )
+
+    for field, labels, max_value in (
+        (
+            "final_cum_gpa_stated",
+            [
+                r"final\s+(?:cum(?:ulative)?\s+)?gpa",
+                r"(?:cum(?:ulative)?|overall|career)\s+gpa",
+                r"\bcgpa\b",
+            ],
+            5.0,
+        ),
+        (
+            "total_credit_hours_stated",
+            [
+                r"total\s+(?:semester\s+)?(?:credit|credits|hours)",
+                r"(?:credit|credits|hours)\s+total",
+                r"total\s+earned\s+(?:credit|credits|hours)",
+            ],
+            250.0,
+        ),
+        (
+            "total_quality_points_stated",
+            [
+                r"total\s+(?:quality|grade)\s+points",
+                r"(?:quality|grade)\s+points\s+total",
+            ],
+            1000.0,
+        ),
+    ):
+        query_alias = "total_credit_hours" if field == "total_credit_hours_stated" else field
+        answer = _verified_query_answer(page, query_alias)
+        parsed = _parse_number(answer, max_value=max_value) if answer else None
+        source_text = answer
+        confidence = "high"
+        if parsed is None:
+            candidate = _find_labeled_number(page, labels, max_value=max_value)
+            if candidate:
+                parsed, source_text = candidate
+                confidence = "high"
+        if parsed is not None:
+            _set_from_textract(
+                record,
+                field,
+                parsed,
+                confidence=confidence,
+                page_number=page_number,
+                spans=[source_text],
+            )
+
+    if "total_credit_hours" not in record:
+        if record.get("total_credit_hours_stated") is not None:
+            _set_from_textract(
+                record,
+                "total_credit_hours",
+                record["total_credit_hours_stated"],
+                confidence=record.get("total_credit_hours_stated_confidence", "high"),
+                page_number=page_number,
+                spans=(record.get("total_credit_hours_stated_source") or {}).get("text_spans"),
+            )
+        elif courses:
+            total = sum(
+                float(course.get("credit_hours") or 0)
+                for course in courses
+                if not course.get("transfer_marker")
+            )
+            if total > 0:
+                _set_from_textract(
+                    record,
+                    "total_credit_hours",
+                    int(total) if total.is_integer() else total,
+                    confidence="medium",
+                    page_number=page_number,
+                    spans=["Computed from Textract course table credit-hour column"],
+                )
+
+    raw_text = page.get("raw_text") or ""
+    if _PNV_CODE_RE.search(raw_text) or any(
+        str(course.get("code") or "").upper().startswith("PNV")
+        for course in courses
+    ):
+        _set_from_textract(
+            record,
+            "program_type",
+            "ms_practical_nursing",
+            confidence="high",
+            page_number=page_number,
+            spans=["PNV course code detected in Textract text/table data"],
+        )
+
+    degree_type = _detect_claimed_degree_type(raw_text)
+    if degree_type:
+        _set_from_textract(
+            record,
+            "claimed_degree_type",
+            degree_type,
+            confidence="medium",
+            page_number=page_number,
+            spans=[_first_matching_line(raw_text, degree_type) or degree_type],
+        )
+
+    scale_format, scale_max = _detect_grading_scale(raw_text)
+    if scale_format:
+        _set_from_textract(
+            record,
+            "grading_scale_format",
+            scale_format,
+            confidence="medium",
+            page_number=page_number,
+            spans=[_first_matching_line(raw_text, "grade") or "grading scale"],
+        )
+    if scale_max is not None:
+        _set_from_textract(
+            record,
+            "grading_scale_maximum",
+            scale_max,
+            confidence="medium",
+            page_number=page_number,
+            spans=[_first_matching_line(raw_text, str(scale_max)) or str(scale_max)],
+        )
+
+    if _degree_conferral_statement_found(raw_text):
+        _set_from_textract(
+            record,
+            "degree_conferral_statement_present",
+            True,
+            confidence="high",
+            page_number=page_number,
+            spans=[_first_degree_conferral_line(raw_text) or "Degree conferral statement"],
+        )
+
+
+def _extract_academic_tables(page: dict, page_number: int) -> dict:
+    courses: list[dict] = []
+    semesters_by_term: dict[str, dict] = {}
+    term_order: list[str] = []
+    current_term: str | None = None
+    header: dict[str, int] | None = None
+
+    for table in page.get("tables") or []:
+        if not isinstance(table, dict):
+            continue
+        rows = table.get("rows") or []
+        if not isinstance(rows, list):
+            continue
+
+        for row in rows:
+            if not isinstance(row, list):
+                continue
+            cells = [str(cell or "").strip() for cell in row]
+            row_text = _row_text(cells)
+            if not row_text:
+                continue
+
+            term = _extract_term_label(row_text)
+            if term and not _find_course_code(row_text):
+                current_term = term
+                _ensure_semester(semesters_by_term, term_order, current_term, row_text, page_number)
+                header = None
+                continue
+
+            maybe_header = _table_header_map(cells)
+            if maybe_header:
+                header = maybe_header
+                continue
+
+            if current_term:
+                _update_semester_summary(
+                    semesters_by_term[current_term],
+                    cells,
+                    row_text,
+                    header,
+                )
+
+            course = _course_from_table_row(
+                cells,
+                row_text,
+                header,
+                current_term,
+                term_order,
+                page_number,
+            )
+            if course:
+                courses.append(course)
+                if current_term:
+                    sem = _ensure_semester(
+                        semesters_by_term,
+                        term_order,
+                        current_term,
+                        row_text,
+                        page_number,
+                    )
+                    sem["courses"].append(course["code"] or course["name"])
+
+    return {
+        "courses": courses,
+        "semesters": [semesters_by_term[term] for term in term_order],
+    }
+
+
+def _row_text(cells: list[str]) -> str:
+    return " ".join(cell for cell in cells if cell).strip()
+
+
+def _table_header_map(cells: list[str]) -> dict[str, int] | None:
+    mapped: dict[str, int] = {}
+    normalized = [_normalize_header_cell(cell) for cell in cells]
+    for idx, cell in enumerate(normalized):
+        if not cell:
+            continue
+        if "quality" in cell or "grade point" in cell or cell in {"points", "pts", "qp"}:
+            mapped.setdefault("grade_points", idx)
+        elif "cum" in cell and "gpa" in cell:
+            mapped.setdefault("cum_gpa", idx)
+        elif ("term" in cell or "semester" in cell or "current" in cell) and "gpa" in cell:
+            mapped.setdefault("term_gpa", idx)
+        elif "gpa" in cell and "term_gpa" not in mapped:
+            mapped.setdefault("term_gpa", idx)
+        elif "cum" in cell and ("credit" in cell or "hour" in cell):
+            mapped.setdefault("cum_credit_hours", idx)
+        elif (
+            "credit" in cell
+            or "credits" in cell
+            or "hour" in cell
+            or cell in {"cr", "hrs", "ch"}
+        ):
+            mapped.setdefault("credit_hours", idx)
+        elif "grade" in cell or cell in {"grd", "gr"}:
+            mapped.setdefault("grade", idx)
+        elif "title" in cell or "description" in cell or "name" in cell:
+            mapped.setdefault("course_title", idx)
+        elif "course" in cell or "subject" in cell or "catalog" in cell or "code" in cell:
+            mapped.setdefault("code", idx)
+
+    if any(key in mapped for key in ("code", "course_title")) and any(
+        key in mapped for key in ("credit_hours", "grade", "grade_points")
+    ):
+        return mapped
+    if any(key in mapped for key in ("term_gpa", "cum_gpa", "credit_hours")) and not _find_course_code(_row_text(cells)):
+        return mapped
+    return None
+
+
+def _normalize_header_cell(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _course_from_table_row(
+    cells: list[str],
+    row_text: str,
+    header: dict[str, int] | None,
+    current_term: str | None,
+    term_order: list[str],
+    page_number: int,
+) -> dict | None:
+    code = _find_course_code(
+        _cell_by_header(cells, header, "code")
+        or row_text
+    )
+    if not code:
+        return None
+
+    title = _cell_by_header(cells, header, "course_title")
+    if not title:
+        title = _strip_course_code(_cell_by_header(cells, header, "code") or row_text, code)
+
+    credit_hours = _parse_number(
+        _cell_by_header(cells, header, "credit_hours"),
+        max_value=40.0,
+    )
+    grade = _extract_grade(_cell_by_header(cells, header, "grade")) or _extract_grade(row_text)
+    grade_points = _parse_number(
+        _cell_by_header(cells, header, "grade_points"),
+        max_value=200.0,
+    )
+    if grade_points is None and grade:
+        grade_points = _LETTER_GRADE_POINTS.get(grade.upper())
+
+    transfer = bool(re.search(r"\b(TR|TRANSFER|CREDIT\s+AWARDED)\b", row_text, re.I))
+    retake = bool(re.search(r"\b(REPEAT|RETAKE|REPLACED|ADJ|ADJUSTMENT)\b", row_text, re.I))
+    semester = term_order.index(current_term) + 1 if current_term in term_order else None
+
+    return {
+        "name": title or code,
+        "code": code,
+        "course_code": code,
+        "course_title": title or None,
+        "credit_hours": credit_hours,
+        "grade": grade,
+        "grade_points": grade_points,
+        "semester": semester,
+        "start_date": None,
+        "end_date": None,
+        "retake_marker": retake,
+        "transfer_marker": transfer,
+        "source_location": {
+            "page_number": page_number,
+            "text_spans": [row_text],
+        },
+    }
+
+
+def _cell_by_header(cells: list[str], header: dict[str, int] | None, key: str) -> str | None:
+    if not header or key not in header:
+        return None
+    idx = header[key]
+    if idx < 0 or idx >= len(cells):
+        return None
+    return cells[idx]
+
+
+def _find_course_code(text: str | None) -> str | None:
+    match = _COURSE_CODE_RE.search(str(text or "").upper())
+    if not match:
+        return None
+    return f"{match.group(1)} {match.group(2)}"
+
+
+def _strip_course_code(text: str | None, code: str) -> str | None:
+    value = str(text or "")
+    stripped = _COURSE_CODE_RE.sub("", value, count=1)
+    stripped = re.sub(r"\s+", " ", stripped).strip(" -:\t")
+    if not stripped or stripped == value:
+        return None
+    return stripped
+
+
+def _extract_grade(text: str | None) -> str | None:
+    match = _GRADE_RE.search(str(text or ""))
+    if not match:
+        return None
+    grade = match.group(1).upper()
+    return "Pass" if grade == "PASS" else grade
+
+
+def _extract_term_label(text: str) -> str | None:
+    match = _TERM_RE.search(text)
+    if not match:
+        return None
+    return re.sub(r"\s+", " ", match.group(1)).strip().title()
+
+
+def _ensure_semester(
+    semesters_by_term: dict[str, dict],
+    term_order: list[str],
+    term: str,
+    source_text: str,
+    page_number: int,
+) -> dict:
+    if term not in semesters_by_term:
+        term_order.append(term)
+        semesters_by_term[term] = {
+            "term": term,
+            "term_type": _term_type(term),
+            "start_date": None,
+            "end_date": None,
+            "courses": [],
+            "term_gpa_stated": None,
+            "term_credit_hours_stated": None,
+            "cum_gpa_stated_after_term": None,
+            "source_location": {
+                "page_number": page_number,
+                "text_spans": [source_text],
+            },
+        }
+    return semesters_by_term[term]
+
+
+def _term_type(term: str) -> str | None:
+    lowered = term.lower()
+    for item in ("fall", "spring", "summer", "winter"):
+        if item in lowered:
+            return item
+    return None
+
+
+def _update_semester_summary(
+    semester: dict,
+    cells: list[str],
+    row_text: str,
+    header: dict[str, int] | None,
+) -> None:
+    updates = {
+        "term_gpa_stated": _parse_number(_cell_by_header(cells, header, "term_gpa"), max_value=5.0),
+        "term_credit_hours_stated": _parse_number(_cell_by_header(cells, header, "credit_hours"), max_value=80.0),
+        "cum_gpa_stated_after_term": _parse_number(_cell_by_header(cells, header, "cum_gpa"), max_value=5.0),
+        "cum_credit_hours_stated": _parse_number(_cell_by_header(cells, header, "cum_credit_hours"), max_value=250.0),
+    }
+    labeled = {
+        "term_gpa_stated": _extract_number_from_text(
+            row_text,
+            [r"(?:term|semester|current)\s+gpa"],
+            max_value=5.0,
+        ),
+        "term_credit_hours_stated": _extract_number_from_text(
+            row_text,
+            [r"(?:term|semester|current).{0,20}(?:credits?|hours?)"],
+            max_value=80.0,
+        ),
+        "cum_gpa_stated_after_term": _extract_number_from_text(
+            row_text,
+            [r"(?:cum(?:ulative)?|overall|career)\s+gpa", r"\bcgpa\b"],
+            max_value=5.0,
+        ),
+        "cum_credit_hours_stated": _extract_number_from_text(
+            row_text,
+            [r"(?:cum(?:ulative)?|overall|career).{0,20}(?:credits?|hours?)"],
+            max_value=250.0,
+        ),
+        "cum_quality_points_stated": _extract_number_from_text(
+            row_text,
+            [r"(?:cum(?:ulative)?|overall|career).{0,20}(?:quality|grade)\s+points"],
+            max_value=1000.0,
+        ),
+    }
+    for key, value in updates.items():
+        if value is not None:
+            semester[key] = value
+            spans = semester.setdefault("source_location", {}).setdefault("text_spans", [])
+            if row_text not in spans:
+                spans.append(row_text)
+    for key, value in labeled.items():
+        if value is not None:
+            semester[key] = value
+            spans = semester.setdefault("source_location", {}).setdefault("text_spans", [])
+            if row_text not in spans:
+                spans.append(row_text)
+
+
+def _find_labeled_number(
+    page: dict,
+    labels: list[str],
+    *,
+    max_value: float | None = None,
+) -> tuple[float | int, str] | None:
+    for text in _page_text_evidence(page):
+        value = _extract_number_from_text(text, labels, max_value=max_value)
+        if value is not None:
+            return value, text
+    return None
+
+
+def _page_text_evidence(page: dict) -> list[str]:
+    evidence: list[str] = []
+    for line in page.get("lines") or []:
+        if isinstance(line, dict) and line.get("text"):
+            evidence.append(str(line["text"]))
+    for table in page.get("tables") or []:
+        if not isinstance(table, dict):
+            continue
+        evidence.extend(str(title) for title in table.get("titles") or [] if title)
+        for row in table.get("rows") or []:
+            if isinstance(row, list):
+                evidence.append(_row_text([str(cell or "") for cell in row]))
+        evidence.extend(str(footer) for footer in table.get("footers") or [] if footer)
+    for form in page.get("forms") or []:
+        if isinstance(form, dict):
+            evidence.append(f"{form.get('key') or ''} {form.get('value') or ''}".strip())
+    if page.get("raw_text"):
+        evidence.extend(str(page["raw_text"]).splitlines())
+    return [item for item in evidence if item]
+
+
+def _extract_number_from_text(
+    text: str | None,
+    labels: list[str],
+    *,
+    max_value: float | None = None,
+) -> float | int | None:
+    source = str(text or "")
+    for label in labels:
+        match = re.search(label + r"[^0-9]{0,40}(\d+(?:\.\d+)?)", source, re.I)
+        if match:
+            return _parse_number(match.group(1), max_value=max_value)
+    return None
+
+
+def _parse_number(value: str | None, *, max_value: float | None = None) -> float | int | None:
+    match = re.search(r"\d+(?:\.\d+)?", str(value or ""))
+    if not match:
+        return None
+    number = float(match.group(0))
+    if max_value is not None and number > max_value:
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def _detect_claimed_degree_type(raw_text: str) -> str | None:
+    text = raw_text.lower()
+    if "practical nursing" in text or "licensed practical nurse" in text or re.search(r"\blpn\b", text):
+        return "LPN"
+    if "associate" in text and "nursing" in text:
+        return "ADN"
+    if "bachelor" in text and "nursing" in text:
+        return "BSN"
+    if re.search(r"\bbsn\b", text):
+        return "BSN"
+    if re.search(r"\badn\b", text):
+        return "ADN"
+    return None
+
+
+def _detect_grading_scale(raw_text: str) -> tuple[str | None, float | None]:
+    text = raw_text.lower()
+    if re.search(r"\ba\s*=\s*4(?:\.0)?", text) or "grade point" in text:
+        return "letter_grade_us", 4.0
+    if "pass/fail" in text or "pass fail" in text:
+        return "pass_fail", None
+    if "percent" in text or "percentage" in text:
+        return "percentage", 100.0
+    return None, None
+
+
+def _degree_conferral_statement_found(raw_text: str) -> bool:
+    return bool(re.search(
+        r"(degree|certificate|diploma|credential).{0,40}"
+        r"(conferred|awarded|earned|completed|granted)",
+        raw_text,
+        re.I | re.S,
+    ))
+
+
+def _first_degree_conferral_line(raw_text: str) -> str | None:
+    for line in raw_text.splitlines():
+        if _degree_conferral_statement_found(line):
+            return line.strip()
+    return None
+
+
+def _first_matching_line(raw_text: str, needle: str) -> str | None:
+    target = str(needle or "").lower()
+    for line in raw_text.splitlines():
+        if target in line.lower():
+            return line.strip()
+    return None
+
+
 def _verified_query_answer(page: dict, alias: str) -> str | None:
     for query in page.get("queries") or []:
         if not isinstance(query, dict) or query.get("alias") != alias:
@@ -846,7 +1916,152 @@ def _verified_query_answer(page: dict, alias: str) -> str | None:
     return None
 
 
-def _set_if_missing(
+def _extract_issuing_institution_from_textract(page: dict) -> tuple[str, str] | None:
+    """Prefer issuer header lines over Textract query answers that may hit recipients."""
+    lines = [
+        str(line.get("text") or "").strip()
+        for line in page.get("lines") or []
+        if isinstance(line, dict) and str(line.get("text") or "").strip()
+    ]
+    if not lines and page.get("raw_text"):
+        lines = [
+            line.strip()
+            for line in str(page.get("raw_text") or "").splitlines()
+            if line.strip()
+        ]
+
+    candidates: list[tuple[int, str, str]] = []
+    for idx, line in enumerate(lines[:40]):
+        if _line_is_recipient_or_contact_context(line):
+            continue
+        candidate = _institution_name_from_line_window(lines, idx)
+        if not candidate:
+            continue
+        name, source = candidate
+        candidates.append((_institution_header_score(name, idx), name, source))
+
+    if not candidates:
+        return None
+    _score, name, source = max(candidates, key=lambda item: item[0])
+    return name, source
+
+
+def _institution_name_from_line_window(
+    lines: list[str],
+    idx: int,
+) -> tuple[str, str] | None:
+    line = _clean_institution_line(lines[idx])
+    if not _looks_like_institution_line(line):
+        return None
+
+    previous = _clean_institution_line(lines[idx - 1]) if idx > 0 else ""
+    if (
+        previous
+        and len(previous.split()) <= 4
+        and not _line_is_recipient_or_contact_context(previous)
+        and not _looks_like_label_line(previous)
+        and not _looks_like_address_line(previous)
+        and previous.upper() == previous
+    ):
+        combined = f"{previous} {line}"
+        if _looks_like_institution_line(combined):
+            return _normalize_institution_name(combined), f"{previous} {line}"
+
+    return _normalize_institution_name(line), line
+
+
+def _clean_institution_line(line: str) -> str:
+    value = re.sub(r"^(issued\s+by|institution|school|college)\s*[:\-]\s*", "", line, flags=re.I)
+    return re.sub(r"\s+", " ", value).strip(" -:\t")
+
+
+def _looks_like_institution_line(line: str) -> bool:
+    text = str(line or "").strip()
+    if not text or len(text) < 5:
+        return False
+    lowered = text.lower()
+    if _line_is_recipient_or_contact_context(text):
+        return False
+    if any(term in lowered for term in (
+        "college",
+        "university",
+        "school of",
+        "institute",
+        "academy",
+        "community college",
+    )):
+        return True
+    return False
+
+
+def _line_is_recipient_or_contact_context(line: str) -> bool:
+    lowered = str(line or "").lower().strip()
+    return (
+        lowered.startswith("issued to")
+        or lowered.startswith("send to")
+        or lowered.startswith("sent to")
+        or lowered.startswith("mailed to")
+        or lowered.startswith("recipient")
+        or lowered.startswith("current name")
+        or lowered.startswith("record of")
+        or "board of nursing" in lowered
+        or "pear orchard" in lowered
+        or "ridgeland" in lowered
+    )
+
+
+def _looks_like_label_line(line: str) -> bool:
+    lowered = str(line or "").lower().strip()
+    return lowered.endswith(":") or lowered in {
+        "ssn:",
+        "student no:",
+        "date of birth:",
+        "current name:",
+        "record of:",
+        "page:",
+    }
+
+
+def _looks_like_address_line(line: str) -> bool:
+    text = str(line or "")
+    lowered = text.lower()
+    return bool(
+        re.search(r"\b\d{5}(?:-\d{4})?\b", text)
+        or re.search(r"\b(p\.?o\.?\s*box|street|st\.|road|rd\.|avenue|ave\.|suite|ste)\b", lowered)
+    )
+
+
+def _institution_header_score(name: str, idx: int) -> int:
+    lowered = name.lower()
+    score = max(0, 100 - idx)
+    if "community college" in lowered:
+        score += 30
+    elif "college" in lowered or "university" in lowered:
+        score += 20
+    if "admissions" in lowered or "records" in lowered:
+        score -= 20
+    return score
+
+
+def _normalize_institution_name(name: str) -> str:
+    text = re.sub(r"\s+", " ", str(name or "")).strip()
+    if text.upper() == text:
+        return text.title()
+    return text
+
+
+def _is_recipient_institution_answer(page: dict, answer: str) -> bool:
+    answer_norm = _normalize_query_text(answer)
+    if not answer_norm:
+        return False
+    for line in _page_text_evidence(page):
+        line_norm = _normalize_query_text(line)
+        if answer_norm and answer_norm in line_norm and _line_is_recipient_or_contact_context(line):
+            return True
+    return False
+
+
+def _set_from_textract(
     record: dict,
     field: str,
     value,
@@ -855,8 +2070,7 @@ def _set_if_missing(
     page_number: int,
     spans: list[str] | None = None,
 ) -> None:
-    existing = record.get(field)
-    if existing not in (None, "", [], "unclear"):
+    if value in (None, "", [], "unclear"):
         return
     record[field] = value
     record[f"{field}_confidence"] = confidence
@@ -897,7 +2111,7 @@ def _apply_registrar_from_textract(record: dict, page: dict, page_number: int) -
         "title_text": title,
         "signature_present": signature_present,
         "signature_type": "handwritten" if signature_present == "yes" else "none",
-        "contact_text": contact,
+        "contact_info_text": contact,
     }
     record["registrar_block_confidence"] = "medium"
     record["registrar_block_source"] = {
@@ -992,6 +2206,46 @@ def _call_bedrock_for_page(
         ) from exc
 
 
+def _call_bedrock_for_textract_page(
+    page_number: int,
+    textract_context: dict,
+) -> dict:
+    """Run one page's Textract context through Nova for academic structuring."""
+    try:
+        try:
+            response_body = _invoke_bedrock_for_textract_page(textract_context)
+        except ClientError as exc:
+            error = exc.response.get("Error", {})
+            if (
+                error.get("Code") == "ValidationException"
+                and "Input Tokens Exceeded" in (error.get("Message") or "")
+            ):
+                logger.warning(json.dumps({
+                    "event": "nova_textract_input_tokens_exceeded_retry",
+                    "page_number": page_number,
+                }))
+                response_body = _invoke_bedrock_for_textract_page(
+                    _minimal_textract_context(textract_context) or textract_context
+                )
+            else:
+                raise
+
+        raw_text = response_body["output"]["message"]["content"][0]["text"]
+        page = (textract_context.get("page") or {}) if isinstance(textract_context, dict) else {}
+        return _normalize_nova_academic_response_shape(
+            _parse_nova_json(raw_text),
+            page,
+            page_number,
+        )
+    except Exception as exc:
+        logger.warning(json.dumps({
+            "event": "nova_textract_interpreter_failed",
+            "page_number": page_number,
+            "error": str(exc),
+        }))
+        return {}
+
+
 def _invoke_bedrock_for_page(
     image_bytes: bytes,
     textract_context: dict | None = None,
@@ -1013,6 +2267,35 @@ def _invoke_bedrock_for_page(
                     },
                     {"text": user_prompt},
                 ],
+            }
+        ],
+        "system": [{"text": system_prompt}],
+        "inferenceConfig": {
+            "max_new_tokens": BEDROCK_MAX_NEW_TOKENS,
+            "temperature": 0.0,
+            "topP": 1.0,
+        },
+    })
+
+    response = _bedrock.invoke_model(
+        modelId=BEDROCK_MODEL_ID,
+        contentType="application/json",
+        accept="application/json",
+        body=body,
+    )
+
+    return json.loads(response["body"].read())
+
+
+def _invoke_bedrock_for_textract_page(textract_context: dict) -> dict:
+    system_prompt, user_prompt = build_textract_structuring_prompt(textract_context)
+
+    body = json.dumps({
+        "schemaVersion": "messages-v1",
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"text": user_prompt}],
             }
         ],
         "system": [{"text": system_prompt}],
@@ -1163,10 +2446,11 @@ def handler(event, context):
 
         # Extract the page into the prompt schema using Textract text structure
         # plus Nova visual reasoning for physical document flags.
+        textract_context = _textract_context_for_page(textract_doc, page_idx)
         nova_raw = _call_bedrock_for_page(
             image_bytes,
             page_idx,
-            _textract_context_for_page(textract_doc, page_idx),
+            textract_context,
         )
 
         # Convert Nova's nested field records into the downstream page shape.
@@ -1179,6 +2463,13 @@ def handler(event, context):
             page_idx,
             img,
         )
+        if NOVA_TEXTRACT_INTERPRETER_ENABLED:
+            nova_academic = _call_bedrock_for_textract_page(page_idx, textract_context)
+            _apply_nova_textract_academic_fields(
+                page_record,
+                nova_academic,
+                page_idx,
+            )
         page_extractions.append(page_record)
 
     _apply_document_level_extraction_fields(page_extractions, len(images))
@@ -1194,6 +2485,7 @@ def handler(event, context):
         "textract": textract_doc,
         "bedrock_model_id": BEDROCK_MODEL_ID,
         "prompt_version": PROMPT_VERSION,
+        "nova_textract_interpreter_enabled": NOVA_TEXTRACT_INTERPRETER_ENABLED,
         "extraction_ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "pages": page_extractions,
     }

@@ -122,17 +122,41 @@ def test_phys_001_check4_no_fire_with_features():
                    for f in check_phys_001(agg))
 
 
+def test_phys_001_check4_no_fire_when_visible_seal_present():
+    agg = {
+        "seal_type": "printed_flat",
+        "security_features_present": [],
+        "security_features_assessable": "yes",
+    }
+    assert not any("security features" in f.rule_description.lower()
+                   for f in check_phys_001(agg))
+
+
 # Check 5: seal not on all pages
 
 def test_phys_001_check5_fires_seal_not_on_all_pages():
-    agg = {"seal_present_on_pages": [1], "document_page_count": 3}
+    agg = {
+        "institution_expected_seal_each_page": True,
+        "seal_present_on_pages": [1],
+        "document_page_count": 3,
+    }
     flags = check_phys_001(agg)
     assert any(f.rule_code == "PHYS_001" and f.severity == "medium"
                and "all pages" in f.rule_description.lower() for f in flags)
 
 
+def test_phys_001_check5_no_fire_without_institution_page_policy():
+    agg = {"seal_present_on_pages": [1], "document_page_count": 3}
+    assert not any("all pages" in f.rule_description.lower()
+                   for f in check_phys_001(agg))
+
+
 def test_phys_001_check5_no_fire_when_seal_on_all_pages():
-    agg = {"seal_present_on_pages": [1, 2, 3], "document_page_count": 3}
+    agg = {
+        "institution_expected_seal_each_page": True,
+        "seal_present_on_pages": [1, 2, 3],
+        "document_page_count": 3,
+    }
     assert not any("all pages" in f.rule_description.lower()
                    for f in check_phys_001(agg))
 
@@ -148,6 +172,27 @@ def test_phys_001_check5_no_fire_missing_field():
     agg = {"document_page_count": 3}
     assert not any("all pages" in f.rule_description.lower()
                    for f in check_phys_001(agg))
+
+
+def test_phys_001_no_false_positive_for_visible_seal_one_page_transcript():
+    agg = {
+        "seal_type": "printed_flat",
+        "seal_quality": "clear",
+        "seal_visible_text": None,
+        "security_features_present": [],
+        "security_features_assessable": "yes",
+        "seal_present_on_pages": [1],
+        "document_page_count": 2,
+        "registrar_block": {
+            "detected": "yes",
+            "location": "footer",
+            "page_number": 2,
+            "name_text": "Angela C. Dorch",
+            "title_text": "Registrar",
+            "signature_present": "yes",
+        },
+    }
+    assert check_phys_001(agg) == []
 
 
 # Multiple checks simultaneously
@@ -495,6 +540,54 @@ def test_phys_004_multiple_checks_fire():
     assert codes == {"PHYS_004"}
 
 
+def test_phys_004_flags_identity_redaction_as_physical_tampering():
+    flags = check_phys_004({
+        "identity_redaction_detected": True,
+        "identity_redaction_detected_source": {
+            "page_number": 1,
+            "text_spans": ["Black redaction mark in applicant/student identity area"],
+        },
+        "suspected_alteration_fields": ["applicant/student identity redaction"],
+        "suspected_alteration_fields_source": {
+            "page_number": 1,
+            "text_spans": ["Black redaction mark in applicant/student identity area"],
+        },
+    })
+
+    assert len(flags) == 1
+    flag = flags[0]
+    assert flag.rule_code == "PHYS_004"
+    assert flag.severity == "high"
+    assert "tampering" in flag.rule_description.lower()
+    assert "physically obscured" in flag.rationale.lower()
+    assert flag.source_location == {
+        "page_number": 1,
+        "text_spans": ["Black redaction mark in applicant/student identity area"],
+    }
+
+
+def test_phys_004_filters_identity_redaction_from_generic_alterations():
+    flags = check_phys_004({
+        "identity_redaction_detected": True,
+        "identity_redaction_detected_source": {
+            "page_number": 1,
+            "text_spans": ["Black redaction mark in applicant/student identity area"],
+        },
+        "suspected_alteration_fields": [
+            "applicant/student identity redaction",
+            "grade column overwrite",
+        ],
+    })
+
+    generic = [
+        f for f in flags
+        if f.rule_description == "Extractor identified suspected content alterations"
+    ]
+    assert len(generic) == 1
+    assert "grade column overwrite" in generic[0].rationale
+    assert "identity redaction" not in generic[0].rationale.lower()
+
+
 def test_phys_004_no_fire_clean():
     agg = {
         "text_alignment": "normal",
@@ -574,20 +667,16 @@ def test_phys_005_both_checks_fire_together():
 # ── PHYS_006 — Applicant Identity Visibility ─────────────────────────────────
 
 
-def test_phys_006_fires_when_identity_redacted():
+def test_phys_006_does_not_fire_when_identity_redaction_is_tampering():
     flags = check_phys_006({
         "identity_redaction_detected": True,
         "identity_redaction_detected_source": {
             "page_number": 1,
             "text_spans": ["Black redaction mark in applicant/student identity area"],
         },
+        "applicant_name_visible": "no",
     })
-    assert any(
-        f.rule_code == "PHYS_006"
-        and f.severity == "high"
-        and "redacted" in f.rule_description.lower()
-        for f in flags
-    )
+    assert flags == []
 
 
 def test_phys_006_fires_when_applicant_name_not_visible():

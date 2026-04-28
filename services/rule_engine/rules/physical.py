@@ -11,6 +11,13 @@ _PRINT_TECH_WINDOW = {
     "photocopy": (1960, None),
 }
 
+_POSITIVE_SEAL_TYPES = frozenset({
+    "embossed",
+    "stamped_ink",
+    "printed_flat",
+    "sticker_foil",
+})
+
 
 def _parse_year(date_str) -> int | None:
     """Extract year as int from an ISO date string or bare year string."""
@@ -34,6 +41,7 @@ def check_phys_001(agg: dict) -> list:
     security_assessable = agg.get("security_features_assessable")
     seal_pages = agg.get("seal_present_on_pages")
     page_count = agg.get("document_page_count")
+    has_visible_seal = seal_type in _POSITIVE_SEAL_TYPES or bool(seal_visible_text)
 
     # Check 1 — seal absent (MEDIUM); skip if seal_type == "unclear"
     # Severity is MEDIUM (advisory) because watermark seals and faint logo-based
@@ -95,6 +103,7 @@ def check_phys_001(agg: dict) -> list:
         security_assessable != "no"
         and isinstance(security_features, list)
         and len(security_features) == 0
+        and not has_visible_seal
     ):
         flags.append(Flag(
             rule_code="PHYS_001",
@@ -110,9 +119,12 @@ def check_phys_001(agg: dict) -> list:
         ))
 
     # Check 5 — seal not present on all pages (MEDIUM)
-    # Skip if page-level seal data not extracted or document is single-page
+    # Only enforce this when an institution-specific policy says every page
+    # should carry the seal. Many legitimate transcripts place the seal on the
+    # first or final attestation page only.
     if (
-        isinstance(seal_pages, list)
+        agg.get("institution_expected_seal_each_page") is True
+        and isinstance(seal_pages, list)
         and isinstance(page_count, int)
         and page_count > 1
         and len(seal_pages) < page_count
@@ -248,7 +260,7 @@ def check_phys_003(agg: dict) -> list:
 
 
 def check_phys_004(agg: dict) -> list:
-    """Text and print integrity — alignment, spacing, compression, fonts, correction marks, ink."""
+    """Text and print integrity, including visible physical tampering indicators."""
     flags = []
 
     text_alignment = agg.get("text_alignment")
@@ -258,6 +270,7 @@ def check_phys_004(agg: dict) -> list:
     obliteration = agg.get("obliteration_marks_detected")
     mixed_ink = agg.get("mixed_ink_colors_in_field")
     printer_quality = agg.get("printer_quality_consistency")
+    identity_redacted = agg.get("identity_redaction_detected")
 
     # Check 1 — text alignment irregular (MEDIUM); skip if "unclear"
     if text_alignment == "misaligned":
@@ -392,9 +405,32 @@ def check_phys_004(agg: dict) -> list:
             source_location=_src(agg, "overlapping_text_detected"),
         ))
 
-    # Check 10 — suspected alteration fields reported by extractor (HIGH)
+    # Check 10 — applicant identity blackout/redaction (HIGH)
+    if identity_redacted is True:
+        flags.append(Flag(
+            rule_code="PHYS_004",
+            rule_description="Applicant identity blackout or redaction indicates physical tampering",
+            severity="high",
+            category="SP-4",
+            rationale=(
+                "The applicant/student identity area contains a visible blackout, cover-up, "
+                "or redaction mark. Because the submitted transcript image has identity "
+                "content physically obscured, this is treated as document tampering rather "
+                "than only as an applicant identity visibility issue."
+            ),
+            source_location=_src(agg, "identity_redaction_detected"),
+        ))
+
+    # Check 11 — suspected alteration fields reported by extractor (HIGH)
     alteration_fields = agg.get("suspected_alteration_fields") or []
-    if isinstance(alteration_fields, list) and len(alteration_fields) > 0:
+    if isinstance(alteration_fields, list):
+        tampering_fields = [
+            field for field in alteration_fields
+            if "identity redaction" not in str(field).lower()
+        ]
+    else:
+        tampering_fields = []
+    if len(tampering_fields) > 0:
         flags.append(Flag(
             rule_code="PHYS_004",
             rule_description="Extractor identified suspected content alterations",
@@ -402,7 +438,7 @@ def check_phys_004(agg: dict) -> list:
             category="SP-4",
             rationale=(
                 "The document extractor identified suspected alterations in the following "
-                f"areas: {', '.join(str(f) for f in alteration_fields)}. "
+                f"areas: {', '.join(str(f) for f in tampering_fields)}. "
                 "These observations indicate possible digital editing or document fabrication."
             ),
             source_location=_src(agg, "suspected_alteration_fields"),
@@ -456,25 +492,13 @@ def check_phys_005(agg: dict) -> list:
 
 
 def check_phys_006(agg: dict) -> list:
-    """Applicant identity visibility — flag redacted or missing student name."""
+    """Applicant identity visibility - flag missing student name when not explained by redaction."""
     flags = []
 
     identity_redacted = agg.get("identity_redaction_detected")
     name_visible = agg.get("applicant_name_visible")
 
     if identity_redacted is True:
-        flags.append(Flag(
-            rule_code="PHYS_006",
-            rule_description="Applicant identity appears redacted",
-            severity="high",
-            category="SP-4",
-            rationale=(
-                "The transcript image appears to contain blacked-out or covered applicant "
-                "identity information. A transcript submitted for licensure review must "
-                "show the applicant identity so it can be matched to the application."
-            ),
-            source_location=_src(agg, "identity_redaction_detected"),
-        ))
         return flags
 
     if name_visible == "no":

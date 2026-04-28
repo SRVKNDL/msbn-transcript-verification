@@ -32,6 +32,7 @@ _OBJECT_ARRAY_FIELDS = frozenset({
     "semesters",
     "programs",
     "leave_of_absence_markers",
+    "academic_extraction_conflicts",
 })
 
 _TAMPERING_BOOLEAN_FIELDS = frozenset({
@@ -50,6 +51,18 @@ _POSITIVE_SEAL_TYPES = frozenset({
     "printed_flat",
     "sticker_foil",
 })
+
+_POSITIVE_SEAL_QUALITIES = frozenset({
+    "clear",
+    "degraded",
+    "pixelated",
+})
+
+_REGISTRAR_DETECTED_RANK = {
+    "yes": 3,
+    "unclear": 2,
+    "no": 1,
+}
 
 # Per-page bookkeeping, not extraction fields.
 _PAGE_META_KEYS = frozenset({"page_number", "image_dimensions"})
@@ -124,6 +137,14 @@ def _flatten_pages(pages: list[dict], page_count: int | None = None) -> dict:
             _merge_object_array_field(field, pages, out)
         elif field in _TAMPERING_BOOLEAN_FIELDS:
             _merge_tampering_boolean(field, pages, out)
+        elif field == "registrar_block":
+            _pick_registrar_block(field, pages, out)
+        elif field == "seal_type":
+            _pick_preferred_scalar(field, pages, out, _seal_type_rank)
+        elif field == "seal_quality":
+            _pick_preferred_scalar(field, pages, out, _seal_quality_rank)
+        elif field == "seal_visible_text":
+            _pick_preferred_scalar(field, pages, out, _seal_visible_text_rank)
         else:
             _pick_highest_confidence(field, pages, out)
 
@@ -155,6 +176,103 @@ def _pick_highest_confidence(field: str, pages: list[dict], out: dict) -> None:
     source = best_page.get(f"{field}_source")
     if source is not None:
         out[f"{field}_source"] = source
+
+
+def _pick_preferred_scalar(field: str, pages: list[dict], out: dict, rank_value) -> None:
+    """Pick a scalar using field-specific evidence quality before confidence."""
+    best_page = None
+    best_score: tuple[int, int, int] | None = None
+    for index, page in enumerate(pages):
+        if field not in page:
+            continue
+        confidence = page.get(f"{field}_confidence")
+        score = (
+            rank_value(page.get(field)),
+            _CONFIDENCE_RANK.get(confidence, 0),
+            -index,
+        )
+        if best_score is None or score > best_score:
+            best_score = score
+            best_page = page
+
+    if best_page is None:
+        return
+
+    _copy_field_from_page(field, best_page, out)
+
+
+def _pick_registrar_block(field: str, pages: list[dict], out: dict) -> None:
+    """Prefer positive registrar evidence over per-page negative findings."""
+    best_page = None
+    best_score: tuple[int, int, int, int] | None = None
+    for index, page in enumerate(pages):
+        block = page.get(field)
+        if not isinstance(block, dict):
+            continue
+        confidence = page.get(f"{field}_confidence")
+        score = (
+            _REGISTRAR_DETECTED_RANK.get(block.get("detected"), 0),
+            _registrar_block_completeness(block),
+            _CONFIDENCE_RANK.get(confidence, 0),
+            -index,
+        )
+        if best_score is None or score > best_score:
+            best_score = score
+            best_page = page
+
+    if best_page is None:
+        return
+
+    _copy_field_from_page(field, best_page, out)
+
+
+def _copy_field_from_page(field: str, page: dict, out: dict) -> None:
+    out[field] = page[field]
+    confidence = page.get(f"{field}_confidence")
+    if confidence is not None:
+        out[f"{field}_confidence"] = confidence
+    source = page.get(f"{field}_source")
+    if source is not None:
+        out[f"{field}_source"] = source
+
+
+def _seal_type_rank(value) -> int:
+    if value in _POSITIVE_SEAL_TYPES:
+        return 3
+    if value == "unclear":
+        return 2
+    if value == "absent":
+        return 1
+    return 0
+
+
+def _seal_quality_rank(value) -> int:
+    if value in _POSITIVE_SEAL_QUALITIES:
+        return 3
+    if value == "unclear":
+        return 2
+    if value == "absent":
+        return 1
+    return 0
+
+
+def _seal_visible_text_rank(value) -> int:
+    return 2 if isinstance(value, str) and value.strip() else 1
+
+
+def _registrar_block_completeness(block: dict) -> int:
+    score = 0
+    if block.get("signature_present") == "yes":
+        score += 4
+    if block.get("name_text"):
+        score += 3
+    if block.get("title_text"):
+        score += 2
+    if block.get("contact_info_text"):
+        score += 1
+    if block.get("location") not in (None, "none"):
+        score += 1
+    return score
 
 
 def _merge_array_field(field: str, pages: list[dict], out: dict) -> None:

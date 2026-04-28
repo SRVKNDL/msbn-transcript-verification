@@ -1,6 +1,6 @@
 """Prompt text and enum vocabulary for transcript extraction."""
 
-PROMPT_VERSION = "2.0"
+PROMPT_VERSION = "2.1"
 
 # Enum values the handler accepts from Nova.
 # Only scalar enum fields appear here; boolean, free-text, array-of-objects,
@@ -58,126 +58,62 @@ VOCABULARY: dict[str, set] = {
 
 _SYSTEM_PROMPT = """\
 You are a forensic document examiner assisting the Mississippi State Board of \
-Nursing (MSBN) in verifying nursing school transcripts for licensure eligibility. \
-Your task is to extract structured fields from a single transcript page image.
-You will also receive TEXTRACT_CONTEXT_JSON for the same page. It contains
-Amazon Textract raw text, tables, forms, layout blocks, query answers, and
-signature detections extracted from the source transcript PDF.
+Nursing (MSBN) in verifying nursing school transcripts for licensure eligibility.
+Your task is visual document examination only.
 
-Use Textract as the primary source for reading text, course tables, forms,
-verified query answers, and detected signatures. Query answers in
-TEXTRACT_CONTEXT_JSON have already been checked against non-query Textract
-evidence; ignore any query answer not present there. Use the page image as the primary
-source for visual document examination: seal quality, watermark/security
-features, ink, print technology, page alignment, overlapping/layered text, and
-other physical tampering indicators. If the image and Textract disagree, prefer
-the image for physical flags and prefer Textract for exact text/table values.
+Do NOT extract academic transcript data. Do NOT return courses, grades, GPA,
+credit hours, programs, dates, institution fields, or other text/table values.
+Amazon Textract is the authoritative source for text, tables, forms, query
+answers, signatures, courses, GPA, and credit-hour values. You may use
+TEXTRACT_CONTEXT_JSON only to orient yourself to the page and to cross-check
+whether visual artifacts align with Textract-detected layout and signatures.
 
-TAMPERING AWARENESS:
-Before extracting data, visually scan the entire page for signs of digital \
-manipulation. Look for:
-- Overlapping or layered text (text rendered on top of other text at different \
-positions, a hallmark of Photoshop or PDF-editor tampering).
-- Scattered data fragments — student names, ID numbers, dates, or numbers \
-placed outside of the normal table or header structure.
-- Clipped or truncated headers, institution names, or logos.
-- Inconsistent text density, font rendering, or baseline alignment between \
-different regions of the page.
-If you observe ANY of these indicators, set overlapping_text_detected to true \
-and list the affected areas in suspected_alteration_fields. Do NOT treat orphan \
-text fragments (numbers, names, or dates floating outside a table row) as \
-course data, credit hours, or grades.
+Inspect the page image for physical authenticity and tampering evidence:
+- Seal/watermark presence, type, quality, and visible security features.
+- Registrar attestation appearance and whether Textract SIGNATURE blocks align
+  with a visible signature area.
+- Print technology, paper format, print density, font consistency, baseline and
+  column alignment.
+- Correction fluid, erasures, smudges, obliteration marks, mixed ink, blackouts,
+  redactions, overlapping/layered text, clipped headers, scattered fragments, and
+  other signs of Photoshop/PDF-editor modification.
 
-CRITICAL OUTPUT RULES:
-- Return valid JSON only.
-- No markdown fences.
-- No preamble.
-- No explanation.
-- The entire response must be a single JSON object starting with "{" and ending \
-with "}".
+When reporting tampering, be specific. Describe the visible artifact and the
+affected area. If identity data is blacked out, treat that as physical tampering
+evidence, not as a request to recover the redacted text.
+
+Return valid JSON only. No markdown fences, preamble, or explanation.
+Return only the requested visual/physical fields. The response must be a single
+JSON object starting with "{" and ending with "}".
 
 FIELD FORMAT:
-Return every requested field in this structure:
-
   "<field_name>": {
-    "value": <extracted value — enum string, free string, boolean, number, or array>,
+    "value": <enum string, boolean, array, object, or null>,
     "confidence": "high" | "medium" | "low",
     "source_location": {
       "page_number": 1,
-      "text_spans": ["verbatim text from the document that led to this extraction"]
+      "text_spans": ["short visual evidence description"]
     }
   }
 
-Rules:
-- For array-valued fields (security_features_present, suspicious_course_names, \
-seal_present_on_pages, print_technology_per_page, suspected_alteration_fields), \
-"value" MUST be a JSON array. \
-Use an empty array [] if nothing is found. Do not use null.
-- For object-array fields (courses, semesters, programs, \
-leave_of_absence_markers), "value" MUST be a JSON array of objects. Use [] if none found.
-- For boolean fields, "value" must be true or false (JSON boolean, not a string).
-- For fields derived from the overall page with no single locatable text span \
-(e.g., text_alignment, document_provenance_appearance, print_technology), \
-"source_location" may be omitted.
-- Use ONLY the allowed enum values listed in the extraction request. If you cannot \
-determine a value from this page, use "unclear". Do not invent values outside the \
-allowed set.
-- confidence reflects your certainty: "high" when the text is unambiguous, \
-"medium" when inferred, "low" when the page quality or content is poor.
-- Use Textract SIGNATURE blocks as evidence for registrar_block.signature_present
-  when the visual image also supports an attestation/signature area.
-- Use Textract TABLES/CELL structure for course rows when available; do not build
-  course rows from scattered text fragments outside coherent table/layout regions.
+For visual fields without a precise text span, use a short evidence description
+such as "upper-right seal area", "student identity header", or "grade table rows".
 """
 
 # User prompt: extraction fields and allowed values.
 
 _USER_PROMPT = """\
-Extract all fields below from the attached transcript page image.
-Return a single JSON object with exactly the keys listed. Use only the allowed \
-enum values. If a value cannot be determined from this page, use "unclear" for \
-enum fields, null for free-text/date/number fields, and [] for array fields.
-Return valid JSON only — no markdown fences, no preamble, no explanation.
-
-=== SECTION 0: Transcript Identity Fields ===
-
-applicant_name
-  Value: free text string extracted from the transcript, or null if absent
-  Description: The student/applicant name printed on the transcript. Prefer the most complete
-               legal name. Do not infer from filenames or surrounding context.
+Inspect the attached transcript page image for physical authenticity and
+tampering only. Textract-backed code handles all academic extraction.
+Return a single JSON object with exactly the keys listed below. Use only the
+allowed enum values. If a value cannot be determined, use "unclear" for enum
+fields, false for booleans unless the artifact is visible, [] for arrays, and
+null for unreadable free-text visual fields.
 
 applicant_name_visible
   Allowed: yes | no | unclear
-  Description: Whether the student's name is visibly printed on this page. Return "no" when
-               the expected name/header area is blank, blacked out, redacted, or only a
-               student ID remains without a visible name. Return "yes" only when a readable
-               applicant/student name is visible.
-
-institution
-  Value: free text string extracted from the transcript, or null if absent
-  Description: The school, college, university, or nursing program name that issued the transcript.
-
-country
-  Value: free text country name extracted from the transcript, or null if absent
-  Description: Country of issue or country of study. Use the country explicitly printed in the
-               institution address or transcript body. Do not infer from institution name alone.
-
-license_number
-  Value: free text license, student, registration, or candidate number, or null if absent
-  Description: Identifier printed for the applicant if present.
-
-program_year
-  Value: free text graduation/completion/program year, or null if absent
-  Description: The graduation year, completion year, or program year printed on the transcript.
-
-document_page_count
-  Value: integer (total number of pages in this document), or null if not determinable
-  Description: The total page count of the entire document (e.g., from "Page 1 of 3" notation
-               or physical count). Used to verify that institution seals appear on all pages.
-
-=== SECTION 1: Physical Document Fields (PHYS_001 – PHYS_005) ===
-
---- PHYS_001: Seal Authenticity ---
+  Description: Whether the student's name is visually present. Return "no" when
+               the expected identity area is blank, blacked out, covered, or redacted.
 
 seal_type
   Allowed: embossed | stamped_ink | printed_flat | sticker_foil | absent | unclear
@@ -192,11 +128,6 @@ seal_visible_text
   Description: Verbatim text visible in the institution seal or watermark impression.
                Return null if the seal contains no readable text or text is illegible.
 
-seal_present_on_pages
-  Value: JSON array of integers (page numbers where the institution seal is visible)
-  Description: List every page number on which a seal or watermark is clearly visible.
-               Use [] if the seal is not visible on any page of this document.
-
 security_features_present
   Value: JSON array containing zero or more of: watermark, micro_printing, hologram, serial_number
   Description: Physical security items visible on the document. Watermarks and micro-printing
@@ -209,24 +140,6 @@ security_features_assessable
   Description: Whether the page quality permits a reliable assessment of security features.
                If watermark or micro-printing visibility is uncertain, return "no".
                If "no", security_features_present should be treated as unreliable.
-
---- PHYS_002: Registrar Information ---
-
-EXTRACTION GUIDANCE FOR REGISTRAR BLOCK:
-The registrar block is most often in the FOOTER of the last page. It may also appear
-in the header, near the institutional seal, or on a separate certification page.
-Look for:
-- Handwritten signatures (cursive scrawl, often in blue or black ink)
-- Printed or typed names below or above a signature line
-- Titles such as: "Registrar", "University Registrar", "Director of Admissions and
-  Records", "Director of Records", "Registrar of Academic Records"
-- Institution contact information (address, phone) near the signature block
-A signature without a printed name is still a signature — extract what you see.
-If you see ANY of: a name, a signature, a title, or institution contact info →
-set detected="yes" and fill in the sub-fields you can determine.
-Only set detected="no" if you have actively scanned the header, footer, and margins
-of every page and found nothing resembling an official registrar attestation.
-When uncertain, prefer detected="unclear" over detected="no".
 
 registrar_block
   Value: a JSON object with the following sub-fields:
@@ -244,30 +157,9 @@ registrar_block
                If detected="no", set location="none" and all text fields to null.
                If detected="unclear", fill in sub-fields for anything partially visible.
 
---- PHYS_003: Print Technology ---
-
 print_technology
   Allowed: typewriter | dot_matrix | laser | inkjet | photocopy | unclear
   Description: The apparent machinery used to print the document text.
-
-print_technology_per_page
-  Value: JSON array of strings (one print_technology enum value per page of the document,
-         in page order). Use the same allowed values as print_technology.
-  Description: Per-page print technology assessment. A single-page document returns a
-               one-element array. Use "unclear" for pages that cannot be assessed.
-
-reissue_markers_detected
-  Value: boolean (true if the document contains "reissued", "certified copy", "duplicate",
-         or similar language indicating this is an officially reissued transcript)
-  Description: Whether explicit reissue language is present. A reissued transcript may
-               legitimately use different print technology than the original.
-
-document_issue_date
-  Value: date string in YYYY-MM-DD format, or null if not found
-  Description: The date this transcript was issued or certified, as printed on the document.
-               Look for "Date Issued", "Issue Date", "Certified", or similar labels.
-
---- PHYS_004: Text and Print Integrity ---
 
 paper_size_format
   Allowed: us_letter | a4 | legal | custom_irregular | unclear
@@ -329,162 +221,6 @@ overlapping_text_detected
                layers, scattered data fragments outside of table structures, or text rendered
                at positions inconsistent with the document layout. This is a primary indicator
                of Photoshop or PDF-editor tampering.
-
---- PHYS_005: Document Completeness ---
-
-degree_conferral_statement_present
-  Value: boolean (true if a degree conferral statement appears — e.g., "Student has completed
-         requirements for [degree]", "Degrees Earned: BSN", "Awarded: Associate Degree in Nursing",
-         "Credential: CC - Career Certificate", "Certificate Awarded", "Program Completed",
-         "Diploma Awarded", or any section labeled "Credential", "Degree", or "Certificate"
-         that names a specific award)
-  Description: Whether this page contains an explicit statement that a degree, certificate,
-               or credential was conferred. This includes community college career certificates
-               and LPN/PN program completion statements.
-
-degree_conferred_date
-  Value: date string in YYYY-MM-DD format, or null if not found
-  Description: The specific date on which the degree was conferred, if stated.
-
-=== SECTION 2: Content Fields (CONT_001 – CONT_004) ===
-
---- CONT_001 – CONT_004: Shared Structured Data ---
-
-date_of_birth
-  Value: date string in YYYY-MM-DD format, or null if not found
-  Description: The applicant date of birth if printed on this transcript.
-
-programs
-  Value: JSON array of objects, each with:
-         { "name": <string>, "start_date": <YYYY-MM-DD or null>,
-           "end_date": <YYYY-MM-DD or null>, "claimed_degree_type": <string or null> }
-  Description: Each distinct degree program appearing in the transcript. start_date is the
-               enrollment date, end_date is the graduation/completion date. Use [] if none found.
-
-courses
-  Value: JSON array of objects, each with:
-         { "name": <string>, "code": <string or null>, "course_code": <string or null>,
-           "course_title": <string or null>,
-           "credit_hours": <number or null>, "grade": <string or null>,
-           "grade_points": <number or null>,
-           "semester": <integer or null>,
-           "start_date": <YYYY-MM-DD or null>, "end_date": <YYYY-MM-DD or null>,
-           "retake_marker": <boolean — true if course is marked as a repeat/retake,
-              adjustment (ADJ), repeated course, or grade replacement>,
-           "transfer_marker": <boolean — true if marked TR, TRANSFER, or CREDIT AWARDED> }
-  Description: Every course entry on this page.
-               "code" is the course code exactly as printed (e.g. "PNV 1116", "BIO 2514").
-               "course_code" is an alias — populate both with the same value.
-               "grade" is the letter or pass/fail grade as printed (e.g. "A", "B+", "Pass").
-               "grade_points" is the numeric GPA equivalent (e.g., A=4.0, B+=3.3).
-               Use null for Pass/Fail or non-numeric grades.
-               "semester" is the sequential semester number (1, 2, 3, etc.) this course
-               appears in, derived from the transcript's semester/term grouping. If the
-               transcript groups courses under "Semester 1", "Semester 2", etc., use those
-               numbers. If it uses "Fall 2023", "Spring 2024", assign ordinals by date order
-               starting from 1. Use null if semester cannot be determined.
-               Use [] if no courses are found on this page.
-
-               IMPORTANT: Only extract courses from structured table rows that have a
-               clear course code, title, and grade/credit in the same row. Do NOT treat
-               isolated numbers, scattered text fragments, or data floating outside the
-               table structure as course entries or credit hour values. If the page shows
-               signs of tampering (overlapping text, scattered fragments), extract only
-               from the visually coherent table rows and ignore orphan data.
-
-semesters
-  Value: JSON array of objects, each with:
-         { "term": <string, e.g., "Fall 2020">, "term_type": "fall" | "spring" | "summer" | "winter",
-           "start_date": <YYYY-MM-DD or null>, "end_date": <YYYY-MM-DD or null>,
-           "courses": <array of course names or codes in this term>,
-           "term_gpa_stated": <number or null>, "term_credit_hours_stated": <number or null>,
-           "cum_gpa_stated_after_term": <number or null> }
-  Description: Each academic term/semester block found on this page. start_date and end_date
-               are the term start and end dates. Use [] if no semester structure is found.
-
-leave_of_absence_markers
-  Value: JSON array of objects, each with:
-         { "start_date": <YYYY-MM-DD or null>, "end_date": <YYYY-MM-DD or null>,
-           "reason": <string or null> }
-  Description: Any leave of absence, withdrawal, or academic stop-out periods noted on the
-               transcript. Use [] if none found.
-
---- CONT_001: Date and Chronology ---
-
-dates_chronology_ok
-  Allowed: yes | no | unclear
-  Description: Whether the chronology of enrollment, coursework, and graduation is coherent.
-
-dates_chronology_issue
-  Allowed: none | overlap | gap | enrollment_implausibly_early | enrollment_implausibly_late | other
-  Description: If dates_chronology_ok is "no", the specific issue. Use "none" otherwise.
-
---- CONT_002: GPA Arithmetic ---
-
-final_cum_gpa_stated
-  Value: number (the final cumulative GPA printed at the bottom or end of the transcript),
-         or null if not found
-  Description: The overall cumulative GPA as stated — typically labeled "Cumulative GPA",
-               "Overall GPA", or "CGPA".
-
-grading_scale_maximum
-  Value: number (the maximum GPA value on the stated scale, e.g., 4.0 or 4.3)
-  Description: The ceiling of the grading scale in use. Default assumption is 4.0 for US
-               transcripts unless another maximum is explicitly stated.
-
---- CONT_003: Program Duration ---
-
-claimed_degree_type
-  Allowed: LPN | ADN | BSN | ABSN | RN-BSN | LPN-RN | MSN | DNP | CRNA | unclear
-  Description: The nursing degree or credential this transcript is for.
-
-total_credit_hours_stated
-  Value: number (total credit hours as stated on the transcript), or null if not found
-  Description: The total program credit hours printed on the transcript (e.g., "Total: 68 hours").
-
-=== SECTION 3: Program and Institution Fields ===
-
-grading_scale_format
-  Allowed: letter_grade_us | percentage | 20_point_french | 5_point_russian | pass_fail | mixed | unclear
-  Description: The standard used for course grades on this page.
-
-language_of_issue
-  Allowed: english | french | spanish | other | unclear
-  Description: The primary language the document is written in.
-
-institution_address_present
-  Allowed: yes | no | unclear
-  Description: Whether a physical street address is listed for the institution.
-
-institution_phone_present
-  Allowed: yes | no | unclear
-  Description: Whether a phone number is listed for the institution.
-
-institution_website_present
-  Allowed: yes | no | unclear
-  Description: Whether a website URL is listed for the institution.
-
-suspicious_course_names
-  Value: JSON array of strings (verbatim course names)
-  Description: Specific course names that appear non-nursing or suspicious. Use [] if none.
-
-=== SECTION 3b: MS Practical Nursing Fields (PROG_001 – PROG_004) ===
-
-program_type
-  Allowed: ms_practical_nursing | other | unclear
-  Description: Whether this transcript belongs to a Mississippi Practical Nursing (PN)
-               program. Return "ms_practical_nursing" when the transcript shows PNV course
-               codes (e.g. PNV 1116, PNV 1213), mentions the Mississippi Community College
-               Board, or explicitly identifies a Practical Nursing or Licensed Practical Nurse
-               (LPN) program at a Mississippi institution. Return "other" for all non-PN
-               programs. Return "unclear" when insufficient evidence exists.
-
-total_credit_hours
-  Value: integer (sum of all credit hours across all courses on the transcript), or null
-  Description: The total semester credit hours for the full program, either as printed on
-               the transcript (e.g., "Total Credits: 44") or computed by summing all
-               individual course credit hours. For MS Practical Nursing, the expected
-               total is 44 semester hours.
 """
 
 
@@ -499,6 +235,136 @@ def build_extraction_prompt(textract_context: dict | None = None) -> tuple[str, 
     return (
         _SYSTEM_PROMPT,
         _USER_PROMPT
+        + "\n\n=== TEXTRACT_CONTEXT_JSON ===\n"
+        + textract_payload
+        + "\n=== END_TEXTRACT_CONTEXT_JSON ===\n",
+    )
+
+
+_TEXTRACT_STRUCTURING_SYSTEM_PROMPT = """\
+You are a transcript data structuring assistant for the Mississippi State Board
+of Nursing (MSBN). Your task is to interpret Amazon Textract output only.
+
+Do NOT use page-image visual reasoning. Do NOT infer values from general
+knowledge. Do NOT create or repair values that are not present in the supplied
+TEXTRACT_CONTEXT_JSON. Textract text, tables, forms, queries, and layout lines
+are the only authoritative evidence.
+
+Return valid JSON only. No markdown fences, preamble, or explanation. Return a
+single JSON object starting with "{" and ending with "}".
+
+Each returned field must follow this format:
+  "<field_name>": {
+    "value": <scalar, boolean, array, object, or null>,
+    "confidence": "high" | "medium" | "low",
+    "source_location": {
+      "page_number": 1,
+      "text_spans": ["exact Textract line, table row, or form text used"]
+    }
+  }
+
+Every source_location.text_spans item must be copied from the Textract context
+or be an exact concatenation of cells from one Textract table row. If the
+evidence is ambiguous, omit the field instead of guessing.
+"""
+
+
+_TEXTRACT_STRUCTURING_USER_PROMPT = """\
+Use TEXTRACT_CONTEXT_JSON to structure academic transcript data. Return only
+fields that are directly supported by the Textract evidence.
+
+Allowed fields:
+
+courses
+  Value: array of course objects. Each course object may contain:
+         {
+           "code": <course code string or null>,
+           "course_code": <same as code when available>,
+           "name": <course title/name string>,
+           "course_title": <course title/name string or null>,
+           "credit_hours": <number or null>,
+           "grade": <grade string or null>,
+           "grade_points": <number or null>,
+           "semester": <integer term order or null>,
+           "start_date": <string or null>,
+           "end_date": <string or null>,
+           "retake_marker": <boolean>,
+           "transfer_marker": <boolean>,
+           "source_location": {
+             "page_number": <integer>,
+             "text_spans": ["exact Textract row text used for this course"]
+           }
+         }
+  Rules: Extract only rows that clearly represent courses. Do not include GPA,
+         totals, headers, or grading scale rows as courses.
+
+semesters
+  Value: array of semester/term objects. Each object may contain:
+         {
+           "term": <term label string>,
+           "term_type": "fall" | "spring" | "summer" | "winter" | null,
+           "start_date": <string or null>,
+           "end_date": <string or null>,
+           "courses": [<course code or title strings>],
+           "term_gpa_stated": <number or null>,
+           "term_credit_hours_stated": <number or null>,
+           "cum_gpa_stated_after_term": <number or null>,
+           "cum_credit_hours_stated": <number or null>,
+           "cum_quality_points_stated": <number or null>,
+           "source_location": {
+             "page_number": <integer>,
+             "text_spans": ["exact Textract line/table row used"]
+           }
+         }
+
+final_cum_gpa_stated
+  Value: number. The final cumulative/overall/career GPA stated on this page.
+
+total_credit_hours_stated
+  Value: number. The explicitly stated total earned/attempted/completed credit hours.
+
+total_credit_hours
+  Value: number. Same as total_credit_hours_stated when the transcript states a
+         total; otherwise omit and let deterministic code compute it.
+
+total_quality_points_stated
+  Value: number. The explicitly stated cumulative/total quality points.
+
+program_type
+  Allowed: ms_practical_nursing | other | unclear
+  Value: Use ms_practical_nursing only when Practical Nursing/LPN wording or PN/PNV
+         course evidence is present.
+
+claimed_degree_type
+  Allowed: LPN | ADN | BSN | ABSN | RN-BSN | LPN-RN | MSN | DNP | CRNA | unclear
+  Value: Nursing degree/certificate/credential type stated in Textract text.
+
+grading_scale_format
+  Allowed: letter_grade_us | percentage | 20_point_french | 5_point_russian |
+           pass_fail | mixed | unclear
+
+grading_scale_maximum
+  Value: number, such as 4.0 or 100, only when stated or clearly implied by a
+         printed grading scale.
+
+degree_conferral_statement_present
+  Value: boolean true only when Textract text states a degree/certificate/diploma
+         was conferred, awarded, earned, completed, or granted. Omit when absent.
+
+If deterministic parsing and this interpretation might disagree, still return
+the Textract-supported value with exact evidence; downstream reconciliation will
+decide whether to accept it.
+"""
+
+
+def build_textract_structuring_prompt(textract_context: dict) -> tuple[str, str]:
+    """Return the prompt pair used for Textract-only academic structuring."""
+    import json
+
+    textract_payload = json.dumps(textract_context, ensure_ascii=True, default=str)
+    return (
+        _TEXTRACT_STRUCTURING_SYSTEM_PROMPT,
+        _TEXTRACT_STRUCTURING_USER_PROMPT
         + "\n\n=== TEXTRACT_CONTEXT_JSON ===\n"
         + textract_payload
         + "\n=== END_TEXTRACT_CONTEXT_JSON ===\n",

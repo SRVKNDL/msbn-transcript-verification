@@ -238,6 +238,86 @@ def test_confidence_tie_earlier_page_wins(s3_bucket, lambda_context):
     assert agg["language_of_issue"] == "english"
 
 
+def test_registrar_block_positive_evidence_wins_over_page_level_no(
+    s3_bucket, lambda_context
+):
+    """A later-page registrar block must not be erased by page 1 saying no."""
+    pages = [
+        {
+            "page_number": 1,
+            "registrar_block": {
+                "detected": "no",
+                "location": "none",
+                "page_number": 1,
+                "name_text": None,
+                "title_text": None,
+                "signature_present": "no",
+                "signature_type": "none",
+                "contact_info_text": None,
+            },
+            "registrar_block_confidence": "high",
+            "registrar_block_source": {
+                "page_number": 1,
+                "text_spans": ["no registrar block on first page"],
+            },
+        },
+        {
+            "page_number": 2,
+            "registrar_block": {
+                "detected": "yes",
+                "location": "footer",
+                "page_number": 2,
+                "name_text": "Angela C. Dorch",
+                "title_text": "Registrar",
+                "signature_present": "yes",
+                "signature_type": "digital",
+                "contact_info_text": (
+                    "Office of Admissions and Records, Senatobia, Mississippi 38668"
+                ),
+            },
+            "registrar_block_confidence": "high",
+            "registrar_block_source": {
+                "page_number": 2,
+                "text_spans": ["footer area with name, title, and digital signature"],
+            },
+        },
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-REG-POS", pages)
+
+    handler(_make_event("APP-REG-POS", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-REG-POS/aggregation.json")
+    assert agg["registrar_block"]["detected"] == "yes"
+    assert agg["registrar_block"]["page_number"] == 2
+    assert agg["registrar_block_source"]["page_number"] == 2
+
+
+def test_positive_seal_type_wins_over_absent_same_confidence(
+    s3_bucket, lambda_context
+):
+    pages = [
+        {
+            "page_number": 1,
+            "seal_type": "absent",
+            "seal_type_confidence": "high",
+            "seal_type_source": {"page_number": 1, "text_spans": ["no seal"]},
+        },
+        {
+            "page_number": 2,
+            "seal_type": "printed_flat",
+            "seal_type_confidence": "high",
+            "seal_type_source": {"page_number": 2, "text_spans": ["central logo area"]},
+        },
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-SEAL-POS", pages)
+
+    handler(_make_event("APP-SEAL-POS", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-SEAL-POS/aggregation.json")
+    assert agg["seal_type"] == "printed_flat"
+    assert agg["seal_type_source"]["page_number"] == 2
+
+
 # ── Array field merging ──────────────────────────────────────────────────────
 
 

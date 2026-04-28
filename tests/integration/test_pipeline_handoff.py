@@ -79,9 +79,8 @@ rule_engine_mod = _load(
 notify_mod = _load("notify_handler_int", "services/notify/handler.py")
 
 
-# ── Canned model response (one clean page) ────────────────────────────────────
-# Every field in the vocabulary at "high" confidence so the rule engine has
-# zero flags on the happy-path test and we can assert end-to-end success.
+# ── Canned extractor evidence (one clean page) ────────────────────────────────
+# Nova is limited to visual/physical findings. Textract supplies text/table data.
 
 _CANNED_PAGE: dict = {
     "seal_type": {
@@ -98,33 +97,62 @@ _CANNED_PAGE: dict = {
         "value": ["watermark", "serial_number"], "confidence": "high"
     },
     "security_features_assessable": {"value": "yes", "confidence": "high"},
-    "grading_scale_format": {"value": "letter_grade_us", "confidence": "high"},
-    "language_of_issue": {"value": "english", "confidence": "high"},
-    "course_relevance": {"value": "nursing_standard", "confidence": "high"},
-    "duplicate_courses_detected": {"value": "no", "confidence": "high"},
-    "suspicious_course_names": {"value": [], "confidence": "high"},
-    "gpa_arithmetic_consistency": {"value": "consistent", "confidence": "high"},
-    "dates_chronology_ok": {"value": "yes", "confidence": "high"},
-    "dates_chronology_issue": {"value": "none", "confidence": "high"},
-    "program_duration_consistency": {
-        "value": "consistent_with_degree", "confidence": "high"
-    },
-    "accreditation_claim": {"value": "ACEN", "confidence": "high"},
-    "accreditation_claim_location": {
-        "value": {"page_number": 1, "text_spans": ["Accredited by ACEN"]},
-        "confidence": "high",
-    },
-    "diploma_mill_language_detected": {"value": "no", "confidence": "high"},
-    "diploma_mill_phrases_found": {"value": [], "confidence": "high"},
-    "institution_address_present": {"value": "yes", "confidence": "high"},
-    "institution_phone_present": {"value": "yes", "confidence": "high"},
-    "institution_website_present": {"value": "yes", "confidence": "high"},
-    "graduation_confirmation_present": {"value": "yes", "confidence": "high"},
-    "required_nursing_domains_present": {
-        "value": ["adult_med_surg", "obstetrics", "pediatrics",
-                  "psychiatric", "gerontology", "community_health"],
-        "confidence": "high",
-    },
+}
+
+_CANNED_TEXTRACT: dict = {
+    "job_id": "textract-job-int",
+    "source_s3_key": "uploads/APP-E2E/transcript.pdf",
+    "feature_types": ["TABLES", "FORMS", "QUERIES", "SIGNATURES", "LAYOUT"],
+    "analyze_document_model_version": "1.0",
+    "document_metadata": {"Pages": 1},
+    "job_status": "SUCCEEDED",
+    "warnings": [],
+    "pages": [
+        {
+            "page_number": 1,
+            "raw_text": (
+                "Clean Community College\n"
+                "Official Transcript\n"
+                "Practical Nursing\n"
+                "Grade Point: A=4.0, B=3.0, C=2.0, D=1.0, F=0.0\n"
+                "Cumulative GPA: 4.00\n"
+                "Total Credits: 44"
+            ),
+            "lines": [
+                {"text": "Clean Community College", "confidence": 99.0, "geometry": {}},
+                {"text": "Practical Nursing", "confidence": 99.0, "geometry": {}},
+                {
+                    "text": "Grade Point: A=4.0, B=3.0, C=2.0, D=1.0, F=0.0",
+                    "confidence": 99.0,
+                    "geometry": {},
+                },
+                {"text": "Cumulative GPA: 4.00", "confidence": 99.0, "geometry": {}},
+                {"text": "Total Credits: 44", "confidence": 99.0, "geometry": {}},
+            ],
+            "words": [],
+            "tables": [
+                {
+                    "id": "table-1",
+                    "entity_types": ["STRUCTURED_TABLE"],
+                    "confidence": 98.0,
+                    "geometry": {},
+                    "rows": [
+                        ["Course", "Title", "Credit Hours", "Grade", "Quality Points"],
+                        ["PNV 1116", "Practical Nursing Foundations", "16", "A", "64"],
+                        ["Total Credits", "44", "", "", ""],
+                        ["Cumulative GPA", "4.00", "", "", ""],
+                    ],
+                    "cells": [],
+                    "titles": [],
+                    "footers": [],
+                }
+            ],
+            "forms": [],
+            "layouts": [],
+            "queries": [],
+            "signatures": [],
+        }
+    ],
 }
 
 
@@ -232,6 +260,11 @@ def _run_extract(sfn_input: dict) -> dict:
     fake_image = Image.new("RGB", (850, 1100), color="white")
     mock = _bedrock_mock()
     with patch.object(extract_mod, "_bedrock", mock), \
+         patch.object(
+             extract_mod,
+             "_analyze_transcript_with_textract",
+             return_value=json.loads(json.dumps(_CANNED_TEXTRACT)),
+         ), \
          patch.object(extract_mod, "convert_from_path", return_value=[fake_image]):
         return extract_mod.handler(sfn_input, _LC)
 
@@ -391,11 +424,13 @@ def test_full_pipeline_clean_transcript_zero_flags(aws_env):
     )
     assert aggregation["applicationId"] == sfn_input["applicationId"]
     assert aggregation["seal_type"] == "embossed"
-    assert aggregation["accreditation_claim"] == "ACEN"
-    assert sorted(aggregation["required_nursing_domains_present"]) == sorted([
-        "adult_med_surg", "obstetrics", "pediatrics",
-        "psychiatric", "gerontology", "community_health",
-    ])
+    assert aggregation["courses"][0]["code"] == "PNV 1116"
+    assert aggregation["courses"][0]["credit_hours"] == 16
+    assert aggregation["final_cum_gpa_stated"] == 4
+    assert aggregation["total_credit_hours"] == 44
+    assert aggregation["program_type"] == "ms_practical_nursing"
+    assert "accreditation_claim" not in aggregation
+    assert "required_nursing_domains_present" not in aggregation
 
 
 # ── GSI1-ReviewQueue queryability ────────────────────────────────────────────

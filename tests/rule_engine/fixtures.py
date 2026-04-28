@@ -114,7 +114,7 @@ CLEAN_BASELINE: dict = {
 # Inspired by MSBN Case B (fabricated non-nursing courses, duplicate entry)
 # combined with Case D/E diploma mill signals and cross-document mismatches.
 # Expected to fire (current rules):
-#   PHYS_001 (x2): pixelated seal, no security features
+#   PHYS_001 (x1): pixelated seal
 #   PHYS_002 (x1): no registrar attestation detected
 #   PHYS_004 (x1): misaligned text
 #   CONT_003 (x1): ADN program duration too short (5 months vs 18-month minimum)
@@ -140,7 +140,7 @@ FRAUD_CASE_B: dict = {
         "text_spans": ["JPEG compression artifacts visible in background"],
     },
     "document_presented_as_original": True,
-    "security_features_present": [],                # PHYS_001 Check 4 fires
+    "security_features_present": [],
     "security_features_present_source": {"page_number": 1, "text_spans": []},
     "security_features_assessable": "yes",
     # PHYS_002: no registrar attestation detected anywhere

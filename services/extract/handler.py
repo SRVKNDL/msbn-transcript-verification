@@ -114,6 +114,24 @@ _TERM_RE = re.compile(
     re.I,
 )
 _PNV_CODE_RE = re.compile(r"\bPNV\s*-?\s*\d{3,4}[A-Z]?\b", re.I)
+_NON_COURSE_CODE_PREFIXES = frozenset({
+    "FALL",
+    "SPRING",
+    "SUMMER",
+    "WINTER",
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEP",
+    "OCT",
+    "NOV",
+    "DEC",
+})
 
 _LETTER_GRADE_POINTS = {
     "A+": 4.0,
@@ -1522,6 +1540,8 @@ def _extract_academic_tables(page: dict, page_number: int) -> dict:
 
             term = _extract_term_label(row_text)
             if term and not _find_course_code(row_text):
+                if _is_non_course_term_context(row_text):
+                    continue
                 current_term = term
                 _ensure_semester(semesters_by_term, term_order, current_term, row_text, page_number)
                 header = None
@@ -1681,7 +1701,10 @@ def _find_course_code(text: str | None) -> str | None:
     match = _COURSE_CODE_RE.search(str(text or "").upper())
     if not match:
         return None
-    return f"{match.group(1)} {match.group(2)}"
+    prefix = match.group(1)
+    if prefix in _NON_COURSE_CODE_PREFIXES:
+        return None
+    return f"{prefix} {match.group(2)}"
 
 
 def _strip_course_code(text: str | None, code: str) -> str | None:
@@ -1706,6 +1729,20 @@ def _extract_term_label(text: str) -> str | None:
     if not match:
         return None
     return re.sub(r"\s+", " ", match.group(1)).strip().title()
+
+
+def _is_non_course_term_context(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "only admit",
+            "high school",
+            "transfer information",
+            "student type",
+            "continuing student",
+        )
+    )
 
 
 def _ensure_semester(

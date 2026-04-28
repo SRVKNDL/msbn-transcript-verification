@@ -742,6 +742,47 @@ def test_textract_backed_fields_use_header_institution_not_recipient_query():
     ]
 
 
+def test_course_code_parser_rejects_term_and_month_rows():
+    assert _mod._find_course_code("Fall 2024") is None
+    assert _mod._find_course_code("Only Admit: Fall 2024") is None
+    assert _mod._find_course_code("High School for Transfers 21-MAY-2022") is None
+    assert _mod._find_course_code("NUR 1118 Nursing Fundamentals") == "NUR 1118"
+
+
+def test_academic_table_parser_does_not_turn_terms_into_courses():
+    page = {
+        "page_number": 1,
+        "raw_text": "",
+        "tables": [
+            {
+                "rows": [
+                    ["Course", "Title", "Credit Hours", "Grade", "Quality Points"],
+                    ["Fall 2024", "", "", "", ""],
+                    ["Only Admit:", "Fall 2024", "", "", ""],
+                    ["High School:", "High School for Transfers 21-MAY-2022", "", "", ""],
+                    ["NUR 1118", "Nursing Fundamentals", "8.00", "B", "24.00"],
+                    ["Fall 2025", "", "", "", ""],
+                    ["NUR 2449", "Nursing Care of the Adult II", "9.00", "IN PROGRESS", ""],
+                ],
+            }
+        ],
+        "lines": [],
+        "forms": [],
+        "layouts": [],
+        "queries": [],
+    }
+
+    parsed = _mod._extract_academic_tables(page, 1)
+    codes = [course["course_code"] for course in parsed["courses"]]
+
+    assert codes == ["NUR 1118", "NUR 2449"]
+    assert all(not code.startswith(("FALL", "MAY")) for code in codes)
+    assert [semester["term"] for semester in parsed["semesters"]] == [
+        "Fall 2024",
+        "Fall 2025",
+    ]
+
+
 def test_nova_textract_academic_response_requires_textract_evidence():
     page = _CANNED_TEXTRACT["pages"][0]
     normalized = _mod._normalize_nova_academic_response_shape(

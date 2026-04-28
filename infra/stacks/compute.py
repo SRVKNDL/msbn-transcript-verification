@@ -77,13 +77,17 @@ class ComputeConstruct(Construct):
             architecture=lambda_.Architecture.X86_64,
             # PDF rendering needs enough memory for multi-page transcripts.
             memory_size=2048,
-            timeout=Duration.seconds(180),
+            timeout=Duration.seconds(300),
             reserved_concurrent_executions=5,
             log_retention=logs.RetentionDays.ONE_WEEK,
             environment={
                 "BUCKET_NAME": storage.bucket.bucket_name,
+                "TABLE_NAME": storage.table.table_name,
                 "BEDROCK_MODEL_ID": "amazon.nova-pro-v1:0",
                 "BEDROCK_MAX_NEW_TOKENS": "5120",
+                "TEXTRACT_FEATURE_TYPES": "TABLES,FORMS,QUERIES,SIGNATURES,LAYOUT",
+                "TEXTRACT_JOB_TIMEOUT_SECONDS": "210",
+                "TEXTRACT_JOB_POLL_SECONDS": "2",
             },
         )
 
@@ -98,6 +102,15 @@ class ComputeConstruct(Construct):
                 resources=[
                     "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
                 ],
+            )
+        )
+        self.extract_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "textract:StartDocumentAnalysis",
+                    "textract:GetDocumentAnalysis",
+                ],
+                resources=["*"],
             )
         )
 
@@ -189,8 +202,13 @@ class ComputeConstruct(Construct):
             },
         )
 
-        # The rule engine writes FLAG records only.
-        storage.table.grant(self.validate_lambda, "dynamodb:PutItem")
+        # Validation replaces the application's FLAG records on each run.
+        storage.table.grant(
+            self.validate_lambda,
+            "dynamodb:PutItem",
+            "dynamodb:Query",
+            "dynamodb:BatchWriteItem",
+        )
 
         # Add reference/* read access when external lookup tables land.
         storage.bucket.grant_read(self.validate_lambda, "processed/*")

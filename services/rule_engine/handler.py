@@ -5,6 +5,7 @@ import logging
 import os
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 from rules import ALL_RULES
 
@@ -45,6 +46,8 @@ def handler(event, context):
         results = rule_fn(aggregation)
         flags.extend(results)
 
+    _delete_existing_flags(application_id)
+
     # Store flags under the application partition for the dashboard.
     for seq, flag in enumerate(flags):
         item = {
@@ -80,3 +83,23 @@ def handler(event, context):
         "flag_count": flag_count,
         "flags": [f.to_dict() for f in flags],
     }
+
+
+def _delete_existing_flags(application_id: str) -> None:
+    """Make validation idempotent by clearing stale flags for this application."""
+    pk = f"APP#{application_id}"
+    query_kwargs = {
+        "KeyConditionExpression": Key("PK").eq(pk) & Key("SK").begins_with("FLAG#"),
+        "ProjectionExpression": "PK, SK",
+    }
+
+    with _table.batch_writer() as batch:
+        while True:
+            response = _table.query(**query_kwargs)
+            for item in response.get("Items", []):
+                batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query_kwargs["ExclusiveStartKey"] = last_key

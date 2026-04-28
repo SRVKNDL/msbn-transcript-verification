@@ -81,7 +81,10 @@ class WorkflowConstruct(Construct):
             extract_lambda,
             write_failed,
             result_path="$.extract_result",
-            comment="Invoke ExtractLambda: PDF → page images → Bedrock extraction JSON",
+            comment=(
+                "Invoke ExtractLambda: PDF -> Textract evidence, page images, "
+                "and Bedrock extraction JSON"
+            ),
         )
 
         # Aggregate only needs the extraction JSON key.

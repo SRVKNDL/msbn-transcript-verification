@@ -17,6 +17,7 @@ from rules.physical import (  # noqa: E402
     check_phys_003,
     check_phys_004,
     check_phys_005,
+    check_phys_006,
 )
 
 
@@ -568,3 +569,38 @@ def test_phys_005_both_checks_fire_together():
     })
     assert len(flags) == 1  # Check 2 only (Check 1 doesn't fire when statement is present)
     assert "date" in flags[0].rule_description.lower()
+
+
+# ── PHYS_006 — Applicant Identity Visibility ─────────────────────────────────
+
+
+def test_phys_006_fires_when_identity_redacted():
+    flags = check_phys_006({
+        "identity_redaction_detected": True,
+        "identity_redaction_detected_source": {
+            "page_number": 1,
+            "text_spans": ["Black redaction mark in applicant/student identity area"],
+        },
+    })
+    assert any(
+        f.rule_code == "PHYS_006"
+        and f.severity == "high"
+        and "redacted" in f.rule_description.lower()
+        for f in flags
+    )
+
+
+def test_phys_006_fires_when_applicant_name_not_visible():
+    flags = check_phys_006({"applicant_name_visible": "no"})
+    assert any(
+        f.rule_code == "PHYS_006"
+        and "name not visible" in f.rule_description.lower()
+        for f in flags
+    )
+
+
+def test_phys_006_no_fire_when_name_visible():
+    assert check_phys_006({
+        "applicant_name_visible": "yes",
+        "applicant_name": "Jane Applicant",
+    }) == []

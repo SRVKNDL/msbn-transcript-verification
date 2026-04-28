@@ -319,13 +319,13 @@ function ReviewStateScreen({
 function TranscriptPageViewer({
   appId,
   page,
-  flags,
   pdfScale,
+  pageRef,
 }: {
   appId: string;
   page: number;
-  flags: Flag[];
   pdfScale: number;
+  pageRef?: (node: HTMLDivElement | null) => void;
 }) {
   const t = useT();
   const [imgUrl, setImgUrl] = useState<string | null>(null);
@@ -346,7 +346,7 @@ function TranscriptPageViewer({
   }, [appId, page]);
 
   if (status === "loading") return (
-    <div style={{
+    <div ref={pageRef} data-transcript-page={page} style={{
       width: Math.round(560 * pdfScale), minHeight: Math.round(720 * pdfScale),
       background: t.surface,
       border: `1px solid ${t.line}`, borderRadius: 2,
@@ -366,7 +366,7 @@ function TranscriptPageViewer({
   );
 
   if (status === "loaded" && imgUrl) return (
-    <div style={{
+    <div ref={pageRef} data-transcript-page={page} style={{
       width: Math.round(560 * pdfScale), background: t.surface,
       border: `1px solid ${t.line}`, borderRadius: 2,
       boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
@@ -378,22 +378,11 @@ function TranscriptPageViewer({
         style={{ width: "100%", display: "block" }}
         onError={() => setStatus("error")}
       />
-      {flags.filter(f => f.sourceLocation.page === page).map(f => (
-        <div key={f.ruleCode} style={{
-          position: "absolute", bottom: 12, left: 12,
-          background: f.severity === "High" ? t.highBg : f.severity === "Medium" ? t.medBg : t.lowBg,
-          border: `1px solid ${f.severity === "High" ? t.high : f.severity === "Medium" ? t.med : t.low}`,
-          borderRadius: 4, padding: "4px 10px",
-          fontSize: 10, fontFamily: t.mono,
-          color: f.severity === "High" ? t.high : f.severity === "Medium" ? t.med : t.low,
-          fontWeight: 600,
-        }}>&#9873; {f.ruleCode} · {f.severity}</div>
-      ))}
     </div>
   );
 
   return (
-    <div style={{
+    <div ref={pageRef} data-transcript-page={page} style={{
       width: Math.round(560 * pdfScale), minHeight: Math.round(720 * pdfScale),
       background: t.surface,
       border: `1px solid ${t.line}`,
@@ -409,6 +398,51 @@ function TranscriptPageViewer({
         Page {page} could not be loaded from the transcript page-image API. Confirm that
         GET /applications/{`{id}`}/pages/{`{page}`} returns a presigned image URL for this application.
       </div>
+    </div>
+  );
+}
+
+function TranscriptDocumentViewer({
+  appId,
+  pages,
+  currentPage,
+  pdfScale,
+}: {
+  appId: string;
+  pages: number[];
+  currentPage: number;
+  pdfScale: number;
+}) {
+  const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const previousPageRef = useRef(currentPage);
+
+  useEffect(() => {
+    if (previousPageRef.current === currentPage) return;
+    previousPageRef.current = currentPage;
+    pageRefs.current[currentPage]?.scrollIntoView({
+      block: "start",
+      inline: "center",
+      behavior: "smooth",
+    });
+  }, [currentPage]);
+
+  return (
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      gap: Math.round(24 * pdfScale),
+      alignItems: "center",
+      paddingBottom: Math.round(32 * pdfScale),
+    }}>
+      {pages.map((page) => (
+        <TranscriptPageViewer
+          key={page}
+          appId={appId}
+          page={page}
+          pdfScale={pdfScale}
+          pageRef={(node) => { pageRefs.current[page] = node; }}
+        />
+      ))}
     </div>
   );
 }
@@ -1344,10 +1378,10 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
                 boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
               }} />
             ) : (
-              <TranscriptPageViewer
+              <TranscriptDocumentViewer
                 appId={id!}
-                page={currentPage}
-                flags={flags}
+                pages={pages}
+                currentPage={currentPage}
                 pdfScale={(isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom}
               />
             )}

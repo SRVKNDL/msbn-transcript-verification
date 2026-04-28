@@ -9,6 +9,7 @@ Four stacks, deployed in order:
 """
 
 import aws_cdk as cdk
+import os
 
 from stacks.msbn_storage_stack import MsbnStorageStack
 from stacks.msbn_auth_stack import MsbnAuthStack
@@ -17,7 +18,10 @@ from stacks.msbn_api_stack import MsbnApiStack
 
 app = cdk.App()
 
-env = cdk.Environment(region="us-east-1")
+env = cdk.Environment(
+    account=os.environ.get("CDK_DEFAULT_ACCOUNT"),
+    region=os.environ.get("CDK_DEFAULT_REGION", "us-east-1"),
+)
 
 # 1. Storage — no dependencies
 storage_stack = MsbnStorageStack(app, "MsbnStorageStack", env=env)

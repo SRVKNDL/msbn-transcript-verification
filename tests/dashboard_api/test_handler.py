@@ -519,6 +519,25 @@ def test_get_application_missing_s3_key_reports_status(dynamo_table, lambda_cont
     assert body["transcriptS3Key"] is None
 
 
+def test_get_application_infers_page_count_from_rendered_images(dynamo_table, lambda_context):
+    """Detail page should show all rendered pages even if DOCUMENT row is absent."""
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="msbn-transcripts-test")
+    for page in (1, 2):
+        s3.put_object(
+            Bucket="msbn-transcripts-test",
+            Key=f"processed/APP-D04/page_transcript_{page}.png",
+            Body=b"\x89PNG\r\n",
+            ContentType="image/png",
+        )
+    _seed_application(dynamo_table, "APP-D04")
+
+    event = _make_event("GET /applications/{id}", path_params={"id": "APP-D04"})
+    body = _parse_response(handler(event, lambda_context))
+
+    assert body["application"]["pageCount"] == 2
+
+
 def test_get_page_image_returns_presigned_url(dynamo_table, lambda_context):
     """Rendered transcript page endpoint returns a short-lived signed PNG URL."""
     s3 = boto3.client("s3", region_name="us-east-1")
@@ -545,6 +564,32 @@ def test_get_page_image_returns_presigned_url(dynamo_table, lambda_context):
     assert parsed.path.endswith("/processed/APP-D05/page_transcript_2.png")
     assert body["s3Key"] == "processed/APP-D05/page_transcript_2.png"
     assert body["expiresIn"] == 300
+
+
+def test_get_page_image_uses_inferred_page_count(dynamo_table, lambda_context):
+    """Page image endpoint should validate against rendered pages when needed."""
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="msbn-transcripts-test")
+    for page in (1, 2):
+        s3.put_object(
+            Bucket="msbn-transcripts-test",
+            Key=f"processed/APP-D05B/page_transcript_{page}.png",
+            Body=b"\x89PNG\r\n",
+            ContentType="image/png",
+        )
+    _seed_application(dynamo_table, "APP-D05B")
+
+    ok_event = _make_event(
+        "GET /applications/{id}/pages/{page}",
+        path_params={"id": "APP-D05B", "page": "2"},
+    )
+    assert handler(ok_event, lambda_context)["statusCode"] == 200
+
+    missing_event = _make_event(
+        "GET /applications/{id}/pages/{page}",
+        path_params={"id": "APP-D05B", "page": "3"},
+    )
+    assert handler(missing_event, lambda_context)["statusCode"] == 404
 
 
 def test_get_page_image_missing_object_returns_404(dynamo_table, lambda_context):

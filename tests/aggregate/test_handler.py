@@ -57,6 +57,12 @@ def _put_extraction(s3_client, app_id: str, pages: list[dict]) -> str:
         "application_id": app_id,
         "document_type": "TRANSCRIPT",
         "page_count": len(pages),
+        "textract_s3_key": f"processed/{app_id}/textract_TRANSCRIPT.json",
+        "textract": {
+            "feature_types": ["TABLES", "FORMS", "QUERIES", "SIGNATURES", "LAYOUT"],
+            "document_metadata": {"Pages": len(pages)},
+            "pages": [{"page_number": 1, "raw_text": "Official Transcript"}],
+        },
         "bedrock_model_id": "amazon.nova-pro-v1:0",
         "prompt_version": "1.0",
         "extraction_ts": "2026-04-16T00:00:00Z",
@@ -151,6 +157,21 @@ def test_single_page_flattens_to_top_level(s3_bucket, lambda_context):
     assert agg["seal_type_source"]["page_number"] == 1
     assert agg["grading_scale_format"] == "letter_grade_us"
     assert agg["accreditation_claim"] == "ACEN"
+
+
+def test_textract_evidence_is_preserved(s3_bucket, lambda_context):
+    pages = [{"page_number": 1, "seal_type": "embossed",
+              "seal_type_confidence": "high"}]
+    extraction_key = _put_extraction(s3_bucket, "APP-TEXTRACT", pages)
+
+    handler(_make_event("APP-TEXTRACT", extraction_key), lambda_context)
+
+    agg = _read_aggregation(s3_bucket, "processed/APP-TEXTRACT/aggregation.json")
+    assert agg["textract_s3_key"] == "processed/APP-TEXTRACT/textract_TRANSCRIPT.json"
+    assert agg["textract"]["feature_types"] == [
+        "TABLES", "FORMS", "QUERIES", "SIGNATURES", "LAYOUT"
+    ]
+    assert agg["textract"]["pages"][0]["raw_text"] == "Official Transcript"
 
 
 # ── Pick highest confidence for enum fields ──────────────────────────────────
@@ -371,6 +392,30 @@ def test_tampering_bool_any_true_propagates(s3_bucket, lambda_context):
 
     agg = _read_aggregation(s3_bucket, "processed/APP-TB1/aggregation.json")
     assert agg["overlapping_text_detected"] is True
+
+
+def test_identity_redaction_boolean_any_true_propagates(s3_bucket, lambda_context):
+    pages = [
+        {"page_number": 1, "identity_redaction_detected": False},
+        {
+            "page_number": 2,
+            "identity_redaction_detected": True,
+            "identity_redaction_detected_confidence": "high",
+            "identity_redaction_detected_source": {
+                "page_number": 2,
+                "text_spans": ["Black redaction mark"],
+            },
+        },
+    ]
+    extraction_key = _put_extraction(s3_bucket, "APP-IDENTITY-REDACTION", pages)
+
+    handler(_make_event("APP-IDENTITY-REDACTION", extraction_key), lambda_context)
+
+    agg = _read_aggregation(
+        s3_bucket, "processed/APP-IDENTITY-REDACTION/aggregation.json"
+    )
+    assert agg["identity_redaction_detected"] is True
+    assert agg["identity_redaction_detected_source"]["page_number"] == 2
 
 
 def test_tampering_bool_all_false_stays_false(s3_bucket, lambda_context):

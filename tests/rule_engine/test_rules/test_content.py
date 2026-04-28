@@ -376,6 +376,52 @@ def test_cont_002_check1_no_fire_exact_match():
     assert not any("term gpa" in f.rule_description.lower() for f in flags)
 
 
+def test_cont_002_check1_uses_transcript_quality_points():
+    """Course grade_points may be row quality points, not 0-4 GPA points."""
+    courses = [
+        _course("NUR101", "Course 1", 3, grade_points=12),  # A: 4.0 * 3
+        _course("NUR102", "Course 2", 3, grade_points=9),   # B: 3.0 * 3
+        _course("NUR103", "Course 3", 3, grade_points=6),   # C: 2.0 * 3
+        _course("NUR104", "Course 4", 3, grade_points=9),
+        _course("NUR105", "Course 5", 3, grade_points=9),
+    ]
+    sem = {
+        "term": "Fall 2020",
+        "term_type": "fall",
+        "courses": [c["course_code"] for c in courses],
+        "term_gpa_stated": 3.0,
+        "term_credit_hours_stated": 15,
+        "cum_gpa_stated_after_term": 3.0,
+    }
+    flags = check_cont_002({
+        "semesters": [sem],
+        "courses": courses,
+        "grading_scale_maximum": 4.0,
+    })
+    assert not any("term gpa" in f.rule_description.lower() for f in flags)
+
+
+def test_cont_002_check1_skips_incomplete_term_course_rows():
+    """Do not recompute a term GPA when extracted rows do not cover term hours."""
+    courses = [
+        _course("NUR101", "Course 1", 3, grade_points=12),
+        _course("NUR102", "Course 2", 3, grade_points=9),
+        _course("NUR103", "Course 3", 3, grade_points=6),
+        _course("NUR104", "Course 4", 3, grade_points=9),
+        _course("NUR105", "Course 5", 3, grade_points=9),
+    ]
+    sem = {
+        "term": "Fall 2020",
+        "term_type": "fall",
+        "courses": [c["course_code"] for c in courses],
+        "term_gpa_stated": 4.0,
+        "term_credit_hours_stated": 30,
+        "cum_gpa_stated_after_term": 4.0,
+    }
+    flags = check_cont_002({"semesters": [sem], "courses": courses})
+    assert not any("term gpa" in f.rule_description.lower() for f in flags)
+
+
 # Tier boundary tests
 
 def test_cont_002_tier_boundary_4_9pct_is_medium():
@@ -410,7 +456,7 @@ def test_cont_002_tier_boundary_5_1pct_is_high():
 # Check 2: rolling cumulative GPA mismatch
 
 def test_cont_002_check2_fires_cum_gpa_high_mismatch():
-    """After two terms, cum GPA > 5% off from weighted average."""
+    """Explicit cumulative quality points support cumulative GPA verification."""
     sems = [
         {
             "term": "Fall 2020", "term_type": "fall",
@@ -418,6 +464,8 @@ def test_cont_002_check2_fires_cum_gpa_high_mismatch():
             "courses": [f"NUR10{i}" for i in range(1, 6)],
             "term_gpa_stated": 3.5, "term_credit_hours_stated": 15,
             "cum_gpa_stated_after_term": 3.5,
+            "cum_quality_points_stated": 52.5,
+            "cum_credit_hours_stated": 15,
         },
         {
             "term": "Spring 2021", "term_type": "spring",
@@ -425,6 +473,8 @@ def test_cont_002_check2_fires_cum_gpa_high_mismatch():
             "courses": [f"NUR20{i}" for i in range(1, 6)],
             "term_gpa_stated": 3.5, "term_credit_hours_stated": 15,
             "cum_gpa_stated_after_term": 4.0,  # inflated
+            "cum_quality_points_stated": 105,
+            "cum_credit_hours_stated": 30,
         },
     ]
     courses = [
@@ -438,6 +488,20 @@ def test_cont_002_check2_fires_cum_gpa_high_mismatch():
     flags = check_cont_002(agg)
     assert any("cumulative gpa" in f.rule_description.lower() and f.severity == "high"
                for f in flags)
+
+
+def test_cont_002_check2_skips_without_cumulative_quality_points():
+    """Rolling term GPA averages alone are too fragile for transfer-heavy transcripts."""
+    sems = [
+        _single_semester("Summer 2025", term_gpa=3.0, hours=3, cum_gpa=3.0, term_type="summer"),
+        _single_semester("Fall 2025", term_gpa=2.6, hours=15, cum_gpa=2.6),
+    ]
+    courses = [
+        _course(f"NUR10{i}", f"Course {i}", 3, grade_points=3.0)
+        for i in range(1, 6)
+    ]
+    flags = check_cont_002({"semesters": sems, "courses": courses})
+    assert not any("cumulative gpa mismatch after" in f.rule_description.lower() for f in flags)
 
 
 # Check 3: final cum GPA mismatch
@@ -466,6 +530,25 @@ def test_cont_002_check3_fires_final_gpa_medium_5_to_10pct():
     flags = check_cont_002(agg)
     assert any("final" in f.rule_description.lower() and f.severity == "medium"
                for f in flags)
+
+
+def test_cont_002_check3_skips_incomplete_course_coverage():
+    """Do not compare final GPA against a partial set of extracted course rows."""
+    courses = [
+        _course("NUR101", "Course 1", 3, grade_points=12),
+        _course("NUR102", "Course 2", 3, grade_points=9),
+        _course("NUR103", "Course 3", 3, grade_points=6),
+        _course("NUR104", "Course 4", 3, grade_points=9),
+        _course("NUR105", "Course 5", 3, grade_points=9),
+    ]
+    agg = {
+        "courses": courses,
+        "final_cum_gpa_stated": 2.86,
+        "total_credit_hours_stated": 101,
+        "grading_scale_maximum": 4.0,
+    }
+    flags = check_cont_002(agg)
+    assert not any("final cumulative gpa mismatch" in f.rule_description.lower() for f in flags)
 
 
 # Check 4: term-to-cum reconciliation failure
@@ -510,6 +593,21 @@ def test_cont_002_check4_no_fire_consistent_reconciliation():
         "grading_scale_maximum": 4.0,
     }
     flags = check_cont_002(agg)
+    assert not any("reconcil" in f.rule_description.lower() for f in flags)
+
+
+def test_cont_002_check4_skips_partial_semester_coverage():
+    sems = [
+        _single_semester("Summer 2025", term_gpa=3.0, hours=3, cum_gpa=3.0, term_type="summer"),
+        _single_semester("Fall 2025", term_gpa=2.6, hours=15, cum_gpa=2.6),
+        _single_semester("Spring 2026", term_gpa=None, hours=13, cum_gpa=None),
+    ]
+    flags = check_cont_002({
+        "semesters": sems,
+        "final_cum_gpa_stated": 2.86,
+        "total_credit_hours_stated": 101,
+        "grading_scale_maximum": 4.0,
+    })
     assert not any("reconcil" in f.rule_description.lower() for f in flags)
 
 

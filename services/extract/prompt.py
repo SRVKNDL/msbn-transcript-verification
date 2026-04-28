@@ -21,6 +21,7 @@ VOCABULARY: dict[str, set] = {
     "document_provenance_appearance": {
         "original", "color_copy", "scan_artifacts_present", "unclear",
     },
+    "applicant_name_visible": {"yes", "no", "unclear"},
     "security_features_present": {
         "watermark", "micro_printing", "hologram", "serial_number",
     },
@@ -59,6 +60,18 @@ _SYSTEM_PROMPT = """\
 You are a forensic document examiner assisting the Mississippi State Board of \
 Nursing (MSBN) in verifying nursing school transcripts for licensure eligibility. \
 Your task is to extract structured fields from a single transcript page image.
+You will also receive TEXTRACT_CONTEXT_JSON for the same page. It contains
+Amazon Textract raw text, tables, forms, layout blocks, query answers, and
+signature detections extracted from the source transcript PDF.
+
+Use Textract as the primary source for reading text, course tables, forms,
+verified query answers, and detected signatures. Query answers in
+TEXTRACT_CONTEXT_JSON have already been checked against non-query Textract
+evidence; ignore any query answer not present there. Use the page image as the primary
+source for visual document examination: seal quality, watermark/security
+features, ink, print technology, page alignment, overlapping/layered text, and
+other physical tampering indicators. If the image and Textract disagree, prefer
+the image for physical flags and prefer Textract for exact text/table values.
 
 TAMPERING AWARENESS:
 Before extracting data, visually scan the entire page for signs of digital \
@@ -111,6 +124,10 @@ determine a value from this page, use "unclear". Do not invent values outside th
 allowed set.
 - confidence reflects your certainty: "high" when the text is unambiguous, \
 "medium" when inferred, "low" when the page quality or content is poor.
+- Use Textract SIGNATURE blocks as evidence for registrar_block.signature_present
+  when the visual image also supports an attestation/signature area.
+- Use Textract TABLES/CELL structure for course rows when available; do not build
+  course rows from scattered text fragments outside coherent table/layout regions.
 """
 
 # User prompt: extraction fields and allowed values.
@@ -128,6 +145,13 @@ applicant_name
   Value: free text string extracted from the transcript, or null if absent
   Description: The student/applicant name printed on the transcript. Prefer the most complete
                legal name. Do not infer from filenames or surrounding context.
+
+applicant_name_visible
+  Allowed: yes | no | unclear
+  Description: Whether the student's name is visibly printed on this page. Return "no" when
+               the expected name/header area is blank, blacked out, redacted, or only a
+               student ID remains without a visible name. Return "yes" only when a readable
+               applicant/student name is visible.
 
 institution
   Value: free text string extracted from the transcript, or null if absent
@@ -290,7 +314,13 @@ suspected_alteration_fields
   Value: JSON array of strings (free-text field names or descriptions where alteration is suspected)
   Description: Any fields where the examiner suspects content was altered. Include descriptions
                of overlapping text, scattered fragments, clipped headers, or any other visual
-               evidence of digital editing. Use [] if none.
+               evidence of digital editing. Include applicant/student identity redaction if
+               the name or student ID area is blacked out. Use [] if none.
+
+identity_redaction_detected
+  Value: boolean (true if applicant/student identity data is visibly redacted, blacked out,
+         covered, or removed from the transcript header)
+  Description: Whether the transcript appears to have hidden applicant identity information.
 
 overlapping_text_detected
   Value: boolean (true if text fragments overlap, are layered on top of each other, or appear
@@ -458,6 +488,18 @@ total_credit_hours
 """
 
 
-def build_extraction_prompt() -> tuple[str, str]:
+def build_extraction_prompt(textract_context: dict | None = None) -> tuple[str, str]:
     """Return the prompt pair used for one page image."""
-    return _SYSTEM_PROMPT, _USER_PROMPT
+    if not textract_context:
+        return _SYSTEM_PROMPT, _USER_PROMPT
+
+    import json
+
+    textract_payload = json.dumps(textract_context, ensure_ascii=True, default=str)
+    return (
+        _SYSTEM_PROMPT,
+        _USER_PROMPT
+        + "\n\n=== TEXTRACT_CONTEXT_JSON ===\n"
+        + textract_payload
+        + "\n=== END_TEXTRACT_CONTEXT_JSON ===\n",
+    )

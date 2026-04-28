@@ -163,12 +163,16 @@ cf_output_contains() {
 infer_frontend_config() {
   if [[ -z "$API_BASE" ]]; then
     API_BASE="$(cf_output_contains MsbnApiStack ApiUrl)"
-    [[ "$API_BASE" == "None" ]] && API_BASE=""
+    if [[ "$API_BASE" == "None" ]]; then
+      API_BASE=""
+    fi
   fi
 
   if [[ -z "$COGNITO_CLIENT_ID" ]]; then
     COGNITO_CLIENT_ID="$(cf_output_contains MsbnAuthStack UserPoolClientId)"
-    [[ "$COGNITO_CLIENT_ID" == "None" ]] && COGNITO_CLIENT_ID=""
+    if [[ "$COGNITO_CLIENT_ID" == "None" ]]; then
+      COGNITO_CLIENT_ID=""
+    fi
   fi
 }
 

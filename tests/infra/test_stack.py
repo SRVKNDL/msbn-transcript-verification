@@ -84,12 +84,12 @@ def api_template(stacks):
 
 
 class TestExtractLambdaHardening:
-    def test_timeout_is_180(self, compute_template):
+    def test_timeout_is_300(self, compute_template):
         compute_template.has_resource_properties(
             "AWS::Lambda::Function",
             Match.object_like({
                 "FunctionName": "msbn-extract",
-                "Timeout": 180,
+                "Timeout": 300,
             }),
         )
 
@@ -110,7 +110,11 @@ class TestExtractLambdaHardening:
                 "Environment": {
                     "Variables": Match.object_like({
                         "BEDROCK_MODEL_ID": "amazon.nova-pro-v1:0",
+                        "TABLE_NAME": Match.any_value(),
                         "BEDROCK_MAX_NEW_TOKENS": "5120",
+                        "TEXTRACT_FEATURE_TYPES": "TABLES,FORMS,QUERIES,SIGNATURES,LAYOUT",
+                        "TEXTRACT_JOB_TIMEOUT_SECONDS": "210",
+                        "TEXTRACT_JOB_POLL_SECONDS": "2",
                     })
                 },
             }),
@@ -226,6 +230,51 @@ class TestBedrockIamScope:
             assert expected_arn in resources, (
                 f"Expected {expected_arn} in statement resources, got {resources}"
             )
+
+
+class TestTextractIamScope:
+    def test_extract_policy_allows_textract_document_analysis(self, compute_template):
+        policies = compute_template.find_resources("AWS::IAM::Policy")
+        textract_actions = set()
+        for _logical_id, resource in policies.items():
+            statements = (
+                resource.get("Properties", {})
+                .get("PolicyDocument", {})
+                .get("Statement", [])
+            )
+            for stmt in statements:
+                actions = stmt.get("Action", [])
+                if isinstance(actions, str):
+                    actions = [actions]
+                textract_actions.update(
+                    action for action in actions if action.startswith("textract:")
+                )
+
+        assert "textract:StartDocumentAnalysis" in textract_actions
+        assert "textract:GetDocumentAnalysis" in textract_actions
+
+
+class TestValidateIamScope:
+    def test_validate_policy_allows_flag_replacement(self, compute_template):
+        policies = compute_template.find_resources("AWS::IAM::Policy")
+        dynamodb_actions = set()
+        for _logical_id, resource in policies.items():
+            statements = (
+                resource.get("Properties", {})
+                .get("PolicyDocument", {})
+                .get("Statement", [])
+            )
+            for stmt in statements:
+                actions = stmt.get("Action", [])
+                if isinstance(actions, str):
+                    actions = [actions]
+                dynamodb_actions.update(
+                    action for action in actions if action.startswith("dynamodb:")
+                )
+
+        assert "dynamodb:PutItem" in dynamodb_actions
+        assert "dynamodb:Query" in dynamodb_actions
+        assert "dynamodb:BatchWriteItem" in dynamodb_actions
 
 
 class TestPrefillLambda:

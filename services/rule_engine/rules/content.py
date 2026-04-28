@@ -19,6 +19,9 @@ _DEGREE_DURATION: dict[str, dict] = {
     "CRNA":   {"min": 30, "max": 48},
 }
 
+_GPA_COVERAGE_TOLERANCE = 0.90
+_TERM_HOURS_TOLERANCE = 0.25
+
 
 def _parse_date(date_str) -> date | None:
     """Parse common date formats; return None on failure."""
@@ -253,7 +256,9 @@ def check_cont_002(agg: dict) -> list:
     if grading_scale == "pass_fail":
         return []
 
-    # Numeric grades: courses with grade_points, excluding transfer credits
+    scale_max = float(scale_max or 4.0)
+
+    # Numeric grades: courses with grade_points/quality points, excluding transfer credits
     numeric_grades = [
         c for c in courses
         if c.get("grade_points") is not None and not c.get("transfer_marker")
@@ -263,9 +268,6 @@ def check_cont_002(agg: dict) -> list:
     # ── Checks 1 and 2 require semester structure and ≥5 numeric grades ────────
 
     if has_semesters and len(numeric_grades) >= 5:
-        cum_hours = 0.0
-        cum_weighted = 0.0
-
         for sem in semesters:
             term_gpa = sem.get("term_gpa_stated")
             term_hours = sem.get("term_credit_hours_stated") or 0
@@ -280,12 +282,13 @@ def check_cont_002(agg: dict) -> list:
                 and not c.get("transfer_marker")
             ]
             if sem_courses and term_gpa is not None and term_gpa > 0:
-                total_sem_ch = sum(c.get("credit_hours") or 0 for c in sem_courses)
-                if total_sem_ch > 0:
-                    computed_term = sum(
-                        (c.get("grade_points") or 0) * (c.get("credit_hours") or 0)
-                        for c in sem_courses
-                    ) / total_sem_ch
+                total_sem_ch = _course_hours(sem_courses)
+                hours_are_complete = (
+                    not term_hours
+                    or abs(total_sem_ch - float(term_hours)) <= _TERM_HOURS_TOLERANCE
+                )
+                if total_sem_ch > 0 and hours_are_complete:
+                    computed_term = _computed_gpa_from_courses(sem_courses, scale_max)
                     diff_pct = abs(computed_term - term_gpa) / term_gpa
                     if diff_pct > 0.05:
                         flags.append(Flag(
@@ -315,10 +318,33 @@ def check_cont_002(agg: dict) -> list:
                         ))
 
             # Check 2 — rolling Cum GPA mismatch (HIGH if >5%, MEDIUM if 2–5%)
-            if term_gpa is not None and term_hours > 0:
-                cum_hours += term_hours
-                cum_weighted += term_gpa * term_hours
-                computed_cum = cum_weighted / cum_hours
+            # Only evaluate when explicit cumulative quality points are available.
+            # Weighting term GPAs alone causes false positives on transfer-heavy
+            # transcripts and documents whose cumulative GPA includes prior work.
+            cum_quality_points = _first_number(
+                sem,
+                "cum_quality_points_stated",
+                "cumulative_quality_points_stated",
+                "cum_quality_points",
+                "quality_points_stated_after_term",
+            )
+            cum_hours_stated = _first_number(
+                sem,
+                "cum_credit_hours_stated",
+                "cumulative_credit_hours_stated",
+                "cum_hours_stated",
+                "hours_stated_after_term",
+            )
+            if (
+                cum_quality_points is not None
+                and cum_hours_stated is not None
+                and cum_hours_stated > 0
+            ):
+                computed_cum = cum_quality_points / cum_hours_stated
+            else:
+                computed_cum = None
+
+            if computed_cum is not None:
                 if cum_gpa_stated is not None and cum_gpa_stated > 0:
                     diff_pct = abs(computed_cum - cum_gpa_stated) / cum_gpa_stated
                     if diff_pct > 0.05:
@@ -352,16 +378,34 @@ def check_cont_002(agg: dict) -> list:
 
     if final_cum_gpa is not None and final_cum_gpa > 0:
         computed_final = None
-        if numeric_grades:
-            total_ch = sum(c.get("credit_hours") or 0 for c in numeric_grades)
-            if total_ch > 0:
-                computed_final = sum(
-                    (c.get("grade_points") or 0) * (c.get("credit_hours") or 0)
-                    for c in numeric_grades
-                ) / total_ch
+        total_credit_hours = _first_number(
+            agg,
+            "total_credit_hours_stated",
+            "total_credit_hours",
+        )
+        total_quality_points = _first_number(
+            agg,
+            "total_quality_points_stated",
+            "quality_points_stated",
+            "total_grade_points_stated",
+        )
+        if total_quality_points is not None and total_credit_hours and total_credit_hours > 0:
+            computed_final = total_quality_points / total_credit_hours
+        elif numeric_grades:
+            total_ch = _course_hours(numeric_grades)
+            course_coverage_ok = (
+                not total_credit_hours
+                or total_ch >= float(total_credit_hours) * _GPA_COVERAGE_TOLERANCE
+            )
+            if total_ch > 0 and course_coverage_ok:
+                computed_final = _computed_gpa_from_courses(numeric_grades, scale_max)
         elif semesters:
             total_ch = sum(s.get("term_credit_hours_stated") or 0 for s in semesters)
-            if total_ch > 0:
+            semester_coverage_ok = (
+                not total_credit_hours
+                or total_ch >= float(total_credit_hours) * _GPA_COVERAGE_TOLERANCE
+            )
+            if total_ch > 0 and semester_coverage_ok:
                 computed_final = sum(
                     (s.get("term_gpa_stated") or 0) * (s.get("term_credit_hours_stated") or 0)
                     for s in semesters
@@ -399,7 +443,16 @@ def check_cont_002(agg: dict) -> list:
 
     if semesters and final_cum_gpa is not None and final_cum_gpa > 0:
         total_ch = sum(s.get("term_credit_hours_stated") or 0 for s in semesters)
-        if total_ch > 0:
+        total_credit_hours = _first_number(
+            agg,
+            "total_credit_hours_stated",
+            "total_credit_hours",
+        )
+        semester_coverage_ok = (
+            not total_credit_hours
+            or total_ch >= float(total_credit_hours) * _GPA_COVERAGE_TOLERANCE
+        )
+        if total_ch > 0 and semester_coverage_ok:
             computed_from_terms = sum(
                 (s.get("term_gpa_stated") or 0) * (s.get("term_credit_hours_stated") or 0)
                 for s in semesters
@@ -491,6 +544,40 @@ def check_cont_002(agg: dict) -> list:
                 ))
 
     return flags
+
+
+def _first_number(data: dict, *keys: str) -> float | None:
+    for key in keys:
+        value = data.get(key)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _course_hours(courses: list[dict]) -> float:
+    return sum(float(c.get("credit_hours") or 0) for c in courses)
+
+
+def _course_quality_points(course: dict, scale_max: float) -> float:
+    """Return quality points, accepting either GPA points or transcript points."""
+    hours = float(course.get("credit_hours") or 0)
+    grade_points = float(course.get("grade_points") or 0)
+    if grade_points > scale_max and hours > 0:
+        # Many transcripts print quality points in the course row:
+        # credit hours * grade value, e.g. 9 credits with C => 18.
+        return grade_points
+    return grade_points * hours
+
+
+def _computed_gpa_from_courses(courses: list[dict], scale_max: float) -> float:
+    total_hours = _course_hours(courses)
+    if total_hours <= 0:
+        return 0.0
+    return sum(_course_quality_points(course, scale_max) for course in courses) / total_hours
 
 
 def check_cont_003(agg: dict) -> list:

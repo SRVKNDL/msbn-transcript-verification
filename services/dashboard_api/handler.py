@@ -123,8 +123,21 @@ def _upload_metadata_from_body(body: dict) -> tuple[dict, dict]:
     return metadata, headers
 
 
-def _application_view(metadata: dict, document: dict | None = None) -> dict:
+def _application_view(
+    metadata: dict,
+    document: dict | None = None,
+    *,
+    page_count: int | None = None,
+) -> dict:
     submitted_at = metadata.get("submission_ts") or metadata.get("uploadedAt") or ""
+    resolved_page_count = page_count
+    if resolved_page_count is None:
+        resolved_page_count = int(
+            (document or {}).get("page_count")
+            or metadata.get("page_count")
+            or metadata.get("document_count")
+            or 0
+        )
     return {
         "applicationId": metadata.get("applicationId"),
         "applicantName": metadata.get("applicant_name") or "",
@@ -146,12 +159,7 @@ def _application_view(metadata: dict, document: dict | None = None) -> dict:
             or metadata.get("graduation_year")
             or ""
         ),
-        "pageCount": int(
-            (document or {}).get("page_count")
-            or metadata.get("page_count")
-            or metadata.get("document_count")
-            or 0
-        ),
+        "pageCount": resolved_page_count,
     }
 
 
@@ -406,12 +414,17 @@ def _get_application(app_id: str | None, table) -> dict:
     flags = [_flag_view(f) for f in flag_resp.get("Items", [])]
 
     transcript_preview = _transcript_preview(metadata)
+    page_count = _resolved_page_count(app_id, metadata, extraction)
 
     return _response(
         200,
         {
             "applicationId": app_id,
-            "application": _application_view(metadata, extraction),
+            "application": _application_view(
+                metadata,
+                extraction,
+                page_count=page_count,
+            ),
             "metadata": metadata,
             "extraction": extraction,
             "transcriptUrl": transcript_preview["url"],
@@ -444,12 +457,7 @@ def _get_page_image(app_id: str | None, page: str | None, table) -> dict:
         return _response(404, {"error": f"Application {app_id} not found"})
 
     doc_resp = table.get_item(Key={"PK": pk, "SK": "DOCUMENT#TRANSCRIPT"})
-    page_count = int(
-        (doc_resp.get("Item") or {}).get("page_count")
-        or meta_resp["Item"].get("page_count")
-        or meta_resp["Item"].get("document_count")
-        or 0
-    )
+    page_count = _resolved_page_count(app_id, meta_resp["Item"], doc_resp.get("Item"))
     if page_count and page_num > page_count:
         return _response(
             404,
@@ -483,6 +491,47 @@ def _get_page_image(app_id: str | None, page: str | None, table) -> dict:
         HttpMethod="GET",
     )
     return _response(200, {"url": url, "s3Key": image_key, "expiresIn": 300})
+
+
+def _resolved_page_count(
+    app_id: str,
+    metadata: dict,
+    document: dict | None = None,
+) -> int:
+    page_count = int(
+        (document or {}).get("page_count")
+        or metadata.get("page_count")
+        or metadata.get("document_count")
+        or 0
+    )
+    if page_count:
+        return page_count
+    return _rendered_page_count(app_id)
+
+
+def _rendered_page_count(app_id: str) -> int:
+    if not _BUCKET_NAME:
+        return 0
+
+    prefix = f"processed/{app_id}/page_transcript_"
+    try:
+        response = _s3.list_objects_v2(Bucket=_BUCKET_NAME, Prefix=prefix)
+    except ClientError:
+        logger.exception(
+            "DashboardApiLambda could not infer rendered page count",
+            extra={"applicationId": app_id},
+        )
+        return 0
+
+    max_page = 0
+    for obj in response.get("Contents") or []:
+        key = obj.get("Key", "")
+        suffix = key.removeprefix(prefix).removesuffix(".png")
+        try:
+            max_page = max(max_page, int(suffix))
+        except ValueError:
+            continue
+    return max_page
 
 
 # POST /applications/{id}/decision.

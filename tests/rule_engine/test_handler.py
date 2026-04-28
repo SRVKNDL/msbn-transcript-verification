@@ -158,6 +158,33 @@ def test_flags_written_to_dynamodb(aws_resources, lambda_context):
     assert len(db_flags) == result["flag_count"]
 
 
+def test_stale_flags_removed_before_writing_new_results(aws_resources, lambda_context):
+    """Revalidation must not leave obsolete flags in the application partition."""
+    app_id = "APP-STALE-FLAGS"
+    aws_resources["table"].put_item(
+        Item={
+            "PK": f"APP#{app_id}",
+            "SK": "FLAG#CONT_002#9999",
+            "entity_type": "FLAG",
+            "applicationId": app_id,
+            "rule_code": "CONT_002",
+            "rule_description": "stale GPA flag",
+            "severity": "high",
+            "category": "SP-5",
+            "rationale": "old result",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        }
+    )
+
+    agg = {**CLEAN_BASELINE, "applicationId": app_id}
+    s3_key = _put_aggregation(aws_resources["s3"], agg)
+
+    result = handler(_make_event(app_id, s3_key), lambda_context)
+
+    assert result["flag_count"] == 0
+    assert _scan_flags(aws_resources["table"], app_id) == []
+
+
 def test_dynamodb_flag_item_has_required_fields(aws_resources, lambda_context):
     """Each DynamoDB FLAG item must contain all required fields."""
     agg = {

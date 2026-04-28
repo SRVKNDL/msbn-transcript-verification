@@ -171,6 +171,133 @@ _CANNED_PAGE: dict = {
     },
 }
 
+_CANNED_TEXTRACT: dict = {
+    "job_id": "textract-job-123",
+    "source_s3_key": _PDF_KEY,
+    "feature_types": ["TABLES", "FORMS", "QUERIES", "SIGNATURES", "LAYOUT"],
+    "analyze_document_model_version": "1.0",
+    "document_metadata": {"Pages": 1},
+    "job_status": "SUCCEEDED",
+    "warnings": [],
+    "pages": [
+        {
+            "page_number": 1,
+            "raw_text": "Copiah-Lincoln Community College\nOfficial Transcript",
+            "lines": [
+                {
+                    "text": "Copiah-Lincoln Community College",
+                    "confidence": 99.0,
+                    "geometry": {},
+                }
+            ],
+            "words": [],
+            "tables": [
+                {
+                    "id": "table-1",
+                    "entity_types": ["STRUCTURED_TABLE"],
+                    "confidence": 98.0,
+                    "geometry": {},
+                    "rows": [["Course", "Grade"], ["PNV 1116", "A"]],
+                    "cells": [],
+                    "titles": [],
+                    "footers": [],
+                }
+            ],
+            "forms": [
+                {
+                    "key": "Student",
+                    "value": "Jane Applicant",
+                    "key_confidence": 97.0,
+                    "value_confidence": 97.0,
+                    "key_geometry": {},
+                    "value_geometry": [],
+                }
+            ],
+            "layouts": [
+                {
+                    "id": "layout-1",
+                    "type": "LAYOUT_TITLE",
+                    "text": "Official Transcript",
+                    "confidence": 98.0,
+                    "geometry": {},
+                }
+            ],
+            "queries": [
+                {
+                    "alias": "institution",
+                    "question": "What institution issued this transcript?",
+                    "pages": [],
+                    "answers": [
+                        {
+                            "text": "Copiah-Lincoln Community College",
+                            "confidence": 99.0,
+                            "geometry": {},
+                        }
+                    ],
+                }
+            ],
+            "signatures": [
+                {
+                    "id": "sig-1",
+                    "confidence": 96.0,
+                    "geometry": {},
+                }
+            ],
+        }
+    ],
+}
+
+_BULKY_TEXTRACT_PAGE: dict = {
+    "page_number": 1,
+    "raw_text": "A" * 20000,
+    "lines": [
+        {"text": f"Line {idx}", "confidence": 99.0, "geometry": {"bbox": idx}}
+        for idx in range(400)
+    ],
+    "words": [
+        {"text": f"word{idx}", "confidence": 99.0, "geometry": {"bbox": idx}}
+        for idx in range(1000)
+    ],
+    "tables": [
+        {
+            "titles": ["Courses"],
+            "footers": [],
+            "entity_types": ["STRUCTURED_TABLE"],
+            "confidence": 98.0,
+            "geometry": {"bbox": table_idx},
+            "rows": [[f"cell {row_idx}-{col_idx}" for col_idx in range(8)]
+                     for row_idx in range(200)],
+            "cells": [
+                {"text": "x", "geometry": {"bbox": row_idx}}
+                for row_idx in range(200)
+            ],
+        }
+        for table_idx in range(20)
+    ],
+    "forms": [
+        {
+            "key": f"Key {idx}",
+            "value": "B" * 1000,
+            "key_confidence": 99.0,
+            "value_confidence": 99.0,
+            "key_geometry": {"bbox": idx},
+            "value_geometry": [{"bbox": idx}],
+        }
+        for idx in range(120)
+    ],
+    "layouts": [
+        {
+            "type": "LAYOUT_TEXT",
+            "text": "C" * 1000,
+            "confidence": 99.0,
+            "geometry": {"bbox": idx},
+        }
+        for idx in range(200)
+    ],
+    "queries": [],
+    "signatures": [{"id": "sig", "confidence": 96.0, "geometry": {"bbox": 1}}],
+}
+
 
 def _model_response_body(page_data: dict | None = None) -> bytes:
     """Return a serialised Bedrock Nova Pro invoke_model response body."""
@@ -260,6 +387,17 @@ def bedrock_mock():
 def patched_pdf_conversion():
     """Keep extract unit tests independent of the host Poppler toolchain."""
     with patch.object(_mod, "convert_from_path", side_effect=_fake_convert_from_path):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def patched_textract_analysis():
+    """Keep extract unit tests independent of the live Textract API."""
+    with patch.object(
+        _mod,
+        "_analyze_transcript_with_textract",
+        side_effect=lambda *args, **kwargs: json.loads(json.dumps(_CANNED_TEXTRACT)),
+    ):
         yield
 
 
@@ -393,29 +531,110 @@ def test_invoke_model_body_guides_conservative_watermark_detection(
     assert "can confidently conclude no listed feature is visible." in user_text
 
 
-def test_prompt_excludes_document_level_fields(
+def test_invoke_model_body_contains_textract_context(
     s3_with_transcript, bedrock_mock, extract_event, lambda_context
 ):
-    """document_page_count, seal_present_on_pages, and print_technology_per_page
-    must NOT appear in the per-page prompt: they are whole-document fields
-    that the model cannot reliably determine from a single page image."""
+    """The prompt should include Textract evidence for the current page."""
     handler(extract_event, lambda_context)
 
     call_kwargs = bedrock_mock.invoke_model.call_args
     body = json.loads(call_kwargs.kwargs["body"])
     user_text = body["messages"][0]["content"][1]["text"]
-    system_text = body["system"][0]["text"]
-    combined = user_text + system_text
 
-    assert "document_page_count" not in user_text, (
-        "document_page_count must not be requested from the model per page"
+    assert "TEXTRACT_CONTEXT_JSON" in user_text
+    assert "Copiah-Lincoln Community College" in user_text
+    assert "STRUCTURED_TABLE" in user_text
+    assert "SIGNATURES" in user_text
+
+
+def test_textract_context_for_nova_omits_token_heavy_fields():
+    """Prompt context must not include full geometry, words, or cell objects."""
+    context = _mod._textract_context_for_page(
+        {
+            "feature_types": ["TABLES", "FORMS", "QUERIES", "SIGNATURES", "LAYOUT"],
+            "document_metadata": {"Pages": 1},
+            "pages": [_BULKY_TEXTRACT_PAGE],
+        },
+        1,
     )
-    assert "seal_present_on_pages" not in combined, (
-        "seal_present_on_pages must not appear in the prompt (derived deterministically)"
+
+    page = context["page"]
+
+    assert "words" not in page
+    assert "cells" not in page["tables"][0]
+    assert "geometry" not in page["lines"][0]
+    assert "geometry" not in page["tables"][0]
+    assert "key_geometry" not in page["forms"][0]
+    assert "geometry" not in page["layouts"][0]
+    assert "geometry" not in page["signatures"][0]
+    assert len(page["raw_text"]) < len(_BULKY_TEXTRACT_PAGE["raw_text"])
+    assert len(page["tables"]) == _mod.NOVA_TEXTRACT_MAX_TABLES
+    assert len(page["tables"][0]["rows"]) == _mod.NOVA_TEXTRACT_MAX_TABLE_ROWS
+    assert page["omitted_for_prompt_size"]["words"] == 1000
+
+
+def test_textract_query_answers_are_verified_against_page_evidence():
+    page = {
+        "raw_text": "Official Transcript\nStudent: Jane Applicant\nInstitution: Delta College",
+        "lines": [],
+        "tables": [],
+        "forms": [],
+        "layouts": [],
+        "queries": [
+            {
+                "alias": "applicant_name",
+                "answers": [{"text": "Jane Applicant", "confidence": 99.0}],
+            },
+            {
+                "alias": "country",
+                "answers": [{"text": "Canada", "confidence": 99.0}],
+            },
+        ],
+    }
+
+    _mod._verify_queries_against_page_evidence(page)
+
+    applicant = page["queries"][0]["answers"][0]
+    country = page["queries"][1]["answers"][0]
+    assert applicant["verified"] is True
+    assert country["verified"] is False
+
+    context = _mod._compact_textract_page_for_nova(page)
+    assert context["queries"][0]["answers"][0]["text"] == "Jane Applicant"
+    assert context["queries"][1]["answers"] == []
+
+
+def test_nova_response_wrapper_is_unwrapped():
+    normalized = _mod._normalize_nova_response_shape(
+        {
+            "fields": {
+                "seal_type": {
+                    "value": "embossed",
+                    "confidence": "high",
+                    "source_location": None,
+                }
+            }
+        },
+        1,
     )
-    assert "print_technology_per_page" not in combined, (
-        "print_technology_per_page must not appear in the prompt (derived deterministically)"
+    assert "seal_type" in normalized
+
+
+def test_generic_nova_field_record_is_ignored():
+    normalized = _mod._normalize_nova_response_shape(
+        {"value": None, "confidence": "low", "source_location": None},
+        1,
     )
+    assert normalized == {}
+
+
+def test_identity_redaction_bar_detection():
+    img = Image.new("RGB", (1000, 1200), "white")
+    for x in range(120, 360):
+        for y in range(190, 210):
+            img.putpixel((x, y), (0, 0, 0))
+
+    assert _mod._detect_identity_redaction_marks(img) is True
 
 
 # ── (c) response parsed into the correct field structure ──────────────────────
@@ -599,7 +818,7 @@ def test_page_count_multi_page(
 def test_extraction_metadata_fields_present(
     s3_with_transcript, bedrock_mock, extract_event, lambda_context
 ):
-    """Extraction JSON must contain bedrock_model_id, prompt_version, extraction_ts."""
+    """Extraction JSON must contain model, prompt, Textract, and timestamp metadata."""
     handler(extract_event, lambda_context)
 
     s3 = boto3.client("s3", region_name="us-east-1")
@@ -612,8 +831,59 @@ def test_extraction_metadata_fields_present(
 
     assert extraction["bedrock_model_id"] == _mod.BEDROCK_MODEL_ID
     assert extraction["prompt_version"] == _mod.PROMPT_VERSION
+    assert extraction["textract_s3_key"] == f"processed/{_APP_ID}/textract_TRANSCRIPT.json"
+    assert extraction["textract"]["feature_types"] == [
+        "TABLES", "FORMS", "QUERIES", "SIGNATURES", "LAYOUT"
+    ]
     assert "extraction_ts" in extraction
     assert extraction["extraction_ts"].endswith("+00:00")
+
+
+def test_textract_json_written_to_s3(
+    s3_with_transcript, bedrock_mock, extract_event, lambda_context
+):
+    """The normalized Textract evidence package must be persisted for audit."""
+    result = handler(extract_event, lambda_context)
+
+    s3 = boto3.client("s3", region_name="us-east-1")
+    textract_doc = json.loads(
+        s3.get_object(Bucket=_BUCKET, Key=result["textract_s3_key"])["Body"].read()
+    )
+
+    assert textract_doc["job_id"] == "textract-job-123"
+    assert textract_doc["pages"][0]["raw_text"]
+    assert textract_doc["pages"][0]["tables"][0]["rows"][1] == ["PNV 1116", "A"]
+    assert textract_doc["pages"][0]["signatures"][0]["id"] == "sig-1"
+
+
+def test_document_record_written_with_page_count(
+    s3_with_transcript, bedrock_mock, extract_event, lambda_context
+):
+    """Extract should publish DOCUMENT#TRANSCRIPT metadata for the dashboard."""
+    table_name = "msbn-applications"
+    dynamo = boto3.resource("dynamodb", region_name="us-east-1")
+    table = dynamo.create_table(
+        TableName=table_name,
+        KeySchema=[
+            {"AttributeName": "PK", "KeyType": "HASH"},
+            {"AttributeName": "SK", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "PK", "AttributeType": "S"},
+            {"AttributeName": "SK", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+
+    with patch.object(_mod, "TABLE_NAME", table_name):
+        handler(extract_event, lambda_context)
+
+    item = table.get_item(
+        Key={"PK": f"APP#{_APP_ID}", "SK": "DOCUMENT#TRANSCRIPT"}
+    )["Item"]
+    assert item["page_count"] == 1
+    assert item["s3_extraction_key"] == f"processed/{_APP_ID}/extraction_transcript.json"
+    assert item["s3_textract_key"] == f"processed/{_APP_ID}/textract_TRANSCRIPT.json"
 
 
 # ── (g) source_location.page_number stamped correctly per page ────────────────
@@ -687,6 +957,8 @@ def test_extraction_json_top_level_shape(
         "application_id",
         "document_type",
         "page_count",
+        "textract_s3_key",
+        "textract",
         "bedrock_model_id",
         "prompt_version",
         "extraction_ts",

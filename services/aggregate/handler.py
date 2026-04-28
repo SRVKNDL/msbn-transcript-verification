@@ -34,6 +34,23 @@ _OBJECT_ARRAY_FIELDS = frozenset({
     "leave_of_absence_markers",
 })
 
+_TAMPERING_BOOLEAN_FIELDS = frozenset({
+    "identity_redaction_detected",
+    "overlapping_text_detected",
+    "compressed_numbers_detected",
+    "mixed_fonts_detected",
+    "correction_artifacts_present",
+    "obliteration_marks_detected",
+    "mixed_ink_colors_in_field",
+})
+
+_POSITIVE_SEAL_TYPES = frozenset({
+    "embossed",
+    "stamped_ink",
+    "printed_flat",
+    "sticker_foil",
+})
+
 # Per-page bookkeeping, not extraction fields.
 _PAGE_META_KEYS = frozenset({"page_number", "image_dimensions"})
 
@@ -58,8 +75,12 @@ def handler(event, context):
     pages = extraction.get("pages", [])
 
     # Collapse page-level values into one document-level record.
-    aggregation = _flatten_pages(pages)
+    aggregation = _flatten_pages(pages, page_count=extraction.get("page_count"))
     aggregation["applicationId"] = application_id
+    if isinstance(extraction.get("textract"), dict):
+        aggregation["textract"] = extraction["textract"]
+    if extraction.get("textract_s3_key"):
+        aggregation["textract_s3_key"] = extraction["textract_s3_key"]
 
     # Store the RuleEngineLambda input under the application prefix.
     aggregation_key = f"processed/{application_id}/aggregation.json"
@@ -83,7 +104,7 @@ def handler(event, context):
     }
 
 
-def _flatten_pages(pages: list[dict]) -> dict:
+def _flatten_pages(pages: list[dict], page_count: int | None = None) -> dict:
     """Collapse per-page records into one flat document-level dict."""
     # Sibling keys travel with their base field; they are not merged directly.
     field_names: set[str] = set()
@@ -101,9 +122,12 @@ def _flatten_pages(pages: list[dict]) -> dict:
             _merge_array_field(field, pages, out)
         elif field in _OBJECT_ARRAY_FIELDS:
             _merge_object_array_field(field, pages, out)
+        elif field in _TAMPERING_BOOLEAN_FIELDS:
+            _merge_tampering_boolean(field, pages, out)
         else:
             _pick_highest_confidence(field, pages, out)
 
+    _apply_document_level_derivations(out, pages, page_count)
     _apply_field_aliases(out)
     return out
 
@@ -197,6 +221,46 @@ def _merge_object_array_field(field: str, pages: list[dict], out: dict) -> None:
                     })
                 merged.append(entry)
     out[field] = merged
+
+
+def _merge_tampering_boolean(field: str, pages: list[dict], out: dict) -> None:
+    """Tampering indicators are true if any page reports true."""
+    true_page = next((page for page in pages if page.get(field) is True), None)
+    if true_page is not None:
+        out[field] = True
+        confidence = true_page.get(f"{field}_confidence")
+        if confidence is not None:
+            out[f"{field}_confidence"] = confidence
+        source = true_page.get(f"{field}_source")
+        if source is not None:
+            out[f"{field}_source"] = source
+        return
+
+    _pick_highest_confidence(field, pages, out)
+
+
+def _apply_document_level_derivations(
+    out: dict,
+    pages: list[dict],
+    page_count: int | None,
+) -> None:
+    """Override model-supplied document fields with deterministic values."""
+    authoritative_page_count = page_count if isinstance(page_count, int) else len(pages)
+    out["document_page_count"] = authoritative_page_count
+
+    ordered_pages = sorted(
+        enumerate(pages, start=1),
+        key=lambda item: item[1].get("page_number") or item[0],
+    )
+    out["seal_present_on_pages"] = [
+        page.get("page_number") or fallback_index
+        for fallback_index, page in ordered_pages
+        if page.get("seal_type") in _POSITIVE_SEAL_TYPES
+    ]
+    out["print_technology_per_page"] = [
+        page.get("print_technology") or "unclear"
+        for _fallback_index, page in ordered_pages
+    ]
 
 
 def _apply_field_aliases(out: dict) -> None:

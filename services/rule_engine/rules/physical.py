@@ -453,3 +453,43 @@ def check_phys_005(agg: dict) -> list:
         ))
 
     return flags
+
+
+def check_phys_006(agg: dict) -> list:
+    """Applicant identity visibility — flag redacted or missing student name."""
+    flags = []
+
+    identity_redacted = agg.get("identity_redaction_detected")
+    name_visible = agg.get("applicant_name_visible")
+
+    if identity_redacted is True:
+        flags.append(Flag(
+            rule_code="PHYS_006",
+            rule_description="Applicant identity appears redacted",
+            severity="high",
+            category="SP-4",
+            rationale=(
+                "The transcript image appears to contain blacked-out or covered applicant "
+                "identity information. A transcript submitted for licensure review must "
+                "show the applicant identity so it can be matched to the application."
+            ),
+            source_location=_src(agg, "identity_redaction_detected"),
+        ))
+        return flags
+
+    if name_visible == "no":
+        flags.append(Flag(
+            rule_code="PHYS_006",
+            rule_description="Applicant name not visible on transcript",
+            severity="high",
+            category="SP-4",
+            rationale=(
+                "No readable applicant/student name was extracted from the transcript. "
+                "Applicant identity must be visible on the official transcript to verify "
+                "that the academic record belongs to the submitted application."
+            ),
+            source_location=_src(agg, "applicant_name_visible")
+            or _src(agg, "applicant_name"),
+        ))
+
+    return flags

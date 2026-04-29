@@ -115,7 +115,23 @@ export function AuditOverviewPage() {
   const [audits, setAudits] = useState<Record<string, AuditEvent[]>>({});
 
   useEffect(() => {
-    listApplications().then((items) => {
+    listApplications({
+      statuses: [
+        "PROCESSING",
+        "INTAKE_COMPLETE",
+        "READY_FOR_REVIEW",
+        "FAILED",
+        "REVIEWED",
+        "READY_FOR_LICENSING_REVIEW",
+        "RETURN_TO_APPLICANT",
+        "DEFERRED",
+        "DENIED",
+        "APPROVED",
+        "CLOSED",
+        "COMPLETED",
+      ],
+      limit: 200,
+    }).then((items) => {
       const sorted = [...items].sort(
         (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
       );

@@ -21,6 +21,7 @@ import { getCurrentUser } from "../auth";
 import type { Application, Flag, Decisions, OverallDecision, ExtractionData, ExtractionRow } from "../types";
 
 const DEFAULT_TRANSCRIPT_ZOOM = 2;
+const TRANSCRIPT_RENDER_SCALE_FACTOR = 0.5;
 const SEVERITY_ORDER = { High: 0, Medium: 1, Low: 2 } as const;
 type QueueSort = "oldest" | "newest" | "flags" | "severity" | "applicant" | "institution";
 const QUEUE_SORT_LABELS: Record<QueueSort, string> = {
@@ -528,15 +529,39 @@ function QueueRow({ app, active, onClick, shaded }: { app: Application; active: 
 }
 
 // --- Flag card ---
-function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpenData, active, onClick, shaded }: {
+function truncateText(value: string | undefined, maxChars: number) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
+function rationalePreview(value: string) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  const firstSentence = text.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim();
+  return truncateText(firstSentence && firstSentence.length >= 48 ? firstSentence : text, 190);
+}
+
+function rationaleParagraphs(value: string) {
+  const text = String(value || "").trim();
+  if (!text) return ["No rationale provided."];
+  const paragraphs = text
+    .split(/(?<=[.!?])\s+(?=[A-Z0-9'"])/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => !/^Duplicated course identifiers reviewed:/i.test(part));
+  return paragraphs.length ? paragraphs : [text];
+}
+
+function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpenData, onOpenDetails, active, onClick, shaded }: {
   flag: Flag; decision?: string; notes?: string;
   onDecision: (d: "CONFIRM" | "OVERRIDE") => void; onNotes: (n: string) => void;
-  onJumpTo: () => void; onOpenData: () => void;
+  onJumpTo: () => void; onOpenData: () => void; onOpenDetails: () => void;
   active: boolean; onClick: () => void; shaded?: boolean;
 }) {
   const t = useT();
   const resolved = !!decision;
   const cardBackground = resolved ? t.surfaceAlt : shaded ? t.surfaceAlt : t.surface;
+  const firstSpan = flag.sourceLocation.spans[0];
   return (
     <div onClick={onClick} style={{
       border: `1px solid ${active ? t.accent : t.line}`,
@@ -566,9 +591,28 @@ function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpen
       <div style={{ fontSize: 12, color: t.ink2, fontWeight: 500, marginBottom: 4 }}>
         {flag.ruleName.replaceAll("_", " ").toLowerCase()}
       </div>
-      <div style={{ fontSize: 12, color: t.ink3, lineHeight: 1.55, marginBottom: 10 }}>
-        {flag.rationale}
-      </div>
+      <button
+        onClick={(e) => { e.stopPropagation(); onOpenDetails(); }}
+        style={{
+          display: "block",
+          width: "100%",
+          border: "none",
+          background: "transparent",
+          padding: 0,
+          textAlign: "left",
+          fontFamily: "inherit",
+          fontSize: 12,
+          color: t.ink3,
+          lineHeight: 1.5,
+          marginBottom: 10,
+          cursor: "pointer",
+        }}
+      >
+        {rationalePreview(flag.rationale)}
+        <span style={{ color: t.accent, fontFamily: t.mono, fontSize: 10, marginLeft: 6 }}>
+          Details
+        </span>
+      </button>
 
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: t.ink4, flexWrap: "wrap" }}>
         <button onClick={(e) => { e.stopPropagation(); onJumpTo(); }} style={{
@@ -586,7 +630,7 @@ function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpen
           # data
         </button>
         <span style={{ fontSize: 10, fontFamily: t.mono }}>
-          "{flag.sourceLocation.spans[0]}"
+          "{truncateText(firstSpan, 84)}"
         </span>
       </div>
 
@@ -609,6 +653,223 @@ function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpen
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function FlagDetailModal({
+  flag,
+  decision,
+  notes,
+  onClose,
+}: {
+  flag: Flag;
+  decision?: string;
+  notes?: string;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const evidence = flag.sourceLocation.spans.length > 0
+    ? flag.sourceLocation.spans
+    : ["No source span was provided for this flag."];
+  const statusLabel = decision === "CONFIRM"
+    ? "Confirmed"
+    : decision === "OVERRIDE"
+      ? "Overridden"
+      : "Pending";
+
+  return (
+    <div
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${flag.ruleCode} details`}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 70,
+        background: "rgba(12,18,28,0.46)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+      }}
+    >
+      <div
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          width: "min(760px, calc(100vw - 32px))",
+          maxHeight: "min(780px, calc(100vh - 40px))",
+          background: t.surface,
+          border: `1px solid ${t.line}`,
+          borderRadius: 4,
+          boxShadow: "0 24px 80px rgba(0,0,0,0.32)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: "18px 22px 14px", borderBottom: `1px solid ${t.line}` }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: t.mono, fontSize: 13, fontWeight: 700, color: t.ink }}>
+                  {flag.ruleCode}
+                </span>
+                <SeverityChip severity={flag.severity} />
+                <span style={{
+                  fontFamily: t.mono,
+                  fontSize: 10,
+                  color: decision === "CONFIRM" ? t.high : decision === "OVERRIDE" ? t.ok : t.ink4,
+                  background: decision === "CONFIRM" ? t.highBg : decision === "OVERRIDE" ? t.okBg : t.surfaceAlt,
+                  border: `1px solid ${t.line}`,
+                  borderRadius: 2,
+                  padding: "2px 7px",
+                  textTransform: "uppercase",
+                }}>
+                  {statusLabel}
+                </span>
+                <span style={{ fontFamily: t.mono, fontSize: 10, color: t.ink4 }}>
+                  {flag.safePractice}
+                </span>
+              </div>
+              <div style={{ fontSize: 18, fontFamily: t.serif, fontWeight: 650, color: t.ink, lineHeight: 1.25 }}>
+                {flag.ruleName.replaceAll("_", " ")}
+              </div>
+            </div>
+            <button onClick={onClose} style={{
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              color: t.ink3,
+              fontSize: 22,
+              lineHeight: 1,
+              padding: 0,
+            }}>
+              &times;
+            </button>
+          </div>
+        </div>
+
+        <div style={{ overflow: "auto", padding: "18px 22px 20px" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+            gap: 8,
+            marginBottom: 16,
+          }}>
+            {[
+              ["Page", String(flag.sourceLocation.page)],
+              ["Severity", flag.severity],
+              ["Source spans", String(evidence.length)],
+              ["Decision", statusLabel],
+            ].map(([label, value]) => (
+              <div key={label} style={{
+                border: `1px solid ${t.line2}`,
+                background: t.surfaceAlt,
+                borderRadius: 3,
+                padding: "8px 10px",
+              }}>
+                <div style={{ fontFamily: t.mono, fontSize: 9, color: t.ink4, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                  {label}
+                </div>
+                <div style={{ fontSize: 13, color: t.ink2, marginTop: 3, fontWeight: 600 }}>
+                  {value}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <section style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: t.mono, fontSize: 10, color: t.ink4, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+              Rationale
+            </div>
+            <div style={{
+              border: `1px solid ${t.line}`,
+              background: t.surface,
+              borderRadius: 3,
+              padding: "12px 14px",
+            }}>
+              {rationaleParagraphs(flag.rationale).map((paragraph, index) => (
+                <p key={index} style={{
+                  margin: index === 0 ? "0 0 9px" : "9px 0",
+                  color: t.ink2,
+                  fontSize: 13,
+                  lineHeight: 1.58,
+                }}>
+                  {paragraph}
+                </p>
+              ))}
+            </div>
+          </section>
+
+          <section style={{ marginBottom: notes ? 18 : 0 }}>
+            <div style={{ fontFamily: t.mono, fontSize: 10, color: t.ink4, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+              Source Evidence
+            </div>
+            <div style={{ border: `1px solid ${t.line}`, borderRadius: 3, overflow: "hidden" }}>
+              {evidence.map((span, index) => (
+                <div key={`${index}-${span}`} style={{
+                  display: "grid",
+                  gridTemplateColumns: "42px 1fr",
+                  gap: 10,
+                  padding: "9px 12px",
+                  borderBottom: index < evidence.length - 1 ? `1px solid ${t.line2}` : "none",
+                  background: index % 2 ? t.surfaceAlt : t.surface,
+                }}>
+                  <div style={{ fontFamily: t.mono, fontSize: 10, color: t.ink4 }}>
+                    #{index + 1}
+                  </div>
+                  <div style={{ fontFamily: t.mono, fontSize: 11, color: t.ink2, lineHeight: 1.5, wordBreak: "break-word" }}>
+                    {span}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {notes && (
+            <section>
+              <div style={{ fontFamily: t.mono, fontSize: 10, color: t.ink4, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+                Override Notes
+              </div>
+              <div style={{
+                border: `1px solid ${t.line}`,
+                background: t.surfaceAlt,
+                borderRadius: 3,
+                padding: "10px 12px",
+                color: t.ink2,
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}>
+                {notes}
+              </div>
+            </section>
+          )}
+        </div>
+
+        <div style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          padding: "12px 22px",
+          borderTop: `1px solid ${t.line}`,
+          background: t.surfaceAlt,
+        }}>
+          <button onClick={onClose} style={{
+            border: `1px solid ${t.accent}`,
+            background: t.accent,
+            color: "#fff",
+            borderRadius: 2,
+            padding: "7px 12px",
+            fontFamily: t.mono,
+            fontSize: 11,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}>
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -774,6 +1035,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [drawerFlag, setDrawerFlag] = useState<Flag | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [detailFlag, setDetailFlag] = useState<Flag | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [queueOpen, setQueueOpen] = useState(true);
@@ -956,6 +1218,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
         break;
       case "escape":
         setDrawerOpen(false);
+        setDetailFlag(null);
         setShowShortcuts(false);
         break;
       default: {
@@ -1087,6 +1350,11 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   const canSubmit = allDecided && allOverridesNoted && !isAppLoading && !!app;
   const jumpTo = (flag: Flag) => setCurrentPage(flag.sourceLocation.page);
   const openDrawer = (flag: Flag | null) => { setDrawerFlag(flag); setDrawerOpen(true); };
+  const openFlagDetails = (flag: Flag) => {
+    setDetailFlag(flag);
+    const displayIndex = displayFlags.findIndex((item) => item.flag === flag);
+    if (displayIndex >= 0) setActiveFlagIdx(displayIndex);
+  };
   const showQueueSidebar = queueOpen && !isTablet && !isPhone;
   const reviewGridTemplateColumns = isPhone
     ? "1fr"
@@ -1383,8 +1651,8 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
           <div style={{ flexShrink: 0 }}>
             {isAppLoading || !app ? (
               <div style={{
-                width: Math.round(560 * ((isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom)),
-                minHeight: Math.round(720 * ((isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom)),
+                width: Math.round(560 * ((isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom * TRANSCRIPT_RENDER_SCALE_FACTOR)),
+                minHeight: Math.round(720 * ((isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom * TRANSCRIPT_RENDER_SCALE_FACTOR)),
                 borderRadius: 2,
                 background: `linear-gradient(90deg, ${t.line2} 25%, ${t.line} 50%, ${t.line2} 75%)`,
                 backgroundSize: "200% 100%",
@@ -1396,7 +1664,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
                 appId={id!}
                 pages={pages}
                 currentPage={currentPage}
-                pdfScale={(isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom}
+                pdfScale={(isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom * TRANSCRIPT_RENDER_SCALE_FACTOR}
               />
             )}
           </div>
@@ -1687,6 +1955,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
                     onNotes={(n) => setDecisions((x) => ({ ...x, [flag.ruleCode]: { ...x[flag.ruleCode], decision: x[flag.ruleCode]?.decision, notes: n } }))}
                     onJumpTo={() => jumpTo(flag)}
                     onOpenData={() => openDrawer(flag)}
+                    onOpenDetails={() => openFlagDetails(flag)}
                   />
                 );
               })}
@@ -1739,6 +2008,15 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
       {/* Extracted data drawer */}
       {drawerOpen && (
         <ExtractedDataDrawer flag={drawerFlag} extraction={extraction} onClose={() => setDrawerOpen(false)} />
+      )}
+
+      {detailFlag && (
+        <FlagDetailModal
+          flag={detailFlag}
+          decision={decisions[detailFlag.ruleCode]?.decision}
+          notes={decisions[detailFlag.ruleCode]?.notes}
+          onClose={() => setDetailFlag(null)}
+        />
       )}
 
       {submitModalOpen && (

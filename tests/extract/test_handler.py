@@ -912,6 +912,90 @@ def test_identity_redaction_bar_detection():
     assert _mod._detect_identity_redaction_marks(img) is True
 
 
+def test_identity_redaction_detection_ignores_scan_frame():
+    img = Image.new("RGB", (1000, 1200), "white")
+    for x in range(0, 1000):
+        for y in range(0, 18):
+            img.putpixel((x, y), (0, 0, 0))
+        for y in range(1182, 1200):
+            img.putpixel((x, y), (0, 0, 0))
+    for y in range(0, 1200):
+        for x in range(0, 18):
+            img.putpixel((x, y), (0, 0, 0))
+        for x in range(982, 1000):
+            img.putpixel((x, y), (0, 0, 0))
+
+    assert _mod._detect_identity_redaction_marks(img) is False
+
+
+def test_visible_identity_header_clears_model_only_redaction():
+    record = {
+        "identity_redaction_detected": True,
+        "identity_redaction_detected_confidence": "medium",
+        "identity_redaction_detected_source": {
+            "page_number": 1,
+            "text_spans": ["student identity header appears removed"],
+        },
+        "suspected_alteration_fields": [
+            "applicant/student identity redaction",
+        ],
+        "suspected_alteration_fields_confidence": "medium",
+        "suspected_alteration_fields_source": {
+            "page_number": 1,
+            "text_spans": ["applicant/student identity redaction"],
+        },
+    }
+    textract_doc = {
+        "pages": [
+            {
+                "page_number": 1,
+                "raw_text": (
+                    "SSN:305-12-3456 Student No 1012056069 "
+                    "Date of Birth:11/11/2025\n"
+                    "Record of: Sabin Baral\n"
+                    "Current Name: Sabin Baral"
+                ),
+                "lines": [
+                    {
+                        "text": (
+                            "SSN:305-12-3456 Student No 1012056069 "
+                            "Date of Birth:11/11/2025"
+                        )
+                    },
+                    {"text": "Record of: Sabin Baral"},
+                    {"text": "Current Name: Sabin Baral"},
+                ],
+                "queries": [
+                    {
+                        "alias": "applicant_name",
+                        "answers": [{"text": "Sabin Baral", "verified": True}],
+                    },
+                    {
+                        "alias": "license_number",
+                        "answers": [{"text": "1012056069", "verified": True}],
+                    },
+                    {
+                        "alias": "date_of_birth",
+                        "answers": [{"text": "11/11/2025", "verified": True}],
+                    },
+                ],
+                "tables": [],
+                "forms": [],
+                "layouts": [],
+                "signatures": [],
+            }
+        ]
+    }
+    img = Image.new("RGB", (1000, 1200), "white")
+
+    _mod._apply_textract_backed_page_fields(record, textract_doc, 1, img)
+
+    assert record["identity_redaction_detected"] is False
+    assert record["identity_redaction_detected_confidence"] == "high"
+    assert record["applicant_name_visible"] == "yes"
+    assert record["suspected_alteration_fields"] == []
+
+
 # ── (c) response parsed into the correct field structure ──────────────────────
 
 

@@ -63,26 +63,24 @@ def test_phys_001_check2_no_fire_absent():
     assert check_phys_001({"seal_quality": "absent"}) == []
 
 
-# Check 3: seal text mismatch
+# Removed checks: seal text mismatch and security feature absence
 
-def test_phys_001_check3_fires_seal_text_mismatch():
+def test_phys_001_does_not_flag_seal_text_mismatch():
     agg = {
         "seal_visible_text": "RandomUniversity Press",
         "institution": "Northside Nursing College",
     }
-    flags = check_phys_001(agg)
-    low_flags = [f for f in flags if f.severity == "low" and "seal text" in f.rule_description.lower()]
-    assert len(low_flags) == 1
+    assert check_phys_001(agg) == []
 
 
-def test_phys_001_check3_no_fire_when_no_seal_text():
+def test_phys_001_no_fire_when_no_seal_text():
     """Fallback: seal_visible_text empty/null → skip Check 3."""
     agg = {"seal_visible_text": "", "institution": "Northside Nursing College"}
     flags = check_phys_001(agg)
     assert not any("seal text" in f.rule_description.lower() for f in flags)
 
 
-def test_phys_001_check3_no_fire_when_text_matches():
+def test_phys_001_no_fire_when_text_matches():
     agg = {
         "seal_visible_text": "Northside Nursing College Official Seal",
         "institution": "Northside Nursing College",
@@ -91,19 +89,15 @@ def test_phys_001_check3_no_fire_when_text_matches():
     assert not any("seal text" in f.rule_description.lower() for f in flags)
 
 
-# Check 4: no security features
-
-def test_phys_001_check4_fires_empty_features_assessable():
+def test_phys_001_does_not_flag_empty_security_features():
     agg = {
         "security_features_present": [],
         "security_features_assessable": "yes",
     }
-    flags = check_phys_001(agg)
-    assert any(f.rule_code == "PHYS_001" and f.severity == "high"
-               and "security features" in f.rule_description.lower() for f in flags)
+    assert check_phys_001(agg) == []
 
 
-def test_phys_001_check4_no_fire_when_not_assessable():
+def test_phys_001_no_fire_when_security_features_not_assessable():
     """Fallback: security_features_assessable == 'no' → skip Check 4."""
     agg = {
         "security_features_present": [],
@@ -113,7 +107,7 @@ def test_phys_001_check4_no_fire_when_not_assessable():
                    for f in check_phys_001(agg))
 
 
-def test_phys_001_check4_no_fire_with_features():
+def test_phys_001_no_fire_with_security_features():
     agg = {
         "security_features_present": ["watermark"],
         "security_features_assessable": "yes",
@@ -122,7 +116,7 @@ def test_phys_001_check4_no_fire_with_features():
                    for f in check_phys_001(agg))
 
 
-def test_phys_001_check4_no_fire_when_visible_seal_present():
+def test_phys_001_no_fire_when_visible_seal_present():
     agg = {
         "seal_type": "printed_flat",
         "security_features_present": [],
@@ -132,7 +126,7 @@ def test_phys_001_check4_no_fire_when_visible_seal_present():
                    for f in check_phys_001(agg))
 
 
-# Check 5: seal not on all pages
+# Check 3: seal not on all pages
 
 def test_phys_001_check5_fires_seal_not_on_all_pages():
     agg = {
@@ -205,7 +199,7 @@ def test_phys_001_multiple_checks_fire():
         "security_features_assessable": "yes",
     }
     flags = check_phys_001(agg)
-    assert len(flags) >= 3
+    assert len(flags) == 2
 
 
 # ── PHYS_002 — Registrar Information ─────────────────────────────────────────

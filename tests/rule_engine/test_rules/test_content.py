@@ -1045,6 +1045,46 @@ def test_cont_004_check2_fires_high_duplicate_volume():
     flags = check_cont_004(agg)
     assert any("proportion" in f.rule_description.lower() and f.severity == "high"
                for f in flags)
+    volume_flag = next(f for f in flags if "proportion" in f.rule_description.lower())
+    for i in range(1, 8):
+        assert f"NUR10{i}" in volume_flag.rationale
+
+
+def test_cont_004_check2_rationale_tracks_all_duplicate_rows():
+    courses = [
+        {
+            **_course("MUO 1181", "Jazz Ensemble II", 1, grade_points=4.0),
+            "grade": "A",
+            "source_location": {
+                "page_number": 2,
+                "text_spans": ["MUO 1181 2 Jazz Ensemble II 1.00 A 4.00 I"],
+            },
+        },
+        {
+            **_course("MUO 1181", "Jazz Ensemble II", 1, grade_points=4.0),
+            "grade": "A",
+            "source_location": {
+                "page_number": 2,
+                "text_spans": ["MUO 1181 3 Jazz Ensemble II 1.00 A 4.00 I"],
+            },
+        },
+        _course("NUR101", "Course 1", 3),
+        _course("NUR101", "Course 1", 3),
+        _course("NUR102", "Course 2", 3),
+        _course("NUR102", "Course 2", 3),
+    ]
+    flags = check_cont_004({"courses": courses})
+    volume_flag = next(f for f in flags if "proportion" in f.rule_description.lower())
+
+    assert "MUO 1181" in volume_flag.rationale
+    assert "NUR101" in volume_flag.rationale
+    assert "NUR102" in volume_flag.rationale
+    assert "MUO 1181 2 Jazz Ensemble II 1.00 A 4.00 I" in (
+        volume_flag.source_location["text_spans"]
+    )
+    assert "MUO 1181 3 Jazz Ensemble II 1.00 A 4.00 I" in (
+        volume_flag.source_location["text_spans"]
+    )
 
 
 def test_cont_004_check2_no_fire_low_duplicate_volume():

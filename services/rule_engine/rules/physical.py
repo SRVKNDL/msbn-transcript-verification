@@ -30,18 +30,13 @@ def _parse_year(date_str) -> int | None:
 
 
 def check_phys_001(agg: dict) -> list:
-    """Seal authenticity — five checks covering presence, quality, text, security features, and page coverage."""
+    """Seal authenticity — presence, quality, and institution-specific page coverage."""
     flags = []
 
     seal_type = agg.get("seal_type")
     seal_quality = agg.get("seal_quality")
-    institution = agg.get("institution") or ""
-    seal_visible_text = agg.get("seal_visible_text") or ""
-    security_features = agg.get("security_features_present")
-    security_assessable = agg.get("security_features_assessable")
     seal_pages = agg.get("seal_present_on_pages")
     page_count = agg.get("document_page_count")
-    has_visible_seal = seal_type in _POSITIVE_SEAL_TYPES or bool(seal_visible_text)
 
     # Check 1 — seal absent (MEDIUM); skip if seal_type == "unclear"
     # Severity is MEDIUM (advisory) because watermark seals and faint logo-based
@@ -79,46 +74,7 @@ def check_phys_001(agg: dict) -> list:
             source_location=_src(agg, "seal_quality"),
         ))
 
-    # Check 3 — seal text doesn't appear to match institution name (LOW)
-    # Skip if seal/watermark text isn't readable (seal_visible_text empty/null)
-    if seal_visible_text and institution:
-        inst_words = [w for w in institution.lower().split() if len(w) > 3]
-        if inst_words and not any(w in seal_visible_text.lower() for w in inst_words):
-            flags.append(Flag(
-                rule_code="PHYS_001",
-                rule_description="Seal text does not appear to match institution name",
-                severity="low",
-                category="SP-4",
-                rationale=(
-                    f"Readable seal/watermark text ('{seal_visible_text}') does not contain "
-                    f"words from the institution name ('{institution}'). Watermark seals often "
-                    "have partial text, so a mismatch is suspicious but not conclusive alone."
-                ),
-                source_location=_src(agg, "seal_visible_text"),
-            ))
-
-    # Check 4 — no security features present (HIGH)
-    # Skip if security_features_assessable == "no"
-    if (
-        security_assessable != "no"
-        and isinstance(security_features, list)
-        and len(security_features) == 0
-        and not has_visible_seal
-    ):
-        flags.append(Flag(
-            rule_code="PHYS_001",
-            rule_description="No security features present",
-            severity="high",
-            category="SP-4",
-            rationale=(
-                "No security features (watermark, micro-printing, hologram, serial number) "
-                "were detected. Legitimate transcripts from most accredited institutions "
-                "include at least one physical security feature."
-            ),
-            source_location=_src(agg, "security_features_present"),
-        ))
-
-    # Check 5 — seal not present on all pages (MEDIUM)
+    # Check 3 — seal not present on all pages (MEDIUM)
     # Only enforce this when an institution-specific policy says every page
     # should carry the seal. Many legitimate transcripts place the seal on the
     # first or final attestation page only.

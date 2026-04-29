@@ -213,6 +213,9 @@ identity_redaction_detected
   Value: boolean (true if applicant/student identity data is visibly redacted, blacked out,
          covered, or removed from the transcript header)
   Description: Whether the transcript appears to have hidden applicant identity information.
+               Do not mark true for ordinary whitespace, page borders, scan/crop edges, or
+               a readable identity header where Record of/Current Name, SSN, Student No, or
+               Date of Birth values are visible.
 
 overlapping_text_detected
   Value: boolean (true if text fragments overlap, are layered on top of each other, or appear

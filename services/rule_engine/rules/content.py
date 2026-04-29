@@ -719,33 +719,45 @@ def check_cont_004(agg: dict) -> list:
             if len(group) >= 2:
                 without_retake = [c for c in group if not c.get("retake_marker")]
                 if len(without_retake) >= 2:
+                    duplicate_rows = _format_duplicate_course_rows(without_retake)
                     flags.append(Flag(
                         rule_code="CONT_004",
-                        rule_description=f"Exact duplicate course without retake marker: {code_str}",
+                        rule_description=(
+                            f"Exact duplicate course without retake marker: {code_str}"
+                        ),
                         severity="high",
                         category="SP-5",
                         rationale=(
                             f"Course '{code_str} — {title_str}' appears {len(without_retake)} "
                             "times with no retake or repeat marker. Duplicate course entries "
-                            "without a legitimate repeat indicator are a fabrication indicator."
+                            "without a legitimate repeat indicator are a fabrication indicator. "
+                            f"Duplicate rows reviewed: {duplicate_rows}."
                         ),
-                        source_location=_src(agg, "courses"),
+                        source_location=_source_for_course_rows(agg, without_retake),
                     ))
 
     # Check 2 — duplicate volume threshold >20% (HIGH)
     if non_transfer:
-        seen: dict = {}
-        duplicated: set = set()
+        groups: dict[str, list[dict]] = defaultdict(list)
         for c in non_transfer:
             key = c.get("course_code") or c.get("course_title") or c.get("name")
             if key:
-                if key in seen:
-                    duplicated.add(key)
-                else:
-                    seen[key] = True
+                groups[str(key)].append(c)
+
+        duplicated = {
+            key: group
+            for key, group in groups.items()
+            if len(group) > 1
+        }
 
         dup_ratio = len(duplicated) / len(non_transfer)
         if dup_ratio > 0.20:
+            duplicate_courses = [
+                course
+                for key in sorted(duplicated)
+                for course in duplicated[key]
+            ]
+            duplicate_evidence = _format_duplicate_course_groups(duplicated)
             flags.append(Flag(
                 rule_code="CONT_004",
                 rule_description="High proportion of duplicate courses",
@@ -755,9 +767,77 @@ def check_cont_004(agg: dict) -> list:
                     f"{len(duplicated)} of {len(non_transfer)} courses "
                     f"({dup_ratio:.0%}) appear more than once, exceeding the 20% threshold. "
                     "A high volume of duplicate entries strongly suggests transcript padding "
-                    "or fabrication."
+                    "or fabrication. Duplicated course identifiers reviewed: "
+                    f"{duplicate_evidence}."
                 ),
-                source_location=_src(agg, "courses"),
+                source_location=_source_for_course_rows(agg, duplicate_courses),
             ))
 
     return flags
+
+
+def _format_duplicate_course_groups(groups: dict[str, list[dict]]) -> str:
+    parts = []
+    for key in sorted(groups):
+        rows = _unique_preserve_order(_course_row_label(course) for course in groups[key])
+        parts.append(f"{key} ({len(groups[key])} entries: {', '.join(rows)})")
+    return "; ".join(parts)
+
+
+def _format_duplicate_course_rows(courses: list[dict]) -> str:
+    return "; ".join(_course_row_label(course) for course in courses)
+
+
+def _course_row_label(course: dict) -> str:
+    code = course.get("course_code") or course.get("code") or ""
+    title = course.get("course_title") or course.get("name") or ""
+    credit_hours = course.get("credit_hours")
+    grade = course.get("grade")
+    quality_points = course.get("quality_points") or course.get("grade_points")
+    term = course.get("term") or course.get("semester")
+    parts = [str(part).strip() for part in (code, title) if str(part or "").strip()]
+    if credit_hours is not None:
+        parts.append(f"{credit_hours} credits")
+    if grade:
+        parts.append(f"grade {grade}")
+    if quality_points is not None:
+        parts.append(f"points {quality_points}")
+    if term:
+        parts.append(f"term {term}")
+    return " ".join(parts) or "unnamed course row"
+
+
+def _source_for_course_rows(agg: dict, courses: list[dict]) -> dict | None:
+    fallback = _src(agg, "courses")
+    spans = []
+    page_number = None
+
+    for course in courses:
+        source = course.get("source_location")
+        if isinstance(source, dict):
+            page_number = page_number or source.get("page_number") or source.get("page")
+            for span in source.get("text_spans") or source.get("spans") or []:
+                text = str(span).strip()
+                if text and text not in spans:
+                    spans.append(text)
+        label = _course_row_label(course)
+        if label not in spans:
+            spans.append(label)
+
+    if spans:
+        if page_number is None and isinstance(fallback, dict):
+            page_number = fallback.get("page_number") or fallback.get("page")
+        return {
+            "page_number": page_number or 1,
+            "text_spans": spans,
+        }
+    return fallback
+
+
+def _unique_preserve_order(values) -> list[str]:
+    unique = []
+    for value in values:
+        text = str(value).strip()
+        if text and text not in unique:
+            unique.append(text)
+    return unique

@@ -114,6 +114,20 @@ _TERM_RE = re.compile(
     re.I,
 )
 _PNV_CODE_RE = re.compile(r"\bPNV\s*-?\s*\d{3,4}[A-Z]?\b", re.I)
+_IDENTITY_REDACTION_WORD_RE = re.compile(
+    r"\b("
+    r"redact(?:ed|ion)?|black(?:ed)?\s*out|blackout|"
+    r"cover(?:ed)?|obscur(?:e|ed|ing)?|removed|hidden"
+    r")\b",
+    re.I,
+)
+_IDENTITY_FIELD_WORD_RE = re.compile(
+    r"\b("
+    r"identity|applicant|student|name|ssn|social security|date of birth|dob|"
+    r"student\s*(?:no|number|id)"
+    r")\b",
+    re.I,
+)
 _NON_COURSE_CODE_PREFIXES = frozenset({
     "FALL",
     "SPRING",
@@ -1323,7 +1337,8 @@ def _apply_textract_backed_page_fields(
     _apply_textract_academic_fields(record, page, page_number)
     _apply_registrar_from_textract(record, page, page_number)
 
-    if _detect_identity_redaction_marks(image):
+    identity_mark_detected = _detect_identity_redaction_marks(image)
+    if identity_mark_detected:
         _set_from_textract(
             record,
             "identity_redaction_detected",
@@ -1354,6 +1369,22 @@ def _apply_textract_backed_page_fields(
                 "text_spans": ["Black redaction mark in applicant/student identity area"],
             },
         )
+    elif (
+        record.get("identity_redaction_detected") is True
+        and _identity_header_has_readable_fields(page)
+    ):
+        _set_from_textract(
+            record,
+            "identity_redaction_detected",
+            False,
+            confidence="high",
+            page_number=page_number,
+            spans=[
+                "Textract read applicant/student identity fields and no black "
+                "redaction mark was detected"
+            ],
+        )
+        _remove_identity_redaction_alterations(record)
 
 
 def _apply_textract_academic_fields(record: dict, page: dict, page_number: int) -> None:
@@ -2122,6 +2153,60 @@ def _looks_like_transcript_identity_area(page: dict) -> bool:
     return "stuid" in raw_text or "student id" in raw_text or "student no" in raw_text
 
 
+def _identity_header_has_readable_fields(page: dict) -> bool:
+    """Return true when multiple applicant identity fields are visibly readable."""
+    raw_text = str(page.get("raw_text") or "")
+    lines = [
+        str(line.get("text") or "").strip()
+        for line in page.get("lines") or []
+        if isinstance(line, dict) and str(line.get("text") or "").strip()
+    ]
+    evidence = "\n".join(lines) if lines else raw_text
+
+    visible_fields = 0
+    if _verified_query_answer(page, "applicant_name"):
+        visible_fields += 1
+    elif re.search(r"\b(record of|current name)\s*:\s*\S+", evidence, re.I):
+        visible_fields += 1
+
+    if _verified_query_answer(page, "license_number"):
+        visible_fields += 1
+    elif re.search(r"\b(student\s*(?:no|number|id|#)|stuid)\s*:?\s*[A-Z0-9-]{3,}", evidence, re.I):
+        visible_fields += 1
+
+    if _verified_query_answer(page, "date_of_birth"):
+        visible_fields += 1
+    elif re.search(r"\b(date of birth|dob)\s*:?\s*\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", evidence, re.I):
+        visible_fields += 1
+
+    if re.search(r"\b(ssn|social security)\s*:?\s*[Xx*\d-]{4,}", evidence, re.I):
+        visible_fields += 1
+
+    return visible_fields >= 2
+
+
+def _remove_identity_redaction_alterations(record: dict) -> None:
+    alterations = record.get("suspected_alteration_fields")
+    if not isinstance(alterations, list):
+        return
+
+    filtered = [
+        item for item in alterations
+        if not _is_identity_redaction_description(str(item))
+    ]
+    record["suspected_alteration_fields"] = filtered
+    if not filtered:
+        record.pop("suspected_alteration_fields_confidence", None)
+        record.pop("suspected_alteration_fields_source", None)
+
+
+def _is_identity_redaction_description(value: str) -> bool:
+    return bool(
+        _IDENTITY_REDACTION_WORD_RE.search(value)
+        and _IDENTITY_FIELD_WORD_RE.search(value)
+    )
+
+
 def _coerce_query_value(field: str, value: str):
     if field in {"final_cum_gpa_stated", "total_credit_hours"}:
         match = re.search(r"\d+(?:\.\d+)?", value)
@@ -2158,13 +2243,15 @@ def _apply_registrar_from_textract(record: dict, page: dict, page_number: int) -
 
 
 def _detect_identity_redaction_marks(image) -> bool:
-    """Detect large black bars in the upper transcript identity/header area."""
+    """Detect filled black redaction bars in the upper transcript identity/header area."""
     grayscale = image.convert("L")
     width, height = grayscale.size
     scan_box = grayscale.crop((0, 0, width, int(height * 0.30)))
     pixels = scan_box.load()
-    min_width = max(60, int(width * 0.055))
-    min_height = max(8, int(height * 0.004))
+    min_width = max(80, int(width * 0.06))
+    min_height = max(12, int(height * 0.006))
+    edge_margin_x = max(8, int(width * 0.015))
+    edge_margin_y = max(4, int(height * 0.003))
 
     for y in range(scan_box.height):
         run_start: int | None = None
@@ -2176,10 +2263,51 @@ def _detect_identity_redaction_marks(image) -> bool:
                 run_end = x if not is_dark else x + 1
                 if run_end - run_start >= min_width:
                     vertical = _dark_run_height(scan_box, run_start, run_end, y)
-                    if vertical >= min_height:
+                    if _is_redaction_bar_candidate(
+                        scan_box,
+                        run_start,
+                        run_end,
+                        y,
+                        vertical,
+                        min_height,
+                        edge_margin_x,
+                        edge_margin_y,
+                    ):
                         return True
                 run_start = None
     return False
+
+
+def _is_redaction_bar_candidate(
+    image,
+    x0: int,
+    x1: int,
+    y0: int,
+    height: int,
+    min_height: int,
+    edge_margin_x: int,
+    edge_margin_y: int,
+) -> bool:
+    if height < min_height:
+        return False
+    if x0 <= edge_margin_x or x1 >= image.width - edge_margin_x:
+        return False
+    if y0 <= edge_margin_y:
+        return False
+
+    width = x1 - x0
+    if width / max(1, height) < 4:
+        return False
+
+    pixels = image.load()
+    dark_pixels = 0
+    total_pixels = width * height
+    for y in range(y0, min(image.height, y0 + height)):
+        for x in range(x0, x1):
+            if pixels[x, y] < 45:
+                dark_pixels += 1
+
+    return dark_pixels / max(1, total_pixels) >= 0.85
 
 
 def _dark_run_height(image, x0: int, x1: int, y0: int) -> int:

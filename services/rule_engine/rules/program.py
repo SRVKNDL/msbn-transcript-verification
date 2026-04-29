@@ -2,6 +2,7 @@
 
 from rules.base import Flag, _src
 from rules.ms_curriculum import (
+    FRAMEWORK_CITATION,
     MS_PN_COURSES,
     VALID_PNV_CODES,
     VALID_BIO_SUBSTITUTIONS,
@@ -22,7 +23,7 @@ def check_prog_001(agg: dict) -> list:
     valid_codes = VALID_PNV_CODES | frozenset(VALID_BIO_SUBSTITUTIONS.keys())
 
     for course in courses:
-        code = (course.get("code") or "").strip().upper()
+        code = _course_code(course)
         if not code.startswith("PNV"):
             continue
         if code not in valid_codes:
@@ -38,7 +39,7 @@ def check_prog_001(agg: dict) -> list:
                         "revision). All valid PNV course codes are defined by the "
                         "MS Community College Board. A course code not in this list "
                         "is a strong fraud indicator. Verify against the official "
-                        "curriculum document."
+                        f"curriculum document, {FRAMEWORK_CITATION}."
                     ),
                     source_location=course.get("source_location"),
                 )
@@ -57,7 +58,7 @@ def check_prog_002(agg: dict) -> list:
 
     flags = []
     for course in courses:
-        code = (course.get("code") or "").strip().upper()
+        code = _course_code(course)
         reported_hours = course.get("credit_hours")
         if reported_hours is None or code not in MS_PN_COURSES:
             continue
@@ -80,7 +81,7 @@ def check_prog_002(agg: dict) -> list:
                         f"{reported} credit hours on the transcript, but the "
                         f"official MS PN curriculum specifies {expected} credit "
                         "hours. Credit hour discrepancies may indicate transcript "
-                        "alteration."
+                        f"alteration, {FRAMEWORK_CITATION}."
                     ),
                     source_location=course.get("source_location"),
                 )
@@ -116,7 +117,7 @@ def check_prog_003(agg: dict) -> list:
                 f"but the official MS Practical Nursing program requires exactly "
                 f"{TOTAL_SEMESTER_HOURS} semester hours (980 clock hours). "
                 "A completed program transcript with a different total is "
-                "suspicious and requires verification."
+                f"suspicious and requires verification, {FRAMEWORK_CITATION}."
             ),
             source_location=_src(agg, "total_credit_hours"),
         )
@@ -134,7 +135,7 @@ def check_prog_004(agg: dict) -> list:
 
     flags = []
     for course in courses:
-        code = (course.get("code") or "").strip().upper()
+        code = _course_code(course)
         semester = course.get("semester")
         if semester is None or code not in MS_PN_COURSES:
             continue
@@ -158,9 +159,13 @@ def check_prog_004(agg: dict) -> list:
                         f"places it no earlier than semester {expected_earliest}. "
                         "Courses have prerequisites and expected ordering; an "
                         "out-of-sequence capstone or advanced course is a red flag "
-                        "for a fabricated transcript."
+                        f"for a fabricated transcript, {FRAMEWORK_CITATION}."
                     ),
                     source_location=course.get("source_location"),
                 )
             )
     return flags
+
+
+def _course_code(course: dict) -> str:
+    return (course.get("code") or course.get("course_code") or "").strip().upper()

@@ -47,7 +47,6 @@ def stacks():
         "TestApiStack",
         env=env,
         dashboard_api_lambda=compute.dashboard_api_lambda,
-        prefill_lambda=compute.prefill_lambda,
         user_pool=auth.user_pool,
         user_pool_client=auth.user_pool_client,
     )
@@ -218,8 +217,8 @@ class TestBedrockIamScope:
                 if "bedrock:InvokeModel" in actions:
                     bedrock_statements.append(stmt)
 
-        assert len(bedrock_statements) == 2, (
-            f"Expected exactly 2 bedrock:InvokeModel statements, found {len(bedrock_statements)}"
+        assert len(bedrock_statements) == 1, (
+            f"Expected exactly 1 bedrock:InvokeModel statement, found {len(bedrock_statements)}"
         )
 
         expected_arn = "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0"
@@ -277,29 +276,23 @@ class TestValidateIamScope:
         assert "dynamodb:BatchWriteItem" in dynamodb_actions
 
 
-class TestPrefillLambda:
-    def test_uses_nova_pro(self, compute_template):
-        compute_template.has_resource_properties(
-            "AWS::Lambda::Function",
-            Match.object_like({
-                "FunctionName": "msbn-prefill",
-                "Timeout": 25,
-                "Environment": {
-                    "Variables": Match.object_like({
-                        "BEDROCK_MODEL_ID": "amazon.nova-pro-v1:0",
-                    })
-                },
-            }),
-        )
+class TestPrefillLambdaDecommissioned:
+    def test_prefill_lambda_not_deployed(self, compute_template):
+        functions = compute_template.find_resources("AWS::Lambda::Function")
+        function_names = {
+            resource.get("Properties", {}).get("FunctionName")
+            for resource in functions.values()
+        }
+        assert "msbn-prefill" not in function_names
 
-    def test_uses_x86_64_architecture(self, compute_template):
-        compute_template.has_resource_properties(
-            "AWS::Lambda::Function",
-            Match.object_like({
-                "FunctionName": "msbn-prefill",
-                "Architectures": ["x86_64"],
-            }),
-        )
+    def test_prefill_routes_not_exposed(self, api_template):
+        routes = api_template.find_resources("AWS::ApiGatewayV2::Route")
+        route_keys = {
+            resource.get("Properties", {}).get("RouteKey")
+            for resource in routes.values()
+        }
+        assert "POST /prefill" not in route_keys
+        assert "POST /prefill-uploads" not in route_keys
 
 
 # ── 5. Cognito password policy and auth hardening ───────────────────────────

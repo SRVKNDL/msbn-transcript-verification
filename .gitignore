@@ -226,3 +226,5 @@ FRONTEND_NAVIGATION_AUDIT.md
 tests/fixtures/aggregation.json
 tests/fixtures/bedrock-playground.json
 tests/playground.json
+tests/rule_engine/test_rules/test_program.py
+tests/fixtures/Microsoft Word - D_51.3901_Practical_Nursing_2024 (4) - 51.3901-practical-nursing.pdf

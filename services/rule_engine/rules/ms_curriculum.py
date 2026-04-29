@@ -20,6 +20,8 @@ class PNVCourse:
 
 
 # 2024 PNV framework, with Option #1 hours as the baseline.
+FRAMEWORK_CITATION = "according to PRACTICAL NURSING MISSISSIPPI CURRICULUM FRAMEWORK (2024)"
+
 MS_PN_COURSES: dict[str, PNVCourse] = {
     "PNV 1116": PNVCourse(
         code="PNV 1116", name="Practical Nursing Foundations",

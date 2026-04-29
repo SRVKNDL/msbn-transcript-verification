@@ -9,6 +9,50 @@ html, body, #root {
   box-sizing: border-box;
 }
 
+.msbn-hover-button {
+  transition: background 0.28s ease, border-color 0.28s ease, color 0.28s ease, transform 0.28s ease, box-shadow 0.28s ease;
+}
+
+.msbn-hover-button:hover {
+  transform: translateY(-1px) scale(1.035);
+  border-color: #60BBB7 !important;
+  background: #41709A !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 18px rgba(55, 100, 145, 0.22);
+}
+
+.msbn-icon-button {
+  transition: background 0.28s ease, border-color 0.28s ease, color 0.28s ease, transform 0.28s ease, box-shadow 0.28s ease;
+}
+
+.msbn-icon-button:hover {
+  transform: translateY(-1px) scale(1.06);
+  border-color: #60BBB7 !important;
+  background: #376491 !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 18px rgba(55, 100, 145, 0.24);
+}
+
+.msbn-brand-button {
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+
+.msbn-brand-button:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.nursys-link {
+  transition: background 0.28s ease, border-color 0.28s ease, transform 0.28s ease, box-shadow 0.28s ease;
+}
+
+.nursys-link:hover {
+  transform: translateY(-1px) scale(1.04);
+  border-color: #0489c6 !important;
+  background: #ffffff !important;
+  box-shadow: 0 8px 18px rgba(4, 137, 198, 0.22);
+}
+
 /* Drawer slide animation */
 @keyframes drawerSlide {
   from { transform: translateX(40px); opacity: 0; }

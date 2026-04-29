@@ -32,6 +32,12 @@ const QUEUE_SORT_LABELS: Record<QueueSort, string> = {
   institution: "institution",
 };
 type FlagSort = "severity" | "page" | "rule" | "status";
+const FLAG_SORT_LABELS: Record<FlagSort, string> = {
+  severity: "Severity",
+  page: "Page",
+  rule: "Rule",
+  status: "Status",
+};
 
 function severityRank(severity: Flag["severity"]) {
   return SEVERITY_ORDER[severity] ?? 3;
@@ -1135,11 +1141,11 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
         background: t.primary, display: "flex", alignItems: "center", flexWrap: "wrap", padding: isPhone ? "10px 16px" : "10px 22px", gap: 12,
         color: t.primaryInk,
       }}>
-        <button onClick={() => setQueueOpen((open) => !open)} style={{
+        <button onClick={() => setQueueOpen((open) => !open)} className="msbn-hover-button" style={{
           border: "1px solid rgba(255,255,255,0.2)",
           background: "rgba(255,255,255,0.08)",
           color: "inherit",
-          width: 32,
+          minWidth: 32,
           height: 32,
           borderRadius: 4,
           cursor: "pointer",
@@ -1147,26 +1153,30 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
           lineHeight: 1,
           fontFamily: t.mono,
           padding: 0,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 7,
+          paddingInline: isPhone ? 0 : 10,
         }} title={queueOpen ? "Hide review queue (B)" : "Show review queue (B)"} aria-label={queueOpen ? "Hide review queue" : "Show review queue"}>
-          &#9776;
+          <span>&#9776;</span>
+          {!isPhone && <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4 }}>Queue</span>}
         </button>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => navigate(APP_ROUTES.dashboard)}>
-          <div style={{
-            width: 30,
-            height: 30,
-            borderRadius: 6,
-            background: t.accent,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: 0.5,
-            fontFamily: t.mono,
-            color: "#fff",
-          }}>
-            MS
-          </div>
+        <div className="msbn-brand-button" style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => navigate(APP_ROUTES.dashboard)}>
+          <img
+            src="/assets/msbn-logo.png"
+            alt="Mississippi Board of Nursing"
+            style={{
+              width: isPhone ? 104 : 126,
+              height: "auto",
+              display: "block",
+              background: "#fff",
+              borderRadius: 3,
+              padding: "3px 5px",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.14)",
+              flexShrink: 0,
+            }}
+          />
           <div>
             <div style={{
               fontSize: 10,
@@ -1182,7 +1192,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
           </div>
         </div>
         <div style={{ height: 20, width: 1, background: "rgba(255,255,255,0.16)" }} />
-        <button onClick={() => navigate(APP_ROUTES.dashboard)} style={{
+        <button onClick={() => navigate(APP_ROUTES.dashboard)} className="msbn-hover-button" style={{
           border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)",
           padding: "4px 10px", fontSize: 11, borderRadius: 2, cursor: "pointer",
           fontFamily: t.mono, color: "rgba(255,255,255,0.82)",
@@ -1191,13 +1201,17 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
         {!isNarrow && flags.length > 0 && <ProgressBar total={flags.length} resolved={resolvedCount} />}
         <div style={{ flex: 1 }} />
         {isNarrow && flags.length > 0 && <div style={{ fontSize: 11, fontFamily: t.mono }}>{resolvedCount}/{flags.length} resolved</div>}
-        <a href={`https://www.nursys.com`} target="_blank" rel="noopener noreferrer" style={{
-          border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)",
-          color: "rgba(255,255,255,0.82)", padding: "5px 12px", fontSize: 11, borderRadius: 2,
+        <a href={`https://www.nursys.com`} target="_blank" rel="noopener noreferrer" className="nursys-link" style={{
+          border: "1px solid rgba(255,255,255,0.34)", background: "#fff",
+          color: "#0489c6", padding: "4px 9px", fontSize: 11, borderRadius: 3,
           fontFamily: t.mono,
           textDecoration: "none", cursor: "pointer",
-        }}>Check Nursys &#8599;</a>
-        <button onClick={() => setShowShortcuts(true)} style={{
+          display: "inline-flex", alignItems: "center", gap: 8,
+        }}>
+          <img src="/assets/nursys-logo.svg" alt="Nursys" style={{ width: 72, height: 24, objectFit: "contain", display: "block" }} />
+          <span style={{ color: "#376491", fontWeight: 800 }}>&#8599;</span>
+        </a>
+        <button onClick={() => setShowShortcuts(true)} className="msbn-hover-button" style={{
           border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)",
           color: "rgba(255,255,255,0.7)", width: 24, height: 24, fontSize: 13, borderRadius: 2,
           cursor: "pointer", fontFamily: t.mono,
@@ -1394,24 +1408,26 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
           boxSizing: "border-box",
           flexShrink: 0,
         }}>
-          <span>source: uploaded transcript · nova-pro-v1:0</span>
-          <div style={{ height: 12, width: 1, background: t.line }} />
-          <button onClick={() => zoomTranscriptBy(-0.1)} style={{
+          <button onClick={() => zoomTranscriptBy(-0.1)} className="msbn-icon-button" style={{
             border: `1px solid ${t.line}`, background: t.surface,
-            width: 24, height: 22, fontSize: 13, cursor: "pointer", borderRadius: 2,
-            color: t.ink3, fontFamily: "inherit", padding: 0,
+            width: 32, height: 30, fontSize: 16, cursor: "pointer", borderRadius: 3,
+            color: t.primary, fontFamily: "inherit", padding: 0,
+            fontWeight: 800,
           }} title="Zoom out">&minus;</button>
-          <button onClick={() => applyTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM)} style={{
-            border: "none", background: "transparent",
-            minWidth: 42, height: 22, fontSize: 10, cursor: "pointer",
-            color: t.ink4, fontFamily: "inherit", padding: "0 4px",
+          <button onClick={() => applyTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM)} className="msbn-hover-button" style={{
+            border: `1px solid ${t.line}`, background: t.surface,
+            minWidth: 52, height: 30, fontSize: 10, cursor: "pointer",
+            color: t.primary, fontFamily: "inherit", padding: "0 7px",
+            borderRadius: 3,
+            fontWeight: 800,
           }} title="Reset zoom">
             {Math.round(transcriptZoom * 100)}%
           </button>
-          <button onClick={() => zoomTranscriptBy(0.1)} style={{
+          <button onClick={() => zoomTranscriptBy(0.1)} className="msbn-icon-button" style={{
             border: `1px solid ${t.line}`, background: t.surface,
-            width: 24, height: 22, fontSize: 13, cursor: "pointer", borderRadius: 2,
-            color: t.ink3, fontFamily: "inherit", padding: 0,
+            width: 32, height: 30, fontSize: 16, cursor: "pointer", borderRadius: 3,
+            color: t.primary, fontFamily: "inherit", padding: 0,
+            fontWeight: 800,
           }} title="Zoom in">+</button>
         </div>}
         {isTranscriptFullscreen && (
@@ -1457,27 +1473,28 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
               }}>{p}</button>
             ))}
             <div style={{ width: 18, height: 1, background: t.line }} />
-            <button onClick={() => zoomTranscriptBy(-0.1)} style={{
+            <button onClick={() => zoomTranscriptBy(-0.1)} className="msbn-icon-button" style={{
               border: `1px solid ${t.line}`, background: t.surface,
-              width: 26, height: 24, fontSize: 14, cursor: "pointer", borderRadius: 2,
-              color: t.ink3, fontFamily: "inherit", padding: 0,
+              width: 32, height: 30, fontSize: 16, cursor: "pointer", borderRadius: 3,
+              color: t.primary, fontFamily: "inherit", padding: 0, fontWeight: 800,
             }} title="Zoom out">&minus;</button>
-            <button onClick={() => applyTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM)} style={{
+            <button onClick={() => applyTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM)} className="msbn-hover-button" style={{
               border: `1px solid ${t.line}`, background: t.surface,
-              width: 34, minHeight: 28, fontSize: 9, cursor: "pointer", borderRadius: 2,
-              color: t.ink3, fontFamily: "inherit", padding: "2px 0",
+              width: 40, minHeight: 32, fontSize: 9, cursor: "pointer", borderRadius: 3,
+              color: t.primary, fontFamily: "inherit", padding: "2px 0", fontWeight: 800,
             }} title="Reset zoom">
               {Math.round(transcriptZoom * 100)}%
             </button>
-            <button onClick={() => zoomTranscriptBy(0.1)} style={{
+            <button onClick={() => zoomTranscriptBy(0.1)} className="msbn-icon-button" style={{
               border: `1px solid ${t.line}`, background: t.surface,
-              width: 26, height: 24, fontSize: 14, cursor: "pointer", borderRadius: 2,
-              color: t.ink3, fontFamily: "inherit", padding: 0,
+              width: 32, height: 30, fontSize: 16, cursor: "pointer", borderRadius: 3,
+              color: t.primary, fontFamily: "inherit", padding: 0, fontWeight: 800,
             }} title="Zoom in">+</button>
           </div>
         )}
         <button
           onClick={toggleTranscriptFullscreen}
+          className="msbn-icon-button"
           aria-label={isTranscriptFullscreen ? "Exit transcript fullscreen" : "Enter transcript fullscreen"}
           title={isTranscriptFullscreen ? "Exit transcript fullscreen (F)" : "Enter transcript fullscreen (F)"}
           style={{
@@ -1485,18 +1502,18 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
             right: 18,
             bottom: 18,
             zIndex: 4,
-            width: 38,
-            height: 38,
+            width: 44,
+            height: 44,
             borderRadius: 4,
             border: `1px solid ${t.line}`,
             background: t.surface,
-            color: t.ink2,
+            color: t.primary,
             boxShadow: "0 10px 24px rgba(15,23,42,0.16)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             cursor: "pointer",
-            fontSize: 18,
+            fontSize: 21,
             lineHeight: 1,
             padding: 0,
           }}
@@ -1522,25 +1539,29 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
               <Stat label="flags" value={`${flags.length}`} />
               <Stat label="high" value={`${flags.filter((f) => f.severity === "High").length}`} />
-              <Stat label="pages" value={`${app?.pageCount ?? 0}`} />
-              <Stat label="uploaded" value={app?.submittedAt ? new Date(app.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Not available"} />
             </div>
           }
           secondaryActions={
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {flags.length > 0 && <ProgressBar total={flags.length} resolved={resolvedCount} />}
               <div style={{ display: "flex", gap: 8 }}>
-                <a href="https://www.nursys.com" target="_blank" rel="noopener noreferrer" style={{
+                <a href="https://www.nursys.com" target="_blank" rel="noopener noreferrer" className="nursys-link" style={{
                   border: `1px solid ${t.line}`,
                   background: t.surface,
-                  color: t.ink2,
-                  padding: "5px 9px",
+                  color: "#0489c6",
+                  padding: "3px 7px",
                   fontSize: 10,
                   borderRadius: 3,
                   fontFamily: t.mono,
                   textDecoration: "none",
                   cursor: "pointer",
-                }}>Nursys &#8599;</a>
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}>
+                  <img src="/assets/nursys-logo.svg" alt="Nursys" style={{ width: 64, height: 22, objectFit: "contain", display: "block" }} />
+                  <span style={{ color: t.primary, fontWeight: 800 }}>&#8599;</span>
+                </a>
                 <button onClick={() => setShowShortcuts(true)} style={{
                   border: `1px solid ${t.line}`,
                   background: t.surface,
@@ -1577,48 +1598,33 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
               <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, letterSpacing: 0.5, textTransform: "uppercase" }}>
                 Flags raised — {resolvedCount} / {flags.length} resolved
               </div>
-              <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, textTransform: "uppercase", letterSpacing: 0.4 }}>
-                Sort
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <label htmlFor="flag-sort" style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                  Sort
+                </label>
+                <select
+                  id="flag-sort"
+                  value={flagSort}
+                  onChange={(event) => setFlagSort(event.target.value as FlagSort)}
+                  aria-label="Sort flags"
+                  style={{
+                    height: 30,
+                    border: `1px solid ${t.line}`,
+                    background: t.surface,
+                    color: t.ink2,
+                    borderRadius: 3,
+                    padding: "0 8px",
+                    fontSize: 11,
+                    fontFamily: t.mono,
+                    cursor: "pointer",
+                    outlineColor: t.accent,
+                  }}
+                >
+                  {(Object.entries(FLAG_SORT_LABELS) as Array<[FlagSort, string]>).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
               </div>
-            </div>
-            <div
-              role="group"
-              aria-label="Sort flags"
-              style={{
-                display: "grid",
-                gridTemplateColumns: isPhone ? "repeat(2, minmax(0, 1fr))" : "repeat(4, minmax(0, 1fr))",
-                gap: 6,
-              }}
-            >
-              {([
-                ["severity", "Severity"],
-                ["rule", "Rule"],
-                ["page", "Page"],
-                ["status", "Status"],
-              ] as const).map(([value, label]) => {
-                const active = flagSort === value;
-                return (
-                  <button
-                    key={value}
-                    onClick={() => setFlagSort(value)}
-                    style={{
-                      height: 30,
-                      border: `1px solid ${active ? t.accent : t.line}`,
-                      background: active ? t.accentBg : t.surface,
-                      color: active ? t.accent : t.ink3,
-                      borderRadius: 4,
-                      cursor: "pointer",
-                      fontFamily: t.mono,
-                      fontSize: 10,
-                      fontWeight: 800,
-                      textTransform: "uppercase",
-                      letterSpacing: 0.3,
-                    }}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
             </div>
           </div>
           {isAppLoading && Array.from({ length: 3 }, (_, index) => (

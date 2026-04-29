@@ -200,6 +200,7 @@ export function Shell({
             onClick={() => navigate(APP_ROUTES.dashboard)}
             title="Home"
             aria-label="Home"
+            className="msbn-brand-button"
             style={{
               border: "none",
               background: "transparent",
@@ -214,24 +215,20 @@ export function Shell({
               minWidth: 0,
             }}
           >
-          <div
+          <img
+            src="/assets/msbn-logo.png"
+            alt="Mississippi Board of Nursing"
             style={{
-              width: 30,
-              height: 30,
-              borderRadius: 6,
-              background: t.accent,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: 0.5,
-              fontFamily: t.mono,
-              color: "#fff",
+              width: compactHeader ? 112 : 132,
+              height: "auto",
+              display: "block",
+              background: "#fff",
+              borderRadius: 3,
+              padding: "3px 5px",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+              flexShrink: 0,
             }}
-          >
-            MS
-          </div>
+          />
           <div>
             <div
               style={{

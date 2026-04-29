@@ -59,21 +59,37 @@ function displayInstitution(app: Application) {
   return "Pending metadata";
 }
 
+function transcriptActivityState(app: Application) {
+  if (app.status === "INTAKE_COMPLETE") {
+    return { label: "queued", colorKey: "low" as const };
+  }
+  if (app.status === "PROCESSING") {
+    return { label: "processing", colorKey: "med" as const };
+  }
+  if (app.status === "FAILED") {
+    return { label: "failed", colorKey: "high" as const };
+  }
+  return { label: "processed", colorKey: "ok" as const };
+}
+
 function StatusPill({ status }: { status: string }) {
   const t = useT();
-  const processing = status === "PROCESSING" || status === "INTAKE_COMPLETE";
+  const queued = status === "INTAKE_COMPLETE";
+  const processing = status === "PROCESSING";
   const failed = status === "FAILED";
   const reviewed = status === "REVIEWED";
-  const label = processing
+  const label = queued
+    ? "Queued"
+    : processing
     ? "Processing"
     : status === "READY_FOR_REVIEW"
-      ? "Ready"
+      ? "Processed"
       : reviewed
-        ? "Reviewed"
+        ? "Processed"
         : status.replaceAll("_", " ").toLowerCase();
-  const borderColor = failed ? t.high : processing ? t.med : reviewed ? t.ink3 : t.ok;
-  const bgColor = failed ? t.highBg : processing ? t.medBg : reviewed ? t.surfaceAlt : t.okBg;
-  const textColor = failed ? t.high : processing ? t.med : reviewed ? t.ink3 : t.ok;
+  const borderColor = failed ? t.high : processing ? t.med : queued ? t.low : t.ok;
+  const bgColor = failed ? t.highBg : processing ? t.medBg : queued ? t.lowBg : t.okBg;
+  const textColor = failed ? t.high : processing ? t.med : queued ? t.low : t.ok;
   return (
     <span
       style={{
@@ -769,6 +785,15 @@ export function DashboardPage({
                 )}
                 {queue.map((a, i) => {
                   const target = applicationDetailPath(a, "dashboard");
+                  const activity = transcriptActivityState(a);
+                  const activityColor =
+                    activity.colorKey === "high"
+                      ? t.high
+                      : activity.colorKey === "med"
+                        ? t.med
+                        : activity.colorKey === "low"
+                          ? t.low
+                          : t.ok;
                   return (
                     <div
                       key={a.applicationId}
@@ -802,7 +827,7 @@ export function DashboardPage({
                           height: 6,
                           borderRadius: 3,
                           marginTop: 6,
-                          background: t.accent,
+                          background: activityColor,
                         }}
                       />
                       <div
@@ -817,13 +842,7 @@ export function DashboardPage({
                           System
                         </span>{" "}
                         <span style={{ color: t.ink3 }}>
-                          {isProcessing(a)
-                            ? "started processing"
-                            : a.status === "FAILED"
-                              ? "failed"
-                              : a.status === "REVIEWED"
-                                ? "reviewed"
-                                : "queued"}
+                          {activity.label}
                         </span>{" "}
                         <span
                           style={{

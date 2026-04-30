@@ -67,6 +67,8 @@ class ApiConstruct(Construct):
             ("DELETE", "/applications/{id}"),
             ("GET", "/applications/{id}/pages/{page}"),
             ("POST", "/applications/{id}/decision"),
+            ("GET", "/applications/{id}/review-draft"),
+            ("POST", "/applications/{id}/review-draft"),
             ("GET", "/applications/{id}/audit"),
         ]
         method_map = {

@@ -511,10 +511,12 @@ def _flag_view(
     textract_doc: dict | None = None,
 ) -> dict:
     rule_code = flag.get("rule_code") or flag.get("ruleCode") or "UNKNOWN"
+    flag_key = flag.get("SK") or f"FLAG#{rule_code}"
     reviewer_status = flag.get("reviewer_status", "OPEN")
     resolved_source = source_location if source_location is not None else flag.get("source_location")
     highlight_target = _highlight_target_for_source_location(resolved_source, textract_doc)
     return {
+        "flagKey": flag_key,
         "ruleCode": rule_code,
         "ruleName": flag.get("rule_name") or rule_code,
         "severity": flag.get("severity") or "Low",
@@ -594,6 +596,14 @@ def handler(event: dict, context) -> dict:
 
         if route_key == "POST /applications/{id}/decision":
             return _post_decision(
+                event, path_params.get("id"), reviewer_email, table
+            )
+
+        if route_key == "GET /applications/{id}/review-draft":
+            return _get_review_draft(path_params.get("id"), table)
+
+        if route_key == "POST /applications/{id}/review-draft":
+            return _post_review_draft(
                 event, path_params.get("id"), reviewer_email, table
             )
 
@@ -922,14 +932,17 @@ def _post_decision(
 
     # Validate each flag decision before writing anything.
     for fd in flag_decisions:
+        flag_key = fd.get("flagKey")
         rule_code = fd.get("ruleCode")
         decision = fd.get("decision")
         notes = fd.get("notes", "")
 
-        if not rule_code:
+        if not flag_key and not rule_code:
             return _response(
-                400, {"error": "Each flagDecision must have a ruleCode"}
+                400, {"error": "Each flagDecision must have a flagKey or ruleCode"}
             )
+        if flag_key and not str(flag_key).startswith("FLAG#"):
+            return _response(400, {"error": f"Invalid flagKey: {flag_key}"})
         if decision not in _VALID_FLAG_DECISIONS:
             return _response(
                 400,
@@ -953,24 +966,30 @@ def _post_decision(
 
     # Process each flag decision.
     for fd in flag_decisions:
-        rule_code = fd["ruleCode"]
+        flag_key = fd.get("flagKey")
+        rule_code = fd.get("ruleCode")
         decision = fd["decision"]
         notes = fd.get("notes", "")
 
-        flag_resp = table.query(
-            KeyConditionExpression=(
-                Key("PK").eq(pk) & Key("SK").begins_with(f"FLAG#{rule_code}#")
-            ),
-        )
+        if flag_key:
+            flag_item_resp = table.get_item(Key={"PK": pk, "SK": flag_key})
+            flag_items = [flag_item_resp["Item"]] if "Item" in flag_item_resp else []
+        else:
+            flag_resp = table.query(
+                KeyConditionExpression=(
+                    Key("PK").eq(pk) & Key("SK").begins_with(f"FLAG#{rule_code}#")
+                ),
+            )
+            flag_items = flag_resp.get("Items", [])
 
-        if not flag_resp.get("Items"):
+        if not flag_items:
             return _response(
-                400, {"error": f"No flags found for rule code: {rule_code}"}
+                400, {"error": f"No flags found for: {flag_key or rule_code}"}
             )
 
         new_status = "CONFIRMED" if decision == "CONFIRM" else "OVERRIDDEN"
 
-        for flag_item in flag_resp["Items"]:
+        for flag_item in flag_items:
             table.update_item(
                 Key={"PK": pk, "SK": flag_item["SK"]},
                 UpdateExpression=(
@@ -989,6 +1008,7 @@ def _post_decision(
 
         event_type = "FLAG_CONFIRMED" if decision == "CONFIRM" else "FLAG_OVERRIDDEN"
         audit_sk = f"AUDIT#{now}#{uuid.uuid4().hex[:8]}"
+        audited_rule_code = rule_code or flag_items[0].get("rule_code") or flag_items[0].get("ruleCode")
         table.put_item(
             Item={
                 "PK": pk,
@@ -999,7 +1019,8 @@ def _post_decision(
                 "previous_state": {"reviewer_status": "OPEN"},
                 "new_state": {
                     "reviewer_status": new_status,
-                    "rule_code": rule_code,
+                    "rule_code": audited_rule_code,
+                    "flag_key": flag_items[0]["SK"],
                     "notes": notes,
                 },
                 "timestamp": now,
@@ -1054,6 +1075,115 @@ def _post_decision(
             "applicationId": app_id,
             "updatedAt": now,
             "auditRecordIds": audit_record_ids,
+        },
+    )
+
+
+# ── /applications/{id}/review-draft ──────────────────────────────────────────
+
+
+def _review_draft_key(app_id: str) -> dict:
+    return {"PK": f"APP#{app_id}", "SK": "REVIEW_DRAFT"}
+
+
+def _validate_draft_payload(body: dict) -> tuple[dict | None, dict | None]:
+    decisions = body.get("decisions", {})
+    overall_decision = body.get("overallDecision")
+
+    if overall_decision is not None and overall_decision not in _VALID_OVERALL_DECISIONS:
+        return None, {
+            "error": f"overallDecision must be null or one of: {sorted(_VALID_OVERALL_DECISIONS)}"
+        }
+
+    if not isinstance(decisions, dict):
+        return None, {"error": "decisions must be an object keyed by flagKey"}
+
+    cleaned_decisions = {}
+    for flag_key, value in decisions.items():
+        if not isinstance(flag_key, str) or not flag_key.startswith("FLAG#"):
+            return None, {"error": f"Invalid decision flag key: {flag_key}"}
+        if not isinstance(value, dict):
+            return None, {"error": f"Decision for {flag_key} must be an object"}
+
+        decision = value.get("decision")
+        notes = str(value.get("notes", ""))
+        if decision is not None and decision not in _VALID_FLAG_DECISIONS:
+            return None, {"error": f"Invalid decision for {flag_key}: {decision}"}
+
+        cleaned_decisions[flag_key] = {"decision": decision, "notes": notes}
+
+    return {
+        "decisions": cleaned_decisions,
+        "overallDecision": overall_decision,
+    }, None
+
+
+def _get_review_draft(app_id: str | None, table) -> dict:
+    if not app_id:
+        return _response(400, {"error": "Missing application ID"})
+
+    pk = f"APP#{app_id}"
+    meta_resp = table.get_item(Key={"PK": pk, "SK": "METADATA"})
+    if "Item" not in meta_resp:
+        return _response(404, {"error": f"Application {app_id} not found"})
+
+    draft_resp = table.get_item(Key=_review_draft_key(app_id))
+    item = draft_resp.get("Item") or {}
+    return _response(
+        200,
+        {
+            "applicationId": app_id,
+            "decisions": item.get("decisions", {}),
+            "overallDecision": item.get("overallDecision"),
+            "updatedAt": item.get("updated_ts"),
+            "reviewer": item.get("reviewer_id"),
+        },
+    )
+
+
+def _post_review_draft(
+    event: dict, app_id: str | None, reviewer_email: str, table
+) -> dict:
+    if not app_id:
+        return _response(400, {"error": "Missing application ID"})
+
+    body_str = event.get("body", "")
+    if not body_str:
+        return _response(400, {"error": "Missing request body"})
+
+    try:
+        body = json.loads(body_str)
+    except json.JSONDecodeError:
+        return _response(400, {"error": "Invalid JSON body"})
+
+    cleaned, error = _validate_draft_payload(body)
+    if error:
+        return _response(400, error)
+
+    pk = f"APP#{app_id}"
+    meta_resp = table.get_item(Key={"PK": pk, "SK": "METADATA"})
+    if "Item" not in meta_resp:
+        return _response(404, {"error": f"Application {app_id} not found"})
+
+    now = datetime.now(timezone.utc).isoformat()
+    table.put_item(
+        Item={
+            "PK": pk,
+            "SK": "REVIEW_DRAFT",
+            "entity_type": "REVIEW_DRAFT",
+            "applicationId": app_id,
+            "reviewer_id": reviewer_email,
+            "updated_ts": now,
+            "decisions": cleaned["decisions"],
+            "overallDecision": cleaned["overallDecision"],
+        }
+    )
+
+    return _response(
+        200,
+        {
+            "applicationId": app_id,
+            "updatedAt": now,
         },
     )
 

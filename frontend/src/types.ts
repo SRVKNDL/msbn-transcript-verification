@@ -21,6 +21,7 @@ export interface SourceLocation {
 }
 
 export interface Flag {
+  flagKey: string;
   ruleCode: string;
   ruleName: string;
   severity: "High" | "Medium" | "Low";

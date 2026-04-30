@@ -472,6 +472,7 @@ def test_get_application_happy_path(dynamo_table, lambda_context):
     assert body["metadata"]["status"] == "READY_FOR_REVIEW"
     assert body["extraction"]["doc_type"] == "TRANSCRIPT"
     assert len(body["flags"]) == 2
+    assert body["flags"][0]["flagKey"].startswith("FLAG#")
 
 
 def test_get_application_includes_textract_highlight_target(
@@ -1191,8 +1192,8 @@ def test_decision_404(dynamo_table, lambda_context):
     assert resp["statusCode"] == 404
 
 
-def test_decision_multiple_flags_same_rule(dynamo_table, lambda_context):
-    """Decision must update all FLAG records for the same rule code."""
+def test_decision_flag_key_updates_one_same_rule_flag(dynamo_table, lambda_context):
+    """flagKey decisions must update only the selected same-rule FLAG record."""
     _seed_application(dynamo_table, "APP-X20")
     _seed_flag(dynamo_table, "APP-X20", "CONT_005", "001")
     _seed_flag(dynamo_table, "APP-X20", "CONT_005", "002")
@@ -1200,15 +1201,100 @@ def test_decision_multiple_flags_same_rule(dynamo_table, lambda_context):
     event = _make_event(
         "POST /applications/{id}/decision",
         path_params={"id": "APP-X20"},
-        body=_decision_body(),
+        body=_decision_body(
+            flag_decisions=[
+                {
+                    "flagKey": "FLAG#CONT_005#001",
+                    "ruleCode": "CONT_005",
+                    "decision": "CONFIRM",
+                    "notes": "",
+                }
+            ]
+        ),
     )
     handler(event, lambda_context)
 
-    for seq in ("001", "002"):
-        flag = dynamo_table.get_item(
-            Key={"PK": "APP#APP-X20", "SK": f"FLAG#CONT_005#{seq}"}
-        )["Item"]
-        assert flag["reviewer_status"] == "CONFIRMED"
+    first = dynamo_table.get_item(
+        Key={"PK": "APP#APP-X20", "SK": "FLAG#CONT_005#001"}
+    )["Item"]
+    second = dynamo_table.get_item(
+        Key={"PK": "APP#APP-X20", "SK": "FLAG#CONT_005#002"}
+    )["Item"]
+    assert first["reviewer_status"] == "CONFIRMED"
+    assert second["reviewer_status"] == "OPEN"
+
+
+# ── /applications/{id}/review-draft ──────────────────────────────────────────
+
+
+def test_review_draft_get_empty(dynamo_table, lambda_context):
+    """Review draft endpoint returns an empty draft before any save."""
+    _seed_application(dynamo_table, "APP-RD01")
+
+    event = _make_event(
+        "GET /applications/{id}/review-draft",
+        path_params={"id": "APP-RD01"},
+    )
+    resp = handler(event, lambda_context)
+
+    assert resp["statusCode"] == 200
+    body = _parse_response(resp)
+    assert body["decisions"] == {}
+    assert body["overallDecision"] is None
+
+
+def test_review_draft_save_and_get(dynamo_table, lambda_context):
+    """Saved review drafts persist in DynamoDB and can be loaded later."""
+    _seed_application(dynamo_table, "APP-RD02")
+    payload = {
+        "decisions": {
+            "FLAG#CONT_005#001": {"decision": "CONFIRM", "notes": ""},
+            "FLAG#CONT_005#002": {"decision": "OVERRIDE", "notes": "Verified"},
+        },
+        "overallDecision": "RETURN_TO_APPLICANT",
+    }
+
+    save = handler(
+        _make_event(
+            "POST /applications/{id}/review-draft",
+            path_params={"id": "APP-RD02"},
+            body=payload,
+        ),
+        lambda_context,
+    )
+    assert save["statusCode"] == 200
+
+    get = handler(
+        _make_event(
+            "GET /applications/{id}/review-draft",
+            path_params={"id": "APP-RD02"},
+        ),
+        lambda_context,
+    )
+    body = _parse_response(get)
+    assert body["decisions"] == payload["decisions"]
+    assert body["overallDecision"] == "RETURN_TO_APPLICANT"
+    assert body["reviewer"] == _REVIEWER_EMAIL
+
+
+def test_review_draft_invalid_decision_rejected(dynamo_table, lambda_context):
+    """Draft saves validate decision values."""
+    _seed_application(dynamo_table, "APP-RD03")
+
+    resp = handler(
+        _make_event(
+            "POST /applications/{id}/review-draft",
+            path_params={"id": "APP-RD03"},
+            body={
+                "decisions": {
+                    "FLAG#CONT_005#001": {"decision": "APPROVE", "notes": ""}
+                },
+                "overallDecision": None,
+            },
+        ),
+        lambda_context,
+    )
+    assert resp["statusCode"] == 400
 
 
 # ── GET /applications/{id}/audit ─────────────────────────────────────────────

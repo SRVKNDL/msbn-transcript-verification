@@ -1,4 +1,4 @@
-import type { Application, Flag, ExtractionData, AuditEvent } from "./types";
+import type { Application, Flag, ExtractionData, AuditEvent, Decisions, OverallDecision } from "./types";
 import { getIdToken } from "./auth";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -54,6 +54,7 @@ interface RawSourceLocation {
 }
 
 type RawFlag = Omit<Partial<Flag>, "sourceLocation"> & {
+  flag_key?: string;
   rule_code?: string;
   rule_name?: string;
   sourceLocation?: RawSourceLocation;
@@ -70,6 +71,12 @@ type RawDetail = {
   transcriptPreviewStatus?: string;
   transcriptS3Key?: string | null;
   flags?: RawFlag[];
+};
+
+type RawReviewDraft = {
+  decisions?: Decisions;
+  overallDecision?: OverallDecision;
+  updatedAt?: string | null;
 };
 
 type RawAuditEvent = Partial<AuditEvent> & {
@@ -139,9 +146,11 @@ function safePracticeFor(ruleCode: string) {
   return "SP";
 }
 
-function normalizeFlag(raw: RawFlag): Flag {
+function normalizeFlag(raw: RawFlag, index: number): Flag {
   const ruleCode = stringValue(raw.ruleCode ?? raw.rule_code, "UNKNOWN");
+  const flagKey = stringValue(raw.flagKey ?? raw.flag_key, `FLAG#${ruleCode}#${String(index + 1).padStart(3, "0")}`);
   return {
+    flagKey,
     ruleCode,
     ruleName: stringValue(raw.ruleName ?? raw.rule_name, ruleCode),
     severity: normalizeSeverity(raw.severity) ?? "Low",
@@ -249,6 +258,45 @@ export async function getApplication(id: string): Promise<{
   };
 }
 
+function normalizeReviewDraft(raw: RawReviewDraft): {
+  decisions: Decisions;
+  overallDecision: OverallDecision;
+  updatedAt: string | null;
+} {
+  const decisions = raw.decisions && typeof raw.decisions === "object" ? raw.decisions : {};
+  return {
+    decisions,
+    overallDecision: raw.overallDecision ?? null,
+    updatedAt: raw.updatedAt ?? null,
+  };
+}
+
+export async function getReviewDraft(id: string): Promise<{
+  decisions: Decisions;
+  overallDecision: OverallDecision;
+  updatedAt: string | null;
+}> {
+  const data = await fetchJson<RawReviewDraft>(`/applications/${id}/review-draft`);
+  return normalizeReviewDraft(data);
+}
+
+export async function saveReviewDraft(
+  id: string,
+  payload: {
+    decisions: Decisions;
+    overallDecision: OverallDecision;
+  }
+): Promise<void> {
+  requireApiBase();
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE}/applications/${id}/review-draft`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: review draft save failed`);
+}
+
 export async function getAuditTrail(id: string): Promise<AuditEvent[]> {
   const existing = auditTrailRequests.get(id);
   if (existing) return existing;
@@ -271,7 +319,7 @@ export async function getAuditTrail(id: string): Promise<AuditEvent[]> {
 export async function submitDecision(
   id: string,
   payload: {
-    flagDecisions: { ruleCode: string; decision: string; notes: string }[];
+    flagDecisions: { flagKey: string; ruleCode: string; decision: string; notes: string }[];
     overallDecision: string;
   }
 ): Promise<void> {

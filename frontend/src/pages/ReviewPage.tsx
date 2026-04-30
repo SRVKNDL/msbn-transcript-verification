@@ -4,7 +4,6 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useT } from "../theme";
 import { useViewport } from "../useViewport";
 import { SeverityChip } from "../components/SeverityChip";
-import { ConfidenceDot } from "../components/ConfidenceDot";
 import { ProgressBar } from "../components/ProgressBar";
 import { ActionButton } from "../components/ActionButton";
 import { DetailHeader } from "../components/DetailHeader";
@@ -16,11 +15,12 @@ import {
   hasApplicationSummary,
 } from "../navigation";
 import type { DetailBackState } from "../navigation";
-import { getApplication, getPageImage, listApplications, submitDecision } from "../api";
+import { getApplication, getPageImage, getReviewDraft, listApplications, saveReviewDraft, submitDecision } from "../api";
 import { getCurrentUser } from "../auth";
-import type { Application, Flag, Decisions, OverallDecision, ExtractionData, ExtractionRow } from "../types";
+import type { Application, Flag, Decisions, OverallDecision } from "../types";
 
 const DEFAULT_TRANSCRIPT_ZOOM = 2;
+const MAX_TRANSCRIPT_ZOOM = 10;
 const TRANSCRIPT_RENDER_SCALE_FACTOR = 0.5;
 const SEVERITY_ORDER = { High: 0, Medium: 1, Low: 2 } as const;
 type QueueSort = "oldest" | "newest" | "flags" | "severity" | "applicant" | "institution";
@@ -79,9 +79,9 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
 function ShortcutLegend({ onClose }: { onClose: () => void }) {
   const t = useT();
   const shortcuts = [
-    ["J / K", "Next / previous flag"],
+    ["↓ / ↑", "Next / previous flag"],
     ["C", "Confirm current flag"],
-    ["O", "Override current flag"],
+    ["X", "Override current flag"],
     ["1\u20139", "Jump to page"],
     ["B", "Toggle review queue"],
     ["F", "Toggle transcript fullscreen"],
@@ -552,10 +552,10 @@ function rationaleParagraphs(value: string) {
   return paragraphs.length ? paragraphs : [text];
 }
 
-function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpenData, onOpenDetails, active, onClick, shaded }: {
+function FlagCard({ flag, decision, notes, onDecision, onNotes, onOpenDetails, active, onClick, shaded }: {
   flag: Flag; decision?: string; notes?: string;
   onDecision: (d: "CONFIRM" | "OVERRIDE") => void; onNotes: (n: string) => void;
-  onJumpTo: () => void; onOpenData: () => void; onOpenDetails: () => void;
+  onOpenDetails: () => void;
   active: boolean; onClick: () => void; shaded?: boolean;
 }) {
   const t = useT();
@@ -591,68 +591,43 @@ function FlagCard({ flag, decision, notes, onDecision, onNotes, onJumpTo, onOpen
       <div style={{ fontSize: 12, color: t.ink2, fontWeight: 500, marginBottom: 4 }}>
         {flag.ruleName.replaceAll("_", " ").toLowerCase()}
       </div>
-      <button
-        onClick={(e) => { e.stopPropagation(); onOpenDetails(); }}
-        style={{
-          display: "block",
-          width: "100%",
-          border: "none",
-          background: "transparent",
-          padding: 0,
-          textAlign: "left",
-          fontFamily: "inherit",
-          fontSize: 12,
-          color: t.ink3,
-          lineHeight: 1.5,
-          marginBottom: 10,
-          cursor: "pointer",
-        }}
-      >
+      <div style={{ fontSize: 12, color: t.ink3, lineHeight: 1.5, marginBottom: 10 }}>
         {rationalePreview(flag.rationale)}
-        <span style={{ color: t.accent, fontFamily: t.mono, fontSize: 10, marginLeft: 6 }}>
-          Details
-        </span>
-      </button>
+      </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: t.ink4, flexWrap: "wrap" }}>
-        <button onClick={(e) => { e.stopPropagation(); onJumpTo(); }} style={{
+        <button onClick={(e) => { e.stopPropagation(); onOpenDetails(); }} style={{
           border: `1px solid ${t.line}`, background: t.surface,
           fontSize: 10, padding: "3px 8px", borderRadius: 2, cursor: "pointer",
-          fontFamily: t.mono, color: t.ink2,
+          fontFamily: t.mono, color: t.primary, fontWeight: 700,
         }}>
-          &darr; page {flag.sourceLocation.page}
+          Details
         </button>
-        <button onClick={(e) => { e.stopPropagation(); onOpenData(); }} style={{
-          border: `1px solid ${t.line}`, background: t.surface,
-          fontSize: 10, padding: "3px 8px", borderRadius: 2, cursor: "pointer",
-          fontFamily: t.mono, color: t.ink2,
-        }}>
-          # data
-        </button>
+        <span style={{ fontSize: 10, fontFamily: t.mono }}>
+          Page {flag.sourceLocation.page}
+        </span>
         <span style={{ fontSize: 10, fontFamily: t.mono }}>
           "{truncateText(firstSpan, 84)}"
         </span>
       </div>
 
-      {active && (
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px dashed ${t.line}` }}>
-          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-            <ActionButton active={decision === "CONFIRM"} onClick={(e) => { e.stopPropagation(); onDecision("CONFIRM"); }} variant="confirm">Confirm flag</ActionButton>
-            <ActionButton active={decision === "OVERRIDE"} onClick={(e) => { e.stopPropagation(); onDecision("OVERRIDE"); }} variant="override">Override</ActionButton>
-          </div>
-          {decision === "OVERRIDE" && (
-            <textarea value={notes || ""} onChange={(e) => onNotes(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              placeholder="Notes required when overriding a flag..."
-              style={{
-                width: "100%", minHeight: 60, boxSizing: "border-box",
-                border: `1px solid ${t.line}`, borderRadius: 2,
-                padding: 8, fontSize: 12, fontFamily: "inherit", color: t.ink2,
-                background: t.surface, resize: "vertical",
-              }} />
-          )}
+      <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px dashed ${t.line}` }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: decision === "OVERRIDE" ? 8 : 0 }}>
+          <ActionButton active={decision === "CONFIRM"} onClick={(e) => { e.stopPropagation(); onDecision("CONFIRM"); }} variant="confirm">Confirm flag</ActionButton>
+          <ActionButton active={decision === "OVERRIDE"} onClick={(e) => { e.stopPropagation(); onDecision("OVERRIDE"); }} variant="override">Override</ActionButton>
         </div>
-      )}
+        {decision === "OVERRIDE" && (
+          <textarea value={notes || ""} onChange={(e) => onNotes(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="Notes required when overriding a flag..."
+            style={{
+              width: "100%", minHeight: 60, boxSizing: "border-box",
+              border: `1px solid ${t.line}`, borderRadius: 2,
+              padding: 8, fontSize: 12, fontFamily: "inherit", color: t.ink2,
+              background: t.surface, resize: "vertical",
+            }} />
+        )}
+      </div>
     </div>
   );
 }
@@ -875,139 +850,6 @@ function FlagDetailModal({
   );
 }
 
-// --- Extracted data drawer ---
-function ExtractedDataDrawer({ flag, extraction, onClose }: {
-  flag: Flag | null; extraction: ExtractionData; onClose: () => void;
-}) {
-  const t = useT();
-  const [tab, setTab] = useState<"physical" | "content" | "program">("physical");
-  const fieldMap: Record<string, string[]> = {
-    CONT_005: ["gpa_arithmetic_consistency"],
-    PHYS_004: ["text_alignment"],
-    PROG_002: ["graduation_confirmation_present"],
-  };
-  const highlighted = flag ? (fieldMap[flag.ruleCode] ?? []) : [];
-  const totalFields = extraction.physical.length + extraction.content.length + extraction.program.length;
-
-  const TABS = [
-    { key: "physical" as const, label: "Physical", count: extraction.physical.length },
-    { key: "content" as const, label: "Content", count: extraction.content.length },
-    { key: "program" as const, label: "Program", count: extraction.program.length },
-  ];
-  const rows = extraction[tab];
-
-  return (
-    <div style={{
-      position: "absolute", inset: 0, background: "rgba(12,18,28,0.4)",
-      zIndex: 30, display: "flex", justifyContent: "flex-end",
-    }}>
-      <div onClick={onClose} style={{ flex: 1 }} />
-      <div style={{
-        width: "min(500px, 100vw)", background: t.surface, height: "100%",
-        borderLeft: `1px solid ${t.line}`, display: "flex", flexDirection: "column",
-        boxShadow: "-20px 0 50px rgba(0,0,0,0.18)",
-        animation: "drawerSlide 220ms cubic-bezier(.2,.7,.3,1)",
-      }}>
-        <div style={{ padding: "18px 22px 12px", borderBottom: `1px solid ${t.line}` }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-            <span style={{ fontSize: 10, fontFamily: t.mono, color: t.ink4, letterSpacing: 0.5, textTransform: "uppercase" }}>Extracted fields</span>
-            <div style={{ flex: 1 }} />
-            <button onClick={onClose} style={{
-              border: "none", background: "transparent", cursor: "pointer",
-              color: t.ink3, fontSize: 16, padding: 0, lineHeight: 1,
-            }}>&times;</button>
-          </div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: t.ink, marginBottom: 4, fontFamily: t.serif }}>Bedrock Nova extraction</div>
-          <div style={{ fontSize: 11, color: t.ink4, fontFamily: t.mono }}>
-            nova-pro-v1:0 · prompt v4.0 · extracted 2026-04-19 14:24 UTC
-          </div>
-          {flag && (
-            <div style={{
-              marginTop: 12, padding: "7px 10px",
-              background: t.highBg, border: `1px solid ${t.high}`,
-              borderRadius: 2, fontSize: 11, color: t.ink2,
-              fontFamily: t.mono,
-            }}>
-              showing fields related to <b style={{ color: t.high }}>{flag.ruleCode}</b>
-            </div>
-          )}
-        </div>
-
-        {/* Tabs */}
-        <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${t.line}`, padding: "0 22px" }}>
-          {TABS.map((tabOption) => (
-            <button key={tabOption.key} onClick={() => setTab(tabOption.key)} style={{
-              border: "none", background: "transparent", cursor: "pointer",
-              padding: "10px 14px 10px 0", marginRight: 18,
-              fontSize: 12, fontWeight: tab === tabOption.key ? 600 : 400,
-              color: tab === tabOption.key ? t.ink : t.ink3,
-              borderBottom: `2px solid ${tab === tabOption.key ? t.accent : "transparent"}`,
-              marginBottom: -1, fontFamily: "inherit",
-            }}>
-              {tabOption.label} <span style={{ color: t.ink4, fontFamily: t.mono, fontSize: 11 }}>{tabOption.count}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Rows */}
-        <div style={{ flex: 1, overflow: "auto", padding: "6px 0" }}>
-          {rows.map((row, i) => {
-            const hi = highlighted.includes(row.field);
-            return (
-              <div key={i} style={{
-                display: "grid", gridTemplateColumns: "1fr 1fr auto",
-                gap: 12, alignItems: "baseline", padding: "9px 22px",
-                background: hi ? t.highBg : "transparent",
-                borderLeft: hi ? `3px solid ${t.high}` : "3px solid transparent",
-                borderBottom: `1px solid ${t.line2}`,
-              }}>
-                <div style={{
-                  fontFamily: t.mono,
-                  fontSize: 11, color: hi ? t.ink : t.ink3, fontWeight: hi ? 600 : 400,
-                }}>{row.field}</div>
-                <div style={{ fontSize: 12, color: t.ink2, fontFamily: t.mono }}>{row.value}</div>
-                <ConfidenceDot level={row.confidence} />
-              </div>
-            );
-          })}
-        </div>
-
-        <div style={{ padding: "12px 22px", borderTop: `1px solid ${t.line}`, fontSize: 10, color: t.ink4, fontFamily: t.mono }}>
-          {totalFields} fields · GET /applications/{"{id}"}/extraction
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function buildFallbackExtraction(app: Application): ExtractionData {
-  const row = (field: string, value: string, confidence: "high" | "medium" | "low" = "medium"): ExtractionRow => ({
-    field,
-    value: value || "Not available",
-    confidence: value ? confidence : "low",
-  });
-  return {
-    physical: [
-      row("page_count", String(app.pageCount), "high"),
-      row("original_filename", app.originalFilename, "high"),
-    ],
-    content: [
-      row("applicant_name", app.applicantName, "high"),
-      row("institution", app.institution, "high"),
-      row("country", app.country, "medium"),
-      row("license_number", app.licenseNumber, "medium"),
-      row("application_id", app.applicationId, "high"),
-    ],
-    program: [
-      row("program_year", app.programYear, "medium"),
-      row("status", app.status, "high"),
-      row("submitted_at", app.submittedAt ? new Date(app.submittedAt).toLocaleString() : "", "high"),
-      row("highest_severity", app.highestSeverity ?? "", "high"),
-      row("flag_count", String(app.flagCount), "high"),
-    ],
-  };
-}
-
 // --- Main review page ---
 export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   const t = useT();
@@ -1025,7 +867,6 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   const [isAppLoading, setIsAppLoading] = useState(true);
   const [queueApps, setQueueApps] = useState<Application[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
-  const [extraction, setExtraction] = useState<ExtractionData>({ physical: [], content: [], program: [] });
   const [error, setError] = useState<string | null>(null);
   const [activeFlagIdx, setActiveFlagIdx] = useState(0);
   const [decisions, setDecisions] = useState<Decisions>({});
@@ -1034,8 +875,6 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   const [flagSort, setFlagSort] = useState<FlagSort>("severity");
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [drawerFlag, setDrawerFlag] = useState<Flag | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [detailFlag, setDetailFlag] = useState<Flag | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -1046,10 +885,11 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   const transcriptPaneRef = useRef<HTMLDivElement>(null);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const transcriptZoomRef = useRef(DEFAULT_TRANSCRIPT_ZOOM);
+  const draftLoadedRef = useRef(false);
+  const draftSaveTimerRef = useRef<number | null>(null);
 
   const pageCount = Math.max(1, app?.pageCount || 1);
   const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
-  const totalFields = extraction.physical.length + extraction.content.length + extraction.program.length;
   const groupedFlags = useMemo(() => {
     const indexed = flags
       .map((flag, originalIndex) => ({ flag, originalIndex }))
@@ -1086,8 +926,8 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     const groups = [...groupedFlags];
     groups.sort((a, b) => {
       if (flagSort === "status") {
-        const aResolved = a.items.every(({ flag }) => decisions[flag.ruleCode]?.decision);
-        const bResolved = b.items.every(({ flag }) => decisions[flag.ruleCode]?.decision);
+        const aResolved = a.items.every(({ flag }) => decisions[flag.flagKey]?.decision);
+        const bResolved = b.items.every(({ flag }) => decisions[flag.flagKey]?.decision);
         return Number(aResolved) - Number(bResolved)
           || severityRank(a.highestSeverity) - severityRank(b.highestSeverity)
           || a.firstPage - b.firstPage
@@ -1125,7 +965,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     if (!viewport) return;
 
     const previousZoom = transcriptZoomRef.current;
-    const clampedZoom = Math.min(3, Math.max(0.75, nextZoom));
+    const clampedZoom = Math.min(MAX_TRANSCRIPT_ZOOM, Math.max(0.75, nextZoom));
 
     if (Math.abs(clampedZoom - previousZoom) < 0.001) return;
 
@@ -1188,24 +1028,26 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     const activeFlag = displayFlags[activeFlagIdx]?.flag;
 
     switch (e.key.toLowerCase()) {
-      case "j":
+      case "arrowdown":
         if (displayFlags.length === 0) break;
+        e.preventDefault();
         setActiveFlagIdx((i) => Math.min(displayFlags.length - 1, i + 1));
         break;
-      case "k":
+      case "arrowup":
         if (displayFlags.length === 0) break;
+        e.preventDefault();
         setActiveFlagIdx((i) => Math.max(0, i - 1));
         break;
       case "c":
         if (activeFlag) {
-          const code = activeFlag.ruleCode;
-          setDecisions((x) => ({ ...x, [code]: { ...x[code], decision: "CONFIRM", notes: x[code]?.notes ?? "" } }));
+          const key = activeFlag.flagKey;
+          setDecisions((x) => ({ ...x, [key]: { ...x[key], decision: "CONFIRM", notes: x[key]?.notes ?? "" } }));
         }
         break;
-      case "o":
+      case "x":
         if (activeFlag) {
-          const code = activeFlag.ruleCode;
-          setDecisions((x) => ({ ...x, [code]: { ...x[code], decision: "OVERRIDE", notes: x[code]?.notes ?? "" } }));
+          const key = activeFlag.flagKey;
+          setDecisions((x) => ({ ...x, [key]: { ...x[key], decision: "OVERRIDE", notes: x[key]?.notes ?? "" } }));
         }
         break;
       case "?":
@@ -1218,7 +1060,6 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
         setQueueOpen((open) => !open);
         break;
       case "escape":
-        setDrawerOpen(false);
         setDetailFlag(null);
         setShowShortcuts(false);
         break;
@@ -1260,25 +1101,33 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     setIsAppLoading(true);
     setApp(null);
     setFlags([]);
-    setExtraction({ physical: [], content: [], program: [] });
     setError(null);
     setActiveFlagIdx(0);
     setDecisions({});
+    draftLoadedRef.current = false;
     setCurrentPage(1);
     transcriptZoomRef.current = DEFAULT_TRANSCRIPT_ZOOM;
     setTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM);
     setOverallDecision(null);
     setSubmitModalOpen(false);
-    setDrawerOpen(false);
     getApplication(id)
       .then((data) => {
         if (cancelled) return;
         setApp(data.application);
         setFlags(data.flags);
-        const ext = data.extraction;
-        const hasData = ext.physical.length > 0 || ext.content.length > 0 || ext.program.length > 0;
-        setExtraction(hasData ? ext : buildFallbackExtraction(data.application));
         setIsAppLoading(false);
+        getReviewDraft(id)
+          .then((draft) => {
+            if (cancelled) return;
+            setDecisions(draft.decisions);
+            setOverallDecision(draft.overallDecision);
+          })
+          .catch((err: Error) => {
+            if (!cancelled) setToast(`Draft load error: ${err.message}`);
+          })
+          .finally(() => {
+            if (!cancelled) draftLoadedRef.current = true;
+          });
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -1286,11 +1135,34 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
         setApp(null);
         setFlags([]);
         setIsAppLoading(false);
+        draftLoadedRef.current = true;
       });
     return () => {
       cancelled = true;
+      if (draftSaveTimerRef.current !== null) {
+        window.clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!id || isAppLoading || !draftLoadedRef.current) return;
+    if (draftSaveTimerRef.current !== null) {
+      window.clearTimeout(draftSaveTimerRef.current);
+    }
+    draftSaveTimerRef.current = window.setTimeout(() => {
+      saveReviewDraft(id, { decisions, overallDecision }).catch((err: Error) => {
+        setToast(`Draft save error: ${err.message}`);
+      });
+    }, 600);
+    return () => {
+      if (draftSaveTimerRef.current !== null) {
+        window.clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
+    };
+  }, [decisions, id, isAppLoading, overallDecision]);
 
   if (error) {
     return (
@@ -1340,17 +1212,15 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     );
   }
 
-  const resolvedCount = flags.filter((f) => decisions[f.ruleCode]?.decision).length;
+  const resolvedCount = flags.filter((f) => decisions[f.flagKey]?.decision).length;
   const allDecided = flags.length === 0 || resolvedCount === flags.length;
   const allOverridesNoted = flags.every((f) => {
-    const d = decisions[f.ruleCode];
+    const d = decisions[f.flagKey];
     if (!d?.decision) return false;
     if (d.decision !== "OVERRIDE") return true;
     return (d.notes ?? "").trim().length > 0;
   });
   const canSubmit = allDecided && allOverridesNoted && !isAppLoading && !!app;
-  const jumpTo = (flag: Flag) => setCurrentPage(flag.sourceLocation.page);
-  const openDrawer = (flag: Flag | null) => { setDrawerFlag(flag); setDrawerOpen(true); };
   const openFlagDetails = (flag: Flag) => {
     setDetailFlag(flag);
     const displayIndex = displayFlags.findIndex((item) => item.flag === flag);
@@ -1374,11 +1244,12 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     if (!canSubmit || !id || !overallDecision) return;
     setIsSubmitting(true);
     const flagDecisions = flags
-      .filter((f) => decisions[f.ruleCode]?.decision)
+      .filter((f) => decisions[f.flagKey]?.decision)
       .map((f) => ({
+        flagKey: f.flagKey,
         ruleCode: f.ruleCode,
-        decision: decisions[f.ruleCode].decision!,
-        notes: decisions[f.ruleCode].notes ?? "",
+        decision: decisions[f.flagKey].decision!,
+        notes: decisions[f.flagKey].notes ?? "",
       }));
     try {
       await submitDecision(id, { flagDecisions, overallDecision: overallDecision! });
@@ -1427,9 +1298,9 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
           justifyContent: "center",
           gap: 7,
           paddingInline: isPhone ? 0 : 10,
-        }} title={queueOpen ? "Hide review queue (B)" : "Show review queue (B)"} aria-label={queueOpen ? "Hide review queue" : "Show review queue"}>
+        }} title={queueOpen ? "Hide left panel (B)" : "Show left panel (B)"} aria-label={queueOpen ? "Hide left panel" : "Show left panel"}>
           <span>&#9776;</span>
-          {!isPhone && <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4 }}>Queue</span>}
+          {!isPhone && <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4 }}>{queueOpen ? "Hide queue" : "Show queue"}</span>}
         </button>
         <div className="msbn-brand-button" style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => navigate(APP_ROUTES.dashboard)}>
           <img
@@ -1482,10 +1353,11 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
         </a>
         <button onClick={() => setShowShortcuts(true)} className="msbn-hover-button" style={{
           border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)",
-          color: "rgba(255,255,255,0.7)", width: 24, height: 24, fontSize: 13, borderRadius: 2,
+          color: "rgba(255,255,255,0.86)", minWidth: 34, height: 28, fontSize: 11, borderRadius: 2,
           cursor: "pointer", fontFamily: t.mono,
-          display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
-        }} title="Keyboard shortcuts (?)">?</button>
+          display: "flex", alignItems: "center", justifyContent: "center", padding: "0 8px",
+          fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3,
+        }} title="Keyboard shortcuts (?)">Shortcuts</button>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 12, opacity: 0.85 }}>
             {user?.displayName ?? "Signed in"}
@@ -1792,7 +1664,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
       </div>
 
       {/* Flag list */}
-      <div style={{ gridColumn: isPhone ? 1 : showQueueSidebar ? 3 : 2, gridRow: embedded ? (isPhone ? 2 : 1) : (isPhone ? 3 : 2), background: t.surfaceAlt, borderLeft: isPhone ? "none" : `1px solid ${t.line}`, borderTop: isPhone ? `1px solid ${t.line}` : "none", overflow: "auto", display: "flex", flexDirection: "column" }}>
+      <div style={{ gridColumn: isPhone ? 1 : showQueueSidebar ? 3 : 2, gridRow: embedded ? (isPhone ? 2 : 1) : (isPhone ? 3 : 2), background: t.surfaceAlt, borderLeft: isPhone ? "none" : `1px solid ${t.line}`, borderTop: isPhone ? `1px solid ${t.line}` : "none", overflow: "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
         <DetailHeader
           compact
           backLabel="Review Queue"
@@ -1834,38 +1706,31 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
                 <button onClick={() => setShowShortcuts(true)} style={{
                   border: `1px solid ${t.line}`,
                   background: t.surface,
-                  color: t.ink3,
-                  width: 26,
+                  color: t.primary,
+                  minWidth: 78,
                   height: 26,
-                  fontSize: 13,
+                  fontSize: 10,
                   borderRadius: 3,
                   cursor: "pointer",
                   fontFamily: t.mono,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  padding: 0,
-                }} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
-              </div>
-            </div>
-          }
-          primaryActions={
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, paddingTop: 12, borderTop: `1px solid ${t.line2}` }}>
-              <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, letterSpacing: 0.5, textTransform: "uppercase" }}>
-                Review controls
-              </div>
-              <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono }}>
-                {allDecided ? "ready to submit" : `${flags.length - resolvedCount} remaining`}
+                  padding: "0 8px",
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.3,
+                }} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">Shortcuts</button>
               </div>
             </div>
           }
         />
 
-        <div style={{ flex: 1, overflow: "auto", padding: "14px 14px 84px" }}>
+        <div style={{ flex: "none", overflow: "visible", padding: "14px 14px 84px" }}>
           <div style={{ marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
               <div style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, letterSpacing: 0.5, textTransform: "uppercase" }}>
-                Flags raised — {resolvedCount} / {flags.length} resolved
+                Flags raised
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <label htmlFor="flag-sort" style={{ fontSize: 10, color: t.ink4, fontFamily: t.mono, textTransform: "uppercase", letterSpacing: 0.4 }}>
@@ -1949,27 +1814,17 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
                 return (
                   <FlagCard key={`${flag.ruleCode}-${originalIndex}`} flag={flag} active={displayIndex === activeFlagIdx}
                     shaded={group.groupIndex % 2 === 1}
-                    decision={decisions[flag.ruleCode]?.decision}
-                    notes={decisions[flag.ruleCode]?.notes}
+                    decision={decisions[flag.flagKey]?.decision}
+                    notes={decisions[flag.flagKey]?.notes}
                     onClick={() => setActiveFlagIdx(displayIndex)}
-                    onDecision={(d) => setDecisions((x) => ({ ...x, [flag.ruleCode]: { ...x[flag.ruleCode], decision: d, notes: x[flag.ruleCode]?.notes ?? "" } }))}
-                    onNotes={(n) => setDecisions((x) => ({ ...x, [flag.ruleCode]: { ...x[flag.ruleCode], decision: x[flag.ruleCode]?.decision, notes: n } }))}
-                    onJumpTo={() => jumpTo(flag)}
-                    onOpenData={() => openDrawer(flag)}
+                    onDecision={(d) => setDecisions((x) => ({ ...x, [flag.flagKey]: { ...x[flag.flagKey], decision: d, notes: x[flag.flagKey]?.notes ?? "" } }))}
+                    onNotes={(n) => setDecisions((x) => ({ ...x, [flag.flagKey]: { ...x[flag.flagKey], decision: x[flag.flagKey]?.decision, notes: n } }))}
                     onOpenDetails={() => openFlagDetails(flag)}
                   />
                 );
               })}
             </div>
           ))}
-          <button onClick={() => openDrawer(null)} style={{
-            width: "100%", marginTop: 4, padding: "9px 12px",
-            background: t.surface, border: `1px dashed ${t.line}`,
-            fontSize: 11, color: t.ink3, cursor: "pointer",
-            borderRadius: 2, fontFamily: t.mono,
-          }}>
-            View all extraction fields ({totalFields}) &rarr;
-          </button>
         </div>
       </div>
 
@@ -2006,16 +1861,11 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
         &#10132;
       </button>
 
-      {/* Extracted data drawer */}
-      {drawerOpen && (
-        <ExtractedDataDrawer flag={drawerFlag} extraction={extraction} onClose={() => setDrawerOpen(false)} />
-      )}
-
       {detailFlag && (
         <FlagDetailModal
           flag={detailFlag}
-          decision={decisions[detailFlag.ruleCode]?.decision}
-          notes={decisions[detailFlag.ruleCode]?.notes}
+          decision={decisions[detailFlag.flagKey]?.decision}
+          notes={decisions[detailFlag.flagKey]?.notes}
           onClose={() => setDetailFlag(null)}
         />
       )}

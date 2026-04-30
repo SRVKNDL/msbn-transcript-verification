@@ -407,11 +407,16 @@ def check_phys_005(agg: dict) -> list:
     """Document completeness markers — degree conferral statement and conferral date."""
     flags = []
 
+    statement_extracted = "degree_conferral_statement_present" in agg
     statement_present = agg.get("degree_conferral_statement_present")
     conferred_date = agg.get("degree_conferred_date")
 
     # Check 1 — degree conferral statement present (HIGH)
-    if statement_present is False:
+    #
+    # The extraction pipeline only writes degree_conferral_statement_present
+    # when it finds positive evidence. Treat an omitted statement field as
+    # absent only when no conferral date was extracted either.
+    if statement_present is False or (not statement_extracted and not conferred_date):
         flags.append(Flag(
             rule_code="PHYS_005",
             rule_description="Degree conferral statement absent",

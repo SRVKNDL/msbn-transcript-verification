@@ -613,9 +613,17 @@ def test_phys_005_check1_no_fire_statement_present():
     assert flags == []
 
 
-def test_phys_005_check1_no_fire_missing_field():
-    """If degree_conferral_statement_present not extracted, neither check fires."""
-    assert check_phys_005({}) == []
+def test_phys_005_check1_fires_missing_statement_and_date_fields():
+    """Production extraction omits the statement field when no evidence is found."""
+    flags = check_phys_005({})
+    assert len(flags) == 1
+    assert flags[0].rule_code == "PHYS_005"
+    assert "statement" in flags[0].rule_description.lower()
+
+
+def test_phys_005_check1_no_fire_missing_statement_when_date_present():
+    flags = check_phys_005({"degree_conferred_date": "2020-05-15"})
+    assert flags == []
 
 
 # Check 2: conferral date absent

@@ -90,6 +90,18 @@ CLEAN_BASELINE: dict = {
             "Conferred degree: Bachelor of Science in Nursing, April 2018"
         ],
     },
+    "degree_conferral_statement_present": True,
+    "degree_conferral_statement_present_source": {
+        "page_number": 3,
+        "text_spans": [
+            "Conferred degree: Bachelor of Science in Nursing, April 2018"
+        ],
+    },
+    "degree_conferred_date": "2018-04-01",
+    "degree_conferred_date_source": {
+        "page_number": 3,
+        "text_spans": ["April 2018"],
+    },
     "required_nursing_domains_present": [
         "adult_med_surg",
         "obstetrics",

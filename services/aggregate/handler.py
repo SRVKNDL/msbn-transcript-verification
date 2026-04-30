@@ -283,18 +283,22 @@ def _merge_array_field(field: str, pages: list[dict], out: dict) -> None:
     first_source_page: int | None = None
     best_confidence_rank = -1
     best_confidence: str | None = None
+    item_pages: dict[str, int] = {}
 
     for page in pages:
         value = page.get(field)
         if not isinstance(value, list) or not value:
             continue
 
+        page_number = page.get("page_number")
         for item in value:
             # Vocabulary array fields are strings, so the item is the dedup key.
             if item in seen:
                 continue
             seen.add(item)
             merged.append(item)
+            if page_number is not None:
+                item_pages[item] = page_number
 
         confidence = page.get(f"{field}_confidence")
         rank = _CONFIDENCE_RANK.get(confidence, 0)
@@ -311,6 +315,8 @@ def _merge_array_field(field: str, pages: list[dict], out: dict) -> None:
                 first_source_page = source.get("page_number")
 
     out[field] = merged
+    if item_pages:
+        out[f"{field}_item_pages"] = item_pages
     if best_confidence is not None:
         out[f"{field}_confidence"] = best_confidence
     if first_source_page is not None or merged_spans:

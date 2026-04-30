@@ -383,10 +383,17 @@ def check_phys_004(agg: dict) -> list:
         tampering_fields = [
             field for field in alteration_fields
             if "identity redaction" not in str(field).lower()
+            and field != "identity_redaction"
         ]
     else:
         tampering_fields = []
     if len(tampering_fields) > 0:
+        item_pages = agg.get("suspected_alteration_fields_item_pages") or {}
+        source_pages = [item_pages[f] for f in tampering_fields if f in item_pages]
+        if source_pages:
+            source_loc = {"page_number": source_pages[0]}
+        else:
+            source_loc = _src(agg, "suspected_alteration_fields")
         flags.append(Flag(
             rule_code="PHYS_004",
             rule_description="Extractor identified suspected content alterations",
@@ -397,7 +404,7 @@ def check_phys_004(agg: dict) -> list:
                 f"areas: {', '.join(str(f) for f in tampering_fields)}. "
                 "These observations indicate possible digital editing or document fabrication."
             ),
-            source_location=_src(agg, "suspected_alteration_fields"),
+            source_location=source_loc,
         ))
 
     return flags

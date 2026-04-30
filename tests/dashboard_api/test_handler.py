@@ -142,8 +142,11 @@ def _seed_flag(
     seq: str = "001",
     severity: str = "High",
     rationale: str = "GPA mismatch",
+    source_location: dict | None = None,
 ) -> None:
     """Write a FLAG record."""
+    if source_location is None:
+        source_location = {"page_number": 2, "text_spans": ["Overall GPA: 3.4"]}
     table.put_item(
         Item={
             "PK": f"APP#{app_id}",
@@ -152,7 +155,7 @@ def _seed_flag(
             "rule_code": rule_code,
             "severity": severity,
             "rationale": rationale,
-            "source_location": {"page_number": 2, "text_spans": ["Overall GPA: 3.4"]},
+            "source_location": source_location,
             "reviewer_status": "OPEN",
             "reviewer_id": None,
             "reviewer_ts": None,
@@ -171,9 +174,20 @@ def _seed_document(table, app_id: str) -> None:
             "doc_type": "TRANSCRIPT",
             "status": "EXTRACTED",
             "s3_extraction_key": f"processed/{app_id}/extraction_TRANSCRIPT.json",
+            "s3_textract_key": f"processed/{app_id}/textract_TRANSCRIPT.json",
             "model_id": "amazon.nova-pro-v1:0",
             "page_count": 4,
         }
+    )
+
+
+def _put_json(bucket: str, key: str, payload: dict) -> None:
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=json.dumps(payload).encode("utf-8"),
+        ContentType="application/json",
     )
 
 
@@ -458,6 +472,184 @@ def test_get_application_happy_path(dynamo_table, lambda_context):
     assert body["metadata"]["status"] == "READY_FOR_REVIEW"
     assert body["extraction"]["doc_type"] == "TRANSCRIPT"
     assert len(body["flags"]) == 2
+
+
+def test_get_application_includes_textract_highlight_target(
+    dynamo_table, lambda_context
+):
+    """Text-backed flag evidence should resolve to Textract geometry."""
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="msbn-transcripts-test")
+    _put_json(
+        "msbn-transcripts-test",
+        "processed/APP-D01H/textract_TRANSCRIPT.json",
+        {
+            "pages": [
+                {
+                    "page_number": 2,
+                    "lines": [
+                        {
+                            "text": "Overall GPA: 3.4",
+                            "geometry": {
+                                "BoundingBox": {
+                                    "Left": 0.11,
+                                    "Top": 0.22,
+                                    "Width": 0.33,
+                                    "Height": 0.04,
+                                }
+                            },
+                        }
+                    ],
+                    "tables": [],
+                    "forms": [],
+                    "layouts": [],
+                    "queries": [],
+                }
+            ]
+        },
+    )
+    _seed_application(dynamo_table, "APP-D01H")
+    _seed_document(dynamo_table, "APP-D01H")
+    _seed_flag(dynamo_table, "APP-D01H", source_location={"page_number": 2, "text_spans": ["Overall GPA: 3.4"]})
+
+    event = _make_event("GET /applications/{id}", path_params={"id": "APP-D01H"})
+    body = _parse_response(handler(event, lambda_context))
+
+    highlight = body["flags"][0]["highlightTarget"]
+    assert highlight["type"] == "textract"
+    assert highlight["page"] == 2
+    assert highlight["matchTypes"] == ["line"]
+    assert highlight["rects"][0] == {
+        "left": 0.11,
+        "top": 0.22,
+        "width": 0.33,
+        "height": 0.04,
+    }
+
+
+def test_get_application_leaves_visual_only_flag_without_highlight(
+    dynamo_table, lambda_context
+):
+    """Descriptive visual spans should not produce fake Textract highlights."""
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="msbn-transcripts-test")
+    _put_json(
+        "msbn-transcripts-test",
+        "processed/APP-D01V/textract_TRANSCRIPT.json",
+        {
+            "pages": [
+                {
+                    "page_number": 1,
+                    "lines": [
+                        {
+                            "text": "Official Transcript",
+                            "geometry": {
+                                "BoundingBox": {
+                                    "Left": 0.2,
+                                    "Top": 0.1,
+                                    "Width": 0.4,
+                                    "Height": 0.05,
+                                }
+                            },
+                        }
+                    ],
+                    "tables": [],
+                    "forms": [],
+                    "layouts": [],
+                    "queries": [],
+                }
+            ]
+        },
+    )
+    _seed_application(dynamo_table, "APP-D01V")
+    _seed_document(dynamo_table, "APP-D01V")
+    _seed_flag(
+        dynamo_table,
+        "APP-D01V",
+        rule_code="PHYS_001",
+        source_location={"page_number": 1, "text_spans": ["upper-right corner"]},
+    )
+
+    event = _make_event("GET /applications/{id}", path_params={"id": "APP-D01V"})
+    body = _parse_response(handler(event, lambda_context))
+
+    assert body["flags"][0]["highlightTarget"] is None
+
+
+def test_get_application_falls_back_to_aggregation_course_source(
+    dynamo_table, lambda_context
+):
+    """Course-based flags can recover source spans from aggregation before matching Textract."""
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="msbn-transcripts-test")
+    _put_json(
+        "msbn-transcripts-test",
+        "processed/APP-D01A/textract_TRANSCRIPT.json",
+        {
+            "pages": [
+                {
+                    "page_number": 1,
+                    "lines": [
+                        {
+                            "text": "PNV1213 BODY STRUCTURE & FUNCTIO B 3.000 9.000",
+                            "geometry": {
+                                "BoundingBox": {
+                                    "Left": 0.09,
+                                    "Top": 0.31,
+                                    "Width": 0.61,
+                                    "Height": 0.03,
+                                }
+                            },
+                        }
+                    ],
+                    "tables": [],
+                    "forms": [],
+                    "layouts": [],
+                    "queries": [],
+                }
+            ]
+        },
+    )
+    _put_json(
+        "msbn-transcripts-test",
+        "processed/APP-D01A/aggregation.json",
+        {
+            "courses": [
+                {
+                    "code": "PNV 1213",
+                    "source_location": {
+                        "page_number": 1,
+                        "text_spans": ["PNV1213 BODY STRUCTURE & FUNCTIO B 3.000 9.000"],
+                    },
+                }
+            ]
+        },
+    )
+    _seed_application(dynamo_table, "APP-D01A")
+    _seed_document(dynamo_table, "APP-D01A")
+    dynamo_table.put_item(
+        Item={
+            "PK": "APP#APP-D01A",
+            "SK": "FLAG#CONT_004#001",
+            "entity_type": "FLAG",
+            "rule_code": "CONT_004",
+            "rule_description": "Exact duplicate course without retake marker: PNV 1213",
+            "severity": "High",
+            "rationale": "Duplicate course entries without a legitimate repeat indicator are a fabrication indicator.",
+            "reviewer_status": "OPEN",
+        }
+    )
+
+    event = _make_event("GET /applications/{id}", path_params={"id": "APP-D01A"})
+    body = _parse_response(handler(event, lambda_context))
+
+    flag = body["flags"][0]
+    assert flag["sourceLocation"] == {
+        "page": 1,
+        "spans": ["PNV1213 BODY STRUCTURE & FUNCTIO B 3.000 9.000"],
+    }
+    assert flag["highlightTarget"]["page"] == 1
+    assert flag["highlightTarget"]["matchTypes"] == ["line"]
 
 
 def test_get_application_includes_transcript_url(dynamo_table, lambda_context):

@@ -174,7 +174,6 @@ _TEXTRACT_QUERIES = [
     ("degree_conferred_date", "What date was the degree, diploma, or certificate conferred?"),
     ("claimed_degree_type", "What nursing degree, diploma, certificate, or credential is claimed?"),
     ("final_cum_gpa_stated", "What final cumulative GPA is stated?"),
-    ("total_credit_hours", "What total credit hours are stated?"),
     ("registrar_name", "What registrar name is printed?"),
     ("registrar_title", "What registrar title is printed?"),
     ("registrar_contact", "What registrar or institution contact information is printed?"),

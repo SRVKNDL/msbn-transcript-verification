@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -39,6 +40,7 @@ _VALID_FLAG_DECISIONS = {"CONFIRM", "OVERRIDE"}
 
 _MAX_PAGE_SIZE = 100
 _DEFAULT_PAGE_SIZE = 20
+_COURSE_CODE_RE = re.compile(r"\b([A-Z]{2,5})\s*-?\s*(\d{3,4}[A-Z]?)\b")
 
 
 class _DecimalEncoder(json.JSONEncoder):
@@ -173,17 +175,354 @@ def _highest_severity(metadata: dict) -> str | None:
     return None
 
 
-def _flag_view(flag: dict) -> dict:
+def _normalize_match_text(value) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _bbox_view(geometry: dict | None) -> dict | None:
+    if not isinstance(geometry, dict):
+        return None
+    bbox = geometry.get("BoundingBox") or geometry.get("boundingBox") or geometry.get("bbox")
+    if not isinstance(bbox, dict):
+        return None
+    try:
+        left = float(bbox.get("Left"))
+        top = float(bbox.get("Top"))
+        width = float(bbox.get("Width"))
+        height = float(bbox.get("Height"))
+    except (TypeError, ValueError):
+        return None
+    if min(left, top, width, height) < 0:
+        return None
+    return {
+        "left": left,
+        "top": top,
+        "width": width,
+        "height": height,
+    }
+
+
+def _merge_bboxes(boxes: list[dict]) -> dict | None:
+    resolved = [_bbox_view(box) for box in boxes]
+    resolved = [box for box in resolved if box]
+    if not resolved:
+        return None
+    left = min(box["left"] for box in resolved)
+    top = min(box["top"] for box in resolved)
+    right = max(box["left"] + box["width"] for box in resolved)
+    bottom = max(box["top"] + box["height"] for box in resolved)
+    return {
+        "left": left,
+        "top": top,
+        "width": max(0.0, right - left),
+        "height": max(0.0, bottom - top),
+    }
+
+
+def _textract_entries(textract_doc: dict | None) -> list[dict]:
+    if not isinstance(textract_doc, dict):
+        return []
+
+    entries: list[dict] = []
+    for page in textract_doc.get("pages") or []:
+        if not isinstance(page, dict):
+            continue
+        page_number = int(page.get("page_number") or 1)
+
+        for line in page.get("lines") or []:
+            if not isinstance(line, dict):
+                continue
+            text = str(line.get("text") or "").strip()
+            bbox = _bbox_view(line.get("geometry"))
+            if text and bbox:
+                entries.append({
+                    "page": page_number,
+                    "text": text,
+                    "normalized": _normalize_match_text(text),
+                    "matchType": "line",
+                    "rect": bbox,
+                })
+
+        for table in page.get("tables") or []:
+            if not isinstance(table, dict):
+                continue
+            cells_by_row: dict[int, list[dict]] = {}
+            for cell in table.get("cells") or []:
+                if not isinstance(cell, dict):
+                    continue
+                row_index = cell.get("row_index")
+                if not isinstance(row_index, int):
+                    continue
+                cells_by_row.setdefault(row_index, []).append(cell)
+
+            for row_index, cells in cells_by_row.items():
+                ordered = sorted(
+                    cells,
+                    key=lambda item: item.get("column_index") or 0,
+                )
+                row_text = " ".join(
+                    str(cell.get("text") or "").strip()
+                    for cell in ordered
+                    if str(cell.get("text") or "").strip()
+                ).strip()
+                row_bbox = _merge_bboxes([cell.get("geometry") for cell in ordered])
+                if row_text and row_bbox:
+                    entries.append({
+                        "page": page_number,
+                        "text": row_text,
+                        "normalized": _normalize_match_text(row_text),
+                        "matchType": "table_row",
+                        "rect": row_bbox,
+                    })
+
+        for form in page.get("forms") or []:
+            if not isinstance(form, dict):
+                continue
+            key_text = str(form.get("key") or "").strip()
+            value_text = str(form.get("value") or "").strip()
+            key_bbox = _bbox_view(form.get("key_geometry"))
+            value_bbox = _merge_bboxes(form.get("value_geometry") or [])
+            if key_text and key_bbox:
+                entries.append({
+                    "page": page_number,
+                    "text": key_text,
+                    "normalized": _normalize_match_text(key_text),
+                    "matchType": "form_key",
+                    "rect": key_bbox,
+                })
+            if value_text and value_bbox:
+                entries.append({
+                    "page": page_number,
+                    "text": value_text,
+                    "normalized": _normalize_match_text(value_text),
+                    "matchType": "form_value",
+                    "rect": value_bbox,
+                })
+            combined_text = " ".join(part for part in (key_text, value_text) if part).strip()
+            combined_bbox = _merge_bboxes([form.get("key_geometry"), *(form.get("value_geometry") or [])])
+            if combined_text and combined_bbox:
+                entries.append({
+                    "page": page_number,
+                    "text": combined_text,
+                    "normalized": _normalize_match_text(combined_text),
+                    "matchType": "form_pair",
+                    "rect": combined_bbox,
+                })
+
+        for layout in page.get("layouts") or []:
+            if not isinstance(layout, dict):
+                continue
+            text = str(layout.get("text") or "").strip()
+            bbox = _bbox_view(layout.get("geometry"))
+            if text and bbox:
+                entries.append({
+                    "page": page_number,
+                    "text": text,
+                    "normalized": _normalize_match_text(text),
+                    "matchType": "layout",
+                    "rect": bbox,
+                })
+
+        for query in page.get("queries") or []:
+            if not isinstance(query, dict):
+                continue
+            for answer in query.get("answers") or []:
+                if not isinstance(answer, dict):
+                    continue
+                text = str(answer.get("text") or "").strip()
+                bbox = _bbox_view(answer.get("geometry"))
+                if text and bbox:
+                    entries.append({
+                        "page": page_number,
+                        "text": text,
+                        "normalized": _normalize_match_text(text),
+                        "matchType": "query_answer",
+                        "rect": bbox,
+                    })
+    return entries
+
+
+def _match_textract_span(span: str, entries: list[dict]) -> list[dict]:
+    normalized = _normalize_match_text(span)
+    if not normalized:
+        return []
+
+    exact = [entry for entry in entries if entry["normalized"] == normalized]
+    if exact:
+        return exact
+
+    containing = [
+        entry
+        for entry in entries
+        if normalized in entry["normalized"] or entry["normalized"] in normalized
+    ]
+    return containing
+
+
+def _highlight_target_for_source_location(
+    source_location: dict | None,
+    textract_doc: dict | None,
+) -> dict | None:
+    if not isinstance(source_location, dict) or not isinstance(textract_doc, dict):
+        return None
+
+    spans = [
+        str(span).strip()
+        for span in source_location.get("text_spans") or source_location.get("spans") or []
+        if str(span or "").strip()
+    ]
+    if not spans:
+        return None
+
+    source_page = source_location.get("page_number") or source_location.get("page")
+    try:
+        source_page = int(source_page) if source_page is not None else None
+    except (TypeError, ValueError):
+        source_page = None
+
+    entries = _textract_entries(textract_doc)
+    matched_spans: list[str] = []
+    unmatched_spans: list[str] = []
+    page_targets: dict[int, dict] = {}
+
+    for span in spans:
+        matches = _match_textract_span(span, entries)
+        if source_page is not None:
+            page_filtered = [match for match in matches if match["page"] == source_page]
+            if page_filtered:
+                matches = page_filtered
+        if not matches:
+            unmatched_spans.append(span)
+            continue
+
+        matched_spans.append(span)
+        for match in matches:
+            target = page_targets.setdefault(
+                match["page"],
+                {"page": match["page"], "rects": [], "textSpans": [], "matchTypes": []},
+            )
+            if span not in target["textSpans"]:
+                target["textSpans"].append(span)
+            if match["matchType"] not in target["matchTypes"]:
+                target["matchTypes"].append(match["matchType"])
+            if match["rect"] not in target["rects"]:
+                target["rects"].append(match["rect"])
+
+    if not page_targets:
+        return None
+
+    ordered_targets = sorted(page_targets.values(), key=lambda item: item["page"])
+    primary_page = source_page if isinstance(source_page, int) and source_page in page_targets else ordered_targets[0]["page"]
+    primary_target = next(
+        target for target in ordered_targets if target["page"] == primary_page
+    )
+
+    return {
+        "type": "textract",
+        "page": primary_page,
+        "rects": primary_target["rects"],
+        "textSpans": primary_target["textSpans"],
+        "matchTypes": primary_target["matchTypes"],
+        "pageTargets": ordered_targets,
+        "matchedSpans": matched_spans,
+        "unmatchedSpans": unmatched_spans,
+    }
+
+
+def _course_code(value: str | None) -> str | None:
+    match = _COURSE_CODE_RE.search(str(value or "").upper())
+    if not match:
+        return None
+    return f"{match.group(1)} {match.group(2)}"
+
+
+def _course_source_locations_for_code(aggregation: dict | None, course_code: str) -> list[dict]:
+    if not isinstance(aggregation, dict):
+        return []
+
+    locations: list[dict] = []
+    for course in aggregation.get("courses") or []:
+        if not isinstance(course, dict):
+            continue
+        current_code = _course_code(course.get("code") or course.get("course_code"))
+        if current_code != course_code:
+            continue
+        source = course.get("source_location")
+        if isinstance(source, dict):
+            locations.append(source)
+    return locations
+
+
+def _fallback_source_location(flag: dict, aggregation: dict | None) -> dict | None:
+    existing = flag.get("source_location")
+    if isinstance(existing, dict):
+        return existing
+
+    rule_code = str(flag.get("rule_code") or flag.get("ruleCode") or "")
+    rule_description = str(flag.get("rule_description") or flag.get("ruleName") or "")
+    rationale = str(flag.get("rationale") or "")
+
+    if rule_code in {"PROG_001", "PROG_002", "PROG_004"} or (
+        rule_code == "CONT_004" and "duplicate course" in rule_description.lower()
+    ):
+        parsed_code = _course_code(rule_description) or _course_code(rationale)
+        if parsed_code:
+            sources = _course_source_locations_for_code(aggregation, parsed_code)
+            spans: list[str] = []
+            page_number = None
+            for source in sources:
+                if page_number is None and isinstance(source.get("page_number"), int):
+                    page_number = source["page_number"]
+                for span in source.get("text_spans") or []:
+                    text = str(span).strip()
+                    if text and text not in spans:
+                        spans.append(text)
+            if page_number is not None and spans:
+                return {"page_number": page_number, "text_spans": spans}
+
+    if rule_code == "PROG_003":
+        for key in ("total_credit_hours_source", "total_credit_hours_stated_source"):
+            source = aggregation.get(key) if isinstance(aggregation, dict) else None
+            if isinstance(source, dict):
+                return source
+
+    return None
+
+
+def _load_json_from_s3(key: str | None) -> dict | None:
+    if not _BUCKET_NAME or not key:
+        return None
+    try:
+        response = _s3.get_object(Bucket=_BUCKET_NAME, Key=key)
+    except ClientError:
+        logger.exception("DashboardApiLambda could not read JSON from S3", extra={"s3_key": key})
+        return None
+    try:
+        return json.loads(response["Body"].read().decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        logger.exception("DashboardApiLambda found invalid JSON in S3", extra={"s3_key": key})
+        return None
+
+
+def _flag_view(
+    flag: dict,
+    *,
+    source_location: dict | None = None,
+    textract_doc: dict | None = None,
+) -> dict:
     rule_code = flag.get("rule_code") or flag.get("ruleCode") or "UNKNOWN"
     reviewer_status = flag.get("reviewer_status", "OPEN")
+    resolved_source = source_location if source_location is not None else flag.get("source_location")
+    highlight_target = _highlight_target_for_source_location(resolved_source, textract_doc)
     return {
         "ruleCode": rule_code,
         "ruleName": flag.get("rule_name") or rule_code,
         "severity": flag.get("severity") or "Low",
         "rationale": flag.get("rationale") or "No rationale provided.",
-        "sourceLocation": _source_location_view(flag.get("source_location")),
+        "sourceLocation": _source_location_view(resolved_source),
         "status": "PENDING" if reviewer_status == "OPEN" else reviewer_status,
         "safePractice": flag.get("safe_practice") or _safe_practice_for(rule_code),
+        "highlightTarget": highlight_target,
     }
 
 
@@ -406,12 +745,21 @@ def _get_application(app_id: str | None, table) -> dict:
 
     doc_resp = table.get_item(Key={"PK": pk, "SK": "DOCUMENT#TRANSCRIPT"})
     extraction = doc_resp.get("Item")
+    textract_doc = _load_json_from_s3((extraction or {}).get("s3_textract_key"))
+    aggregation = _load_json_from_s3(f"processed/{app_id}/aggregation.json")
 
     flag_resp = table.query(
         KeyConditionExpression=Key("PK").eq(pk) & Key("SK").begins_with("FLAG#"),
     )
 
-    flags = [_flag_view(f) for f in flag_resp.get("Items", [])]
+    flags = [
+        _flag_view(
+            flag,
+            source_location=_fallback_source_location(flag, aggregation),
+            textract_doc=textract_doc,
+        )
+        for flag in flag_resp.get("Items", [])
+    ]
 
     transcript_preview = _transcript_preview(metadata)
     page_count = _resolved_page_count(app_id, metadata, extraction)

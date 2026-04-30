@@ -113,6 +113,8 @@ export function AuditOverviewPage() {
   const [query, setQuery] = useState("");
   const [apps, setApps] = useState<Application[]>([]);
   const [audits, setAudits] = useState<Record<string, AuditEvent[]>>({});
+  const [loadingAudits, setLoadingAudits] = useState<Record<string, boolean>>({});
+  const [auditErrors, setAuditErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     listApplications({
@@ -136,13 +138,48 @@ export function AuditOverviewPage() {
         (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
       );
       setApps(sorted);
-      void Promise.all(
-        sorted.map((app) =>
-          getAuditTrail(app.applicationId).then((events) => [app.applicationId, events] as const)
-        )
-      ).then((entries) => setAudits(Object.fromEntries(entries)));
     });
   }, []);
+
+  function hasLoadedAudit(applicationId: string) {
+    return Object.prototype.hasOwnProperty.call(audits, applicationId);
+  }
+
+  function loadAuditEvents(applicationId: string) {
+    if (hasLoadedAudit(applicationId) || loadingAudits[applicationId]) return;
+
+    setLoadingAudits((current) => ({ ...current, [applicationId]: true }));
+    setAuditErrors((current) => {
+      const next = { ...current };
+      delete next[applicationId];
+      return next;
+    });
+
+    getAuditTrail(applicationId)
+      .then((events) => {
+        setAudits((current) => ({ ...current, [applicationId]: events }));
+      })
+      .catch((err) => {
+        setAuditErrors((current) => ({
+          ...current,
+          [applicationId]:
+            err instanceof Error ? err.message : "Unable to load audit events.",
+        }));
+      })
+      .finally(() => {
+        setLoadingAudits((current) => {
+          const next = { ...current };
+          delete next[applicationId];
+          return next;
+        });
+      });
+  }
+
+  function toggleExpanded(app: Application) {
+    const nextExpandedId = expandedId === app.applicationId ? null : app.applicationId;
+    setExpandedId(nextExpandedId);
+    if (nextExpandedId) loadAuditEvents(app.applicationId);
+  }
 
   const totalEvents = apps.reduce(
     (sum, app) => sum + (audits[app.applicationId]?.length ?? 0),
@@ -177,7 +214,7 @@ export function AuditOverviewPage() {
       <PageHeader
         eyebrow="SP-9 \u00b7 Compliance"
         title="Audit log"
-        subtitle={`${filteredApps.length} of ${apps.length} documents \u00b7 ${totalEvents} total events`}
+        subtitle={`${filteredApps.length} of ${apps.length} documents \u00b7 ${totalEvents} loaded events`}
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
             <input
@@ -261,21 +298,22 @@ export function AuditOverviewPage() {
 
       <div style={{ padding: "20px 34px 40px", maxWidth: 960 }}>
         {filteredApps.map((app) => {
+          const auditLoaded = hasLoadedAudit(app.applicationId);
+          const auditLoading = Boolean(loadingAudits[app.applicationId]);
+          const auditError = auditErrors[app.applicationId];
           const allEvents = audits[app.applicationId] ?? [];
           const events = filterEvents(allEvents);
           const isExpanded = expandedId === app.applicationId;
-          const flagCount = allEvents.filter(
-            (e) => e.event === "FLAG_RAISED"
-          ).length;
+          const flagCount = auditLoaded
+            ? allEvents.filter((e) => e.event === "FLAG_RAISED").length
+            : app.flagCount;
 
           return (
             <div key={app.applicationId} style={{ marginBottom: 10 }}>
               <Card pad={0}>
                 {/* Row header */}
                 <div
-                  onClick={() =>
-                    setExpandedId(isExpanded ? null : app.applicationId)
-                  }
+                  onClick={() => toggleExpanded(app)}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -338,7 +376,7 @@ export function AuditOverviewPage() {
                     }}
                   >
                     <div style={{ color: t.ink3 }}>
-                      {allEvents.length} events
+                      {auditLoaded ? `${allEvents.length} events` : "Events on demand"}
                       {flagCount > 0 && (
                         <span style={{ color: t.high, marginLeft: 8 }}>
                           {flagCount} flags
@@ -360,7 +398,47 @@ export function AuditOverviewPage() {
                       background: t.surfaceAlt,
                     }}
                   >
-                    {events.length === 0 ? (
+                    {auditLoading ? (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: t.ink4,
+                          fontStyle: "italic",
+                        }}
+                      >
+                        Loading audit events...
+                      </div>
+                    ) : auditError ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          fontSize: 12,
+                          color: t.high,
+                        }}
+                      >
+                        <span>{auditError}</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            loadAuditEvents(app.applicationId);
+                          }}
+                          style={{
+                            background: t.surface,
+                            border: `1px solid ${t.line}`,
+                            padding: "4px 10px",
+                            fontSize: 11,
+                            borderRadius: 2,
+                            cursor: "pointer",
+                            fontFamily: t.mono,
+                            color: t.ink2,
+                          }}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ) : events.length === 0 ? (
                       <div
                         style={{
                           fontSize: 12,

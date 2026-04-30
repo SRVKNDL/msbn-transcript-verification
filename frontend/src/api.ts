@@ -2,6 +2,7 @@ import type { Application, Flag, ExtractionData, AuditEvent } from "./types";
 import { getIdToken } from "./auth";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+const auditTrailRequests = new Map<string, Promise<AuditEvent[]>>();
 
 async function fetchJson<T>(path: string): Promise<T> {
   requireApiBase();
@@ -249,10 +250,22 @@ export async function getApplication(id: string): Promise<{
 }
 
 export async function getAuditTrail(id: string): Promise<AuditEvent[]> {
-  const data = await fetchJson<{ items: RawAuditEvent[] }>(
+  const existing = auditTrailRequests.get(id);
+  if (existing) return existing;
+
+  const request = fetchJson<{ items: RawAuditEvent[] }>(
     `/applications/${id}/audit`
-  );
-  return data.items.map(normalizeAuditEvent);
+  ).then((data) => data.items.map(normalizeAuditEvent));
+
+  auditTrailRequests.set(id, request);
+
+  try {
+    return await request;
+  } finally {
+    if (auditTrailRequests.get(id) === request) {
+      auditTrailRequests.delete(id);
+    }
+  }
 }
 
 export async function submitDecision(
@@ -331,4 +344,3 @@ export async function uploadTranscriptWithDetails(
   }
   return { s3Key: data.s3Key };
 }
-

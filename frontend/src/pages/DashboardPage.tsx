@@ -1195,8 +1195,8 @@ function ActivityRow({
             ? "Review →"
             : r.status === "FAILED"
               ? "Audit →"
-              : r.status === "REVIEWED"
-                ? "Audit →"
+              : target
+                ? "Open →"
                 : "Waiting"}
         </button>
       </td>

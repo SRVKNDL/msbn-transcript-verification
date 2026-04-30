@@ -35,6 +35,13 @@ export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
     </div>
   );
 
+  const timeline = [...auditEvents].sort((a, b) => {
+    const left = Date.parse(a.ts);
+    const right = Date.parse(b.ts);
+    if (Number.isNaN(left) || Number.isNaN(right)) return a.ts.localeCompare(b.ts);
+    return right - left;
+  });
+
   // Derive decision info from audit events or application status
   const decisionEvent = auditEvents.find(e => e.event === "DECISION_SUBMITTED" || e.event === "REVIEW_COMPLETE");
   const overallDecision = app.status === "REVIEWED" || app.status === "READY_FOR_LICENSING_REVIEW"
@@ -228,13 +235,13 @@ export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
               <div style={{ fontSize: 12, fontWeight: 600, color: t.ink, fontFamily: t.serif }}>Audit Trail</div>
             </div>
             <div style={{ padding: "8px 0" }}>
-              {auditEvents.length === 0 && (
+              {timeline.length === 0 && (
                 <div style={{ padding: "20px 16px", textAlign: "center", color: t.ink4, fontSize: 12 }}>
                   No audit events.
                 </div>
               )}
-              {auditEvents.slice(0, 6).map((ev, i) => (
-                <div key={i} style={{ display: "flex", gap: 10, padding: "7px 16px", alignItems: "flex-start" }}>
+              {timeline.map((ev, i) => (
+                <div key={`${ev.ts}-${ev.event}-${i}`} style={{ display: "flex", gap: 10, padding: "7px 16px", alignItems: "flex-start" }}>
                   <div style={{
                     width: 6, height: 6, borderRadius: 3, marginTop: 5, flexShrink: 0,
                     background: ev.event === "FLAG_RAISED" ? t.high : ev.event.includes("COMPLETE") ? t.ok : t.low,

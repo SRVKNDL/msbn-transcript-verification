@@ -43,6 +43,17 @@ export function applicationReviewedPath(app: Application | string) {
   return `/reviewed/${applicationId(app)}`;
 }
 
+const REVIEW_OUTCOME_STATUSES = new Set([
+  "REVIEWED",
+  "READY_FOR_LICENSING_REVIEW",
+  "RETURN_TO_APPLICANT",
+  "DEFERRED",
+  "DENIED",
+  "APPROVED",
+  "CLOSED",
+  "COMPLETED",
+]);
+
 export function hasApplicationSummary(app: Application) {
   return Boolean(app.applicantName.trim() || app.institution.trim());
 }
@@ -53,7 +64,8 @@ export function isApplicationReviewable(app: Application) {
 
 export function applicationDetailPath(app: Application, source: NavigationSource) {
   if (isApplicationReviewable(app)) return applicationReviewPath(app);
-  if (source === "dashboard" && (app.status === "FAILED" || app.status === "REVIEWED")) {
+  if (REVIEW_OUTCOME_STATUSES.has(app.status)) return applicationReviewedPath(app);
+  if (source === "dashboard" && app.status === "FAILED") {
     return applicationAuditPath(app);
   }
   return null;

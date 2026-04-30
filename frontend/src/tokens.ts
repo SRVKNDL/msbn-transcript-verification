@@ -31,8 +31,8 @@ export const LAYOUT = {
   sidebarBorder: "#1a3558",
   paper: "#ffffff",
   pdfBg: "#cbd5e1",
-  accent: "#2563eb",
-  accentInk: "#1d4ed8",
+  accent: "#2A73EC",
+  accentInk: "#1d57c4",
   line: "#e2e8f0",
   line2: "#f1f5f9",
 } as const;

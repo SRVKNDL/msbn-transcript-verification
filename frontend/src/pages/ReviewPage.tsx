@@ -707,6 +707,7 @@ function FlagDetailModal({
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
+          animation: "modalIn 0.22s cubic-bezier(.2,.7,.3,1)",
         }}
       >
         <div style={{ padding: "18px 22px 14px", borderBottom: `1px solid ${t.line}` }}>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
-import { PageHeader, Card, Btn } from "../components/Shell";
+import { PageHeader, Card } from "../components/Shell";
 import {
   applicationDetailPath,
   detailBackStateFor,
@@ -95,21 +95,88 @@ function StatusPill({ status }: { status: string }) {
       style={{
         display: "inline-flex",
         alignItems: "center",
-        border: `1px solid ${borderColor}`,
+        border: `1.5px solid ${borderColor}`,
         background: bgColor,
         color: textColor,
-        borderRadius: 2,
-        padding: "2px 7px",
-        fontSize: 10,
+        borderRadius: 999,
+        padding: "4px 14px",
+        fontSize: 11,
         fontWeight: 700,
         fontFamily: t.mono,
-        letterSpacing: 0.3,
+        letterSpacing: 0.4,
         textTransform: "uppercase",
         whiteSpace: "nowrap",
       }}
     >
       {label}
     </span>
+  );
+}
+
+function ClipboardStatIcon({ color }: { color: string }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      <rect x="3.5" y="3.5" width="11" height="13" rx="1.4" stroke={color} strokeWidth="1.6" />
+      <rect x="6" y="2" width="6" height="3" rx="0.7" stroke={color} strokeWidth="1.6" fill="none" />
+      <path d="M6.4 9h5.2M6.4 11.6h3.5" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function GearIcon({ color }: { color: string }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      <circle cx="9" cy="9" r="2.4" stroke={color} strokeWidth="1.5" />
+      <path
+        d="M9 1.6v2M9 14.4v2M3.8 3.8l1.4 1.4M12.8 12.8l1.4 1.4M1.6 9h2M14.4 9h2M3.8 14.2l1.4-1.4M12.8 5.2l1.4-1.4"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function FlagStatIcon({ color }: { color: string }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      <path d="M4.5 2.5v13" stroke={color} strokeWidth="1.6" strokeLinecap="round" />
+      <path
+        d="M4.5 3h8.6l-1.7 3.1 1.7 3.1H4.5"
+        stroke={color}
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CheckIcon({ color }: { color: string }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      <path
+        d="M3.5 9.5 7 13l7.5-8"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function UploadIconLg({ color }: { color: string }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M3.2 11.5a2.7 2.7 0 0 1 .35-5.32 4 4 0 0 1 7.74-.5 2.85 2.85 0 0 1 1.3 5.5"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M8 8.4v5.4M5.7 10.6 8 8.3l2.3 2.3" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -247,31 +314,47 @@ export function DashboardPage({
     day: "numeric",
     year: "numeric",
   });
+  const eyebrowTime = today.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  const stats = [
+  const stats: {
+    label: string;
+    value: string;
+    delta: string;
+    accent: string;
+    bg: string;
+    icon: (color: string) => React.ReactNode;
+  }[] = [
     {
       label: "Awaiting review",
       value: String(awaiting.length),
-      delta: error ?? "from live API",
+      delta: error ?? "From live API",
       accent: t.accent,
+      bg: t.accentBg,
+      icon: (c) => <ClipboardStatIcon color={c} />,
     },
     {
       label: "Processing",
       value: String(processing.length),
-      delta: failed.length ? `${failed.length} failed` : "visible after S3 upload",
-      accent: processing.length ? t.med : t.ink2,
+      delta: failed.length ? `${failed.length} failed` : "Visible after S3 upload",
+      accent: t.med,
+      bg: t.medBg,
+      icon: (c) => <GearIcon color={c} />,
     },
     {
       label: "High-severity flags",
       value: String(highSeverity),
-      delta: `across ${awaiting.length} apps`,
+      delta: `Across ${awaiting.length} apps`,
       accent: t.high,
+      bg: t.highBg,
+      icon: (c) => <FlagStatIcon color={c} />,
     },
     {
       label: "Total open flags",
       value: String(flagged),
-      delta: "ready for reviewer action",
+      delta: "Ready for reviewer action",
       accent: t.ok,
+      bg: t.okBg,
+      icon: (c) => <CheckIcon color={c} />,
     },
   ];
 
@@ -319,12 +402,17 @@ export function DashboardPage({
     }
   }
 
-  const statusToggles: { key: keyof EnabledGroups; label: string }[] = [
-    { key: "processing", label: "Processing" },
-    { key: "failed",     label: "Failed" },
-    { key: "ready",      label: "Ready" },
-    { key: "reviewed",   label: "Reviewed" },
+  const statusToggles: { key: keyof EnabledGroups; label: string; color: string }[] = [
+    { key: "processing", label: "Processing", color: t.med },
+    { key: "failed",     label: "Failed",     color: t.high },
+    { key: "ready",      label: "Ready",      color: t.ok },
+    { key: "reviewed",   label: "Reviewed",   color: t.ink3 },
   ];
+
+  const allActive = (Object.values(enabledGroups).filter(Boolean).length === 4);
+  function selectAll() {
+    setEnabledGroups({ processing: true, failed: true, ready: true, reviewed: true });
+  }
 
   // Shared select style.
   const selectStyle: React.CSSProperties = {
@@ -342,9 +430,39 @@ export function DashboardPage({
   return (
     <>
       <PageHeader
-        eyebrow={`${eyebrowDate} · ${today.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} CT`}
+        eyebrow={`${eyebrowDate} — ${eyebrowTime} CT`}
         title="Reviewer dashboard"
-        subtitle={`${awaiting.length} applications awaiting review · ${highSeverity} high severity`}
+        subtitle={
+          <span>
+            {awaiting.length} applications awaiting review &middot;{" "}
+            <span style={{ color: t.high, fontWeight: 600 }}>
+              {highSeverity} high severity
+            </span>
+          </span>
+        }
+        actions={
+          <button
+            onClick={() => onNavigate("upload")}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              background: t.primary,
+              color: "#fff",
+              border: `1px solid ${t.primary}`,
+              borderRadius: 8,
+              padding: "10px 16px",
+              fontSize: 13,
+              fontWeight: 600,
+              fontFamily: "inherit",
+              cursor: "pointer",
+              letterSpacing: 0.1,
+            }}
+          >
+            <UploadIconLg color="#fff" />
+            Upload transcript
+          </button>
+        }
       />
 
       <div
@@ -382,38 +500,75 @@ export function DashboardPage({
             <div
               key={s.label}
               style={{
-                background: t.surface,
-                border: `1px solid ${t.line}`,
-                borderTop: `3px solid ${s.accent}`,
-                padding: "16px 18px",
-                borderRadius: 3,
+                background: s.bg,
+                border: `1px solid ${s.bg}`,
+                borderLeft: `5px solid ${s.accent}`,
+                padding: "20px 22px",
+                borderRadius: 10,
+                position: "relative",
+                minHeight: 150,
+                display: "flex",
+                flexDirection: "column",
               }}
             >
               <div
                 style={{
-                  fontSize: 11,
-                  color: t.ink3,
-                  letterSpacing: 0.4,
-                  textTransform: "uppercase",
-                  fontFamily: t.mono,
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 10,
                 }}
               >
-                {s.label}
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: s.accent,
+                    letterSpacing: 0.7,
+                    textTransform: "uppercase",
+                    fontWeight: 700,
+                    lineHeight: 1.3,
+                    maxWidth: 140,
+                  }}
+                >
+                  {s.label}
+                </div>
+                <span
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: "rgba(255,255,255,0.65)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  {s.icon(s.accent)}
+                </span>
               </div>
               <div
                 style={{
-                  fontSize: 34,
-                  fontWeight: 600,
+                  fontSize: 48,
+                  fontWeight: 700,
                   fontFamily: t.serif,
-                  color: t.ink,
-                  marginTop: 4,
-                  letterSpacing: -0.5,
+                  color: s.accent,
+                  marginTop: 14,
+                  letterSpacing: -1,
                   lineHeight: 1,
                 }}
               >
                 {s.value}
               </div>
-              <div style={{ fontSize: 11, color: t.ink4, marginTop: 8 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: s.accent,
+                  opacity: 0.78,
+                  marginTop: 10,
+                  fontWeight: 500,
+                }}
+              >
                 {s.delta}
               </div>
             </div>
@@ -432,13 +587,21 @@ export function DashboardPage({
             subtitle={`${queue.length} of ${displayed.length} entries`}
             pad={0}
             actions={
-              <Btn
-                variant="ghost"
-                size="sm"
+              <button
                 onClick={() => onNavigate("queue")}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: t.accent,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  fontFamily: "inherit",
+                  cursor: "pointer",
+                  padding: "4px 6px",
+                }}
               >
                 View all &rarr;
-              </Btn>
+              </button>
             }
           >
             {/* Filter toolbar */}
@@ -454,26 +617,41 @@ export function DashboardPage({
               }}
             >
               {/* Status toggles */}
-              <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-                {statusToggles.map(({ key, label }) => {
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  onClick={selectAll}
+                  style={{
+                    fontSize: 12,
+                    fontFamily: "inherit",
+                    fontWeight: 600,
+                    padding: "6px 16px",
+                    borderRadius: 999,
+                    cursor: "pointer",
+                    border: `1.5px solid ${allActive ? t.accent : t.line}`,
+                    background: "transparent",
+                    color: allActive ? t.accent : t.ink3,
+                    transition: "border-color 0.15s, color 0.15s",
+                  }}
+                >
+                  All
+                </button>
+                {statusToggles.map(({ key, label, color }) => {
                   const active = enabledGroups[key];
                   return (
                     <button
                       key={key}
                       onClick={() => toggleGroup(key)}
                       style={{
-                        fontSize: 10,
-                        fontFamily: t.mono,
-                        fontWeight: 700,
-                        letterSpacing: 0.3,
-                        textTransform: "uppercase",
-                        padding: "3px 9px",
-                        borderRadius: 2,
+                        fontSize: 12,
+                        fontFamily: "inherit",
+                        fontWeight: 600,
+                        padding: "6px 16px",
+                        borderRadius: 999,
                         cursor: "pointer",
-                        border: `1px solid ${active ? t.accent : t.line}`,
-                        background: active ? t.accent : "transparent",
-                        color: active ? "#fff" : t.ink3,
-                        transition: "background 0.15s, color 0.15s",
+                        border: `1.5px solid ${active ? color : t.line}`,
+                        background: "transparent",
+                        color: active ? color : t.ink3,
+                        transition: "border-color 0.15s, color 0.15s",
                       }}
                     >
                       {label}
@@ -786,14 +964,6 @@ export function DashboardPage({
                 {queue.map((a, i) => {
                   const target = applicationDetailPath(a, "dashboard");
                   const activity = transcriptActivityState(a);
-                  const activityColor =
-                    activity.colorKey === "high"
-                      ? t.high
-                      : activity.colorKey === "med"
-                        ? t.med
-                        : activity.colorKey === "low"
-                          ? t.low
-                          : t.ok;
                   return (
                     <div
                       key={a.applicationId}
@@ -810,56 +980,66 @@ export function DashboardPage({
                         target ? `Open ${displayApplicant(a)}` : undefined
                       }
                       style={{
-                        padding: "11px 18px",
+                        padding: "14px 18px",
                         borderBottom:
                           i < queue.length - 1
                             ? `1px solid ${t.line2}`
                             : "none",
                         display: "flex",
-                        gap: 10,
+                        gap: 12,
                         alignItems: "flex-start",
                         cursor: target ? "pointer" : "default",
                       }}
                     >
                       <div
                         style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: 3,
-                          marginTop: 6,
-                          background: activityColor,
+                          width: 32,
+                          height: 32,
+                          borderRadius: 16,
+                          background: t.surfaceAlt,
+                          color: t.ink3,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          fontFamily: t.mono,
+                          letterSpacing: 0.4,
+                          flexShrink: 0,
                         }}
-                      />
+                      >
+                        SY
+                      </div>
                       <div
                         style={{
                           flex: 1,
-                          fontSize: 12,
+                          fontSize: 13,
                           color: t.ink2,
-                          lineHeight: 1.5,
+                          lineHeight: 1.45,
+                          minWidth: 0,
                         }}
                       >
-                        <span style={{ fontWeight: 600, color: t.ink }}>
-                          System
-                        </span>{" "}
-                        <span style={{ color: t.ink3 }}>
-                          {activity.label}
-                        </span>{" "}
-                        <span
-                          style={{
-                            fontFamily: t.mono,
-                            fontSize: 11,
-                            color: t.ink2,
-                          }}
-                        >
-                          {a.applicationId}
-                        </span>
+                        <div>
+                          <span style={{ fontWeight: 700, color: t.ink }}>
+                            System
+                          </span>{" "}
+                          <span style={{ color: t.ink3 }}>{activity.label}</span>{" "}
+                          <span
+                            style={{
+                              fontFamily: t.mono,
+                              fontSize: 12,
+                              color: t.accent,
+                              fontWeight: 600,
+                            }}
+                          >
+                            {a.applicationId}
+                          </span>
+                        </div>
                         <div
                           style={{
-                            fontSize: 10,
+                            fontSize: 11,
                             color: t.ink4,
-                            fontFamily: t.mono,
-                            marginTop: 2,
-                            letterSpacing: 0.2,
+                            marginTop: 3,
                           }}
                         >
                           {timeAgo(a.ageHours)}

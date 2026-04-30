@@ -677,7 +677,7 @@ export function AuditPage({ embedded = false }: { embedded?: boolean }) {
             width: 30,
             height: 30,
             borderRadius: 6,
-            background: "#2563eb",
+            background: "#2A73EC",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",

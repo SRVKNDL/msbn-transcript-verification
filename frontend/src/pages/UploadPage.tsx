@@ -161,7 +161,7 @@ export function UploadPage() {
         title="Upload transcript"
         subtitle="Upload one or more transcript PDFs. Extraction will begin automatically once submitted."
       />
-      <div style={{ padding: "24px 34px 40px", maxWidth: 880 }}>
+      <div style={{ padding: "24px 34px 40px", maxWidth: 880, margin: "0 auto" }}>
         <Card
           title="Application details"
           subtitle="Enter the application ID before upload."

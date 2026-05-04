@@ -334,7 +334,43 @@ export function UploadPage() {
 
         <Card
           title="Transcript files"
-          subtitle="PDF only \u00b7 max 25 MB per file"
+          actions={
+            <span
+              aria-label="PDF only"
+              title="PDF only"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 9px",
+                border: `1px solid ${t.line}`,
+                background: t.surfaceAlt,
+                color: t.ink3,
+                borderRadius: 999,
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: 0.6,
+                textTransform: "uppercase",
+                fontFamily: t.mono,
+              }}
+            >
+              <svg
+                width="12"
+                height="14"
+                viewBox="0 0 12 14"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M1.5 0.5h6L11 4v9a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 1 13V1a.5.5 0 0 1 .5-.5Z"
+                  stroke="currentColor"
+                  strokeLinejoin="round"
+                />
+                <path d="M7.5 0.5V4h3" stroke="currentColor" strokeLinejoin="round" />
+              </svg>
+              PDF
+            </span>
+          }
         >
           {/* Dropzone */}
           <input

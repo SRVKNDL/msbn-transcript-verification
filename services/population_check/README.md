@@ -1,13 +1,15 @@
 # PopulationCheckLambda
 
-Applies population-level validation rules across all applications in the system.
+Placeholder for future population-level checks across applications.
 
-**Responsibilities:**
-- POP_001: Detect duplicate license numbers via DynamoDB GSI2 (LicenseDedup)
-- POP_002: Flag curricula with low overlap within an institution cluster via GSI3
-- POP_003: Flag submission volume anomalies (>3x baseline) via GSI3
-- Write FLAG items to DynamoDB (advisory-only, Low severity until thresholds are validated)
+## Current State
 
-**Note:** POP_002/003 activate only when a cluster of 3+ applications exists for a given institution/program/year.
+- The handler is a stub.
+- It is not part of the active workflow.
+- No population-level rules are currently enforced.
 
-**Runtime:** Python 3.11
+## Intended Future Scope
+
+- Duplicate license number detection
+- Curriculum overlap anomaly detection
+- Submission volume anomaly detection

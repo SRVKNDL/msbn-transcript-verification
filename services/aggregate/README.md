@@ -1,14 +1,36 @@
 # AggregationLambda
 
-Compares cross-document fields across all extracted documents for a single application.
+Flattens page-level extraction into the single transcript document consumed by
+the rule engine.
 
-**Responsibilities:**
-- Read all `extraction_{doc_type}.json` files for an application from S3
-- Populate the Section 4 `CROSS_*` vocabulary fields (`signature_match_across_documents`,
-  `institution_name_match`, `applicant_name_match`, `dates_match_across_documents`)
-- Write `processed/{application_id}/aggregation.json` to S3
-- Update DynamoDB with the aggregation S3 path
+## Responsibilities
 
-**Trigger:** Step Functions state after the parallel Extract Map state completes
-**Runtime:** Python 3.11
-**Downstream:** CrossDocLambda reads `aggregation.json` to evaluate `CROSS_001–003` rules
+- Read `extraction_transcript.json` from S3
+- Merge page-level scalar fields using confidence-aware selection
+- Merge arrays such as courses, semesters, programs, and security features
+- Apply document-level derived fields and aliases
+- Write `processed/{applicationId}/aggregation.json`
+
+## Input
+
+Step Functions event fields:
+
+- `applicationId`
+- `extraction_s3_key`
+- optional `bucket`
+
+## Output
+
+Returns:
+
+```json
+{
+  "applicationId": "<id>",
+  "aggregation_s3_key": "processed/<id>/aggregation.json"
+}
+```
+
+## Notes
+
+- The current implementation is transcript-only.
+- This Lambda does not perform cross-document comparison.

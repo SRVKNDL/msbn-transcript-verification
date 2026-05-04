@@ -4,23 +4,13 @@
 
 ### AWS Budget
 
-- **Name**: `Total_Budget`
-- **Type**: Cost budget, $1,000/month
-- **Thresholds** (actual cost):
-  - 25% ($250)
-  - 50% ($500)
-  - 75% ($750)
-  - 90% ($900)
-- **Subscribers**: all 6 team members on every threshold:
-  - Bishal.Bagale@usm.edu
-  - Sabin.Baral@usm.edu
-  - Saurav.Kandel@usm.edu
-  - Shushil.Pant@usm.edu
-  - Sudeep.Kumal@usm.edu
-  - Sujal.Maharjan@usm.edu
+- **Name**: project cost budget
+- **Type**: monthly AWS cost budget
+- **Thresholds**: configure account-appropriate actual-cost alerts
+- **Subscribers**: designated project owners / alert recipients
 - **Managed in**: AWS Console (Billing > Budgets). NOT managed by CDK.
 - If re-deploying to a different AWS account, recreate this budget manually
-  to match the configuration above.
+  using the target account's budget thresholds and alert recipients.
 
 ## Pre-deploy checklist
 
@@ -33,9 +23,10 @@
 2. **Bootstrap CDK** — Run `cdk bootstrap` if this is the first CDK
    deployment in the target account + region (us-east-1).
 
-3. **Verify SNS subscriptions** — Confirm all 6 team members have clicked
-   the AWS confirmation link in their USM email for the budget alert
-   SNS topic. Unconfirmed subscribers will not receive budget alerts.
+3. **Verify budget alert subscriptions** — Confirm the intended alert
+   recipients have accepted any required subscription confirmations for
+   the budget notification channel. Unconfirmed recipients will not
+   receive cost alerts.
 
 4. **Run tests** — `make test` must pass (all tests green).
 
@@ -197,5 +188,6 @@ After `cdk destroy` completes:
    aws logs delete-log-group --log-group-name /aws/lambda/msbn-dashboard-api
    ```
 
-3. **Keep the budget** — The manual `Total_Budget` resource stays in
-   the AWS Console. Do not delete it between deploys.
+3. **Keep the budget** — The manual budget resource stays in the AWS
+   Console. Do not delete it between deploys unless you are intentionally
+   replacing it with a new account-level cost alert configuration.

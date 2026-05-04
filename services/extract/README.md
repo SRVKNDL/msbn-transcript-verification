@@ -19,10 +19,10 @@ Converts transcript PDFs into a structured extraction JSON for downstream rule e
 5. Downloads the PDF from S3 `uploads/` to `/tmp`.
 6. Converts each page to a PNG image using `pdf2image` (backed by `poppler-utils`).
 7. Writes page images to `processed/{applicationId}/page_transcript_{n}.png` in S3.
-8. Invokes Bedrock Nova per page with both the page image and the matching
-   Textract page context.
+8. Invokes Bedrock Nova per page with the page image and matching Textract
+   page context.
 9. Writes the extraction document to `processed/{applicationId}/extraction_transcript.json`.
-10. Returns `{"applicationId", "page_count", "textract_s3_key", "extraction_s3_key"}`.
+10. Returns the S3 keys needed by downstream workflow steps.
 
 ## Input (Step Functions event)
 
@@ -40,6 +40,7 @@ Converts transcript PDFs into a structured extraction JSON for downstream rule e
 {
   "applicationId":     "<uuid>",
   "page_count":        2,
+  "textract_s3_key":   "processed/<applicationId>/textract_TRANSCRIPT.json",
   "extraction_s3_key": "processed/<applicationId>/extraction_transcript.json"
 }
 ```
@@ -50,13 +51,13 @@ S3 objects created:
 |-----|-------------|
 | `processed/{appId}/page_transcript_{n}.png` | Per-page PNG for dashboard rendering |
 | `processed/{appId}/textract_TRANSCRIPT.json` | Normalized Textract raw text, tables, forms, layouts, queries, and signatures |
-| `processed/{appId}/extraction_transcript.json` | Nova-normalized rule-engine JSON plus embedded Textract evidence |
+| `processed/{appId}/extraction_transcript.json` | Per-page extraction used by aggregation and review workflows |
 
 ## Dependencies
 
 | Package | Purpose |
 |---------|---------|
 | `pdf2image` | PDF → PNG conversion (wraps `pdftoppm` from `poppler-utils`) |
-| `pypdf` | PDF metadata (page count validation, used in Session 2) |
+| `pypdf` | PDF page metadata and validation |
 | `pillow` | Image handling and PNG serialization |
 | `boto3` | S3, Textract, and Bedrock clients |

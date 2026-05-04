@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader, Card } from "../components/Shell";
@@ -7,8 +7,9 @@ import {
   detailBackStateFor,
   isApplicationReviewable,
 } from "../navigation";
-import { listApplications, deleteApplication } from "../api";
+import { deleteApplication } from "../api";
 import type { Application } from "../types";
+import { useApplicationList } from "../useApplicationList";
 
 function timeAgo(hrs: number) {
   if (hrs < 24) return `${hrs}h ago`;
@@ -226,7 +227,7 @@ export function DashboardPage({
     navigate(path, detailBackStateFor("dashboard"));
   };
   const [apps, setApps] = useState<Application[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const [enabledGroups, setEnabledGroups] = useState<EnabledGroups>({
     processing: true,
@@ -241,43 +242,27 @@ export function DashboardPage({
   const [pageSize, setPageSize] = useState(10);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
-
-  // Keep a stable ref to enabledGroups for the polling interval.
-  const groupsRef = useRef(enabledGroups);
-  groupsRef.current = enabledGroups;
+  const activeStatuses = resolveStatuses(enabledGroups);
+  const { apps: loadedApps, error } = useApplicationList({
+    statuses: activeStatuses,
+    limit: 200,
+    pollMs: 3000,
+  });
+  const currentError = actionError ?? error;
 
   useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      const statuses = resolveStatuses(groupsRef.current);
-      listApplications({ statuses, limit: 200 })
-        .then((items) => {
-          if (cancelled) return;
-          setApps(items);
-          setError(null);
-        })
-        .catch((err: Error) => {
-          if (!cancelled) setError(err.message);
-        });
-    };
-    load();
-    const interval = window.setInterval(load, 8000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  // Re-mount the effect (and refetch immediately) when the status filter changes.
-  }, [enabledGroups]);
+    setApps(loadedApps);
+  }, [loadedApps]);
 
   // Client-side pipeline: status filter → date filter → sort → paginate.
-  const activeStatuses = new Set<string>([
+  const activeStatusSet = new Set<string>([
     ...(enabledGroups.processing ? ["PROCESSING", "INTAKE_COMPLETE"] : []),
     ...(enabledGroups.failed ? ["FAILED"] : []),
     ...(enabledGroups.ready ? ["READY_FOR_REVIEW"] : []),
     ...(enabledGroups.reviewed ? REVIEW_OUTCOME_STATUSES : []),
   ]);
   let displayed = apps.filter((a) =>
-    activeStatuses.has(a.status) ||
+    activeStatusSet.has(a.status) ||
     (enabledGroups.reviewed && !ACTIVE_STATUSES.has(a.status))
   );
   if (dateFrom) {
@@ -327,7 +312,7 @@ export function DashboardPage({
     {
       label: "Awaiting review",
       value: String(awaiting.length),
-      delta: error ?? "From live API",
+      delta: currentError ?? "From live API",
       accent: t.accent,
       bg: t.accentBg,
       icon: (c) => <ClipboardStatIcon color={c} />,
@@ -377,7 +362,7 @@ export function DashboardPage({
     const noun = ids.length === 1 ? "1 entry" : `${ids.length} entries`;
     if (!window.confirm(`Permanently delete ${noun}? This removes all records and files and cannot be undone.`)) return;
     setDeleting(true);
-    setError(null);
+    setActionError(null);
     try {
       const results = await Promise.allSettled(ids.map((appId) => deleteApplication(appId)));
       const failedIds = results.flatMap((result, index) =>
@@ -388,7 +373,7 @@ export function DashboardPage({
       setSelected(new Set());
 
       if (failedIds.length > 0) {
-        setError(
+        setActionError(
           failedIds.length === 1
             ? `Delete failed for ${failedIds[0]}`
             : `Delete failed for ${failedIds.length} selected applications`
@@ -396,7 +381,7 @@ export function DashboardPage({
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Delete failed";
-      setError(msg);
+      setActionError(msg);
     } finally {
       setDeleting(false);
     }
@@ -473,7 +458,7 @@ export function DashboardPage({
           gap: 18,
         }}
       >
-        {error && (
+        {currentError && (
           <div
             style={{
               background: t.highBg,
@@ -485,7 +470,7 @@ export function DashboardPage({
               fontWeight: 600,
             }}
           >
-            {error}
+            {currentError}
           </div>
         )}
         {/* Stats row */}

@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT, useThemeMode } from "../theme";
-import { listApplications } from "../api";
 import { getCurrentUser, signOut } from "../auth";
 import { useViewport } from "../useViewport";
-import type { Application } from "../types";
+import { useApplicationList } from "../useApplicationList";
 import {
   APP_ROUTES,
   applicationAuditPath,
@@ -103,8 +102,6 @@ export function Shell({
   const t = useT();
   const navigate = useNavigate();
   const { mode, setMode } = useThemeMode();
-  const [pendingCount, setPendingCount] = useState(0);
-  const [searchApps, setSearchApps] = useState<Application[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -114,43 +111,30 @@ export function Shell({
   const user = getCurrentUser();
   const darkMode = mode === "dark";
   const { isPhone, isTablet } = useViewport();
+  const { apps: searchApps } = useApplicationList({
+    statuses: [
+      "PROCESSING",
+      "INTAKE_COMPLETE",
+      "FAILED",
+      "READY_FOR_REVIEW",
+      "REVIEWED",
+      "READY_FOR_LICENSING_REVIEW",
+      "RETURN_TO_APPLICANT",
+      "DEFERRED",
+      "DENIED",
+    ],
+    limit: 300,
+    pollMs: 15000,
+  });
+  const pendingCount = searchApps.filter(
+    (a) =>
+      a.status === "READY_FOR_REVIEW" &&
+      Boolean(a.applicantName.trim() || a.institution.trim())
+  ).length;
 
   useEffect(() => {
     setSidebarOpen(shellMode !== "detail" && !isTablet);
   }, [isTablet, shellMode]);
-
-  useEffect(() => {
-    listApplications({ statuses: ["READY_FOR_REVIEW"] })
-      .then((apps) =>
-        setPendingCount(
-          apps.filter(
-            (a) =>
-              a.status === "READY_FOR_REVIEW" &&
-              Boolean(a.applicantName.trim() || a.institution.trim())
-          ).length
-        )
-      )
-      .catch(() => setPendingCount(0));
-  }, []);
-
-  useEffect(() => {
-    listApplications({
-      statuses: [
-        "PROCESSING",
-        "INTAKE_COMPLETE",
-        "FAILED",
-        "READY_FOR_REVIEW",
-        "REVIEWED",
-        "READY_FOR_LICENSING_REVIEW",
-        "RETURN_TO_APPLICANT",
-        "DEFERRED",
-        "DENIED",
-      ],
-      limit: 300,
-    })
-      .then(setSearchApps)
-      .catch(() => setSearchApps([]));
-  }, []);
 
   useEffect(() => {
     if (!profileOpen && !searchOpen) return;
@@ -299,6 +283,7 @@ export function Shell({
           display: "flex",
           alignItems: "center",
           position: "relative",
+          zIndex: 20,
           borderBottom: `3px solid ${t.accent}`,
           paddingRight: isPhone ? 12 : 20,
         }}
@@ -355,6 +340,7 @@ export function Shell({
             left: "50%",
             transform: "translateX(-50%)",
             width: "min(520px, calc(100% - 340px))",
+            zIndex: 21,
           }}
         >
           <span
@@ -679,18 +665,6 @@ export function Shell({
           {renderNavGroup("actions", "Actions")}
         </nav>
 
-        <div
-          style={{
-            padding: "12px 22px 14px",
-            fontSize: 10,
-            color: "rgba(255,255,255,0.35)",
-            fontFamily: t.mono,
-            letterSpacing: 0.3,
-            borderTop: "1px solid rgba(255,255,255,0.07)",
-          }}
-        >
-          POC v0.1 · 2026-04-21
-        </div>
       </aside>
 
       {/* ── Page content ── */}

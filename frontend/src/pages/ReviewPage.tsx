@@ -15,9 +15,10 @@ import {
   hasApplicationSummary,
 } from "../navigation";
 import type { DetailBackState } from "../navigation";
-import { getApplication, getPageImage, getReviewDraft, listApplications, saveReviewDraft, submitDecision } from "../api";
+import { getApplication, getPageImage, getReviewDraft, saveReviewDraft, submitDecision } from "../api";
 import { getCurrentUser } from "../auth";
 import type { Application, Flag, Decisions, OverallDecision } from "../types";
+import { useApplicationList } from "../useApplicationList";
 
 const DEFAULT_TRANSCRIPT_ZOOM = 2;
 const MAX_TRANSCRIPT_ZOOM = 10;
@@ -412,27 +413,14 @@ function TranscriptPageViewer({
 function TranscriptDocumentViewer({
   appId,
   pages,
-  currentPage,
   pdfScale,
+  pageRefs,
 }: {
   appId: string;
   pages: number[];
-  currentPage: number;
   pdfScale: number;
+  pageRefs: { current: Record<number, HTMLDivElement | null> };
 }) {
-  const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const previousPageRef = useRef(currentPage);
-
-  useEffect(() => {
-    if (previousPageRef.current === currentPage) return;
-    previousPageRef.current = currentPage;
-    pageRefs.current[currentPage]?.scrollIntoView({
-      block: "start",
-      inline: "center",
-      behavior: "smooth",
-    });
-  }, [currentPage]);
-
   return (
     <div style={{
       display: "flex",
@@ -652,10 +640,17 @@ function FlagDetailModal({
     : decision === "OVERRIDE"
       ? "Overridden"
       : "Pending";
+  const [isClosing, setIsClosing] = useState(false);
+
+  function requestClose() {
+    if (isClosing) return;
+    setIsClosing(true);
+    window.setTimeout(onClose, 180);
+  }
 
   return (
     <div
-      onClick={onClose}
+      onClick={requestClose}
       role="dialog"
       aria-modal="true"
       aria-label={`${flag.ruleCode} details`}
@@ -668,6 +663,7 @@ function FlagDetailModal({
         alignItems: "center",
         justifyContent: "center",
         padding: 20,
+        animation: `${isClosing ? "modalBackdropOut" : "modalBackdropIn"} 180ms cubic-bezier(.2,.7,.3,1) forwards`,
       }}
     >
       <div
@@ -682,9 +678,40 @@ function FlagDetailModal({
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          animation: "modalIn 0.22s cubic-bezier(.2,.7,.3,1)",
+          transformOrigin: "center",
+          animation: `${isClosing ? "modalOut" : "modalIn"} 180ms cubic-bezier(.2,.7,.3,1) forwards`,
         }}
       >
+        <style>{`
+          @keyframes modalBackdropIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+          @keyframes modalBackdropOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+          }
+          @keyframes modalIn {
+            from {
+              opacity: 0;
+              transform: translateY(14px) scale(0.985);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0) scale(1);
+            }
+          }
+          @keyframes modalOut {
+            from {
+              opacity: 1;
+              transform: translateY(0) scale(1);
+            }
+            to {
+              opacity: 0;
+              transform: translateY(10px) scale(0.985);
+            }
+          }
+        `}</style>
         <div style={{ padding: "18px 22px 14px", borderBottom: `1px solid ${t.line}` }}>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -713,7 +740,7 @@ function FlagDetailModal({
                 {flag.ruleName.replaceAll("_", " ")}
               </div>
             </div>
-            <button onClick={onClose} style={{
+            <button onClick={requestClose} style={{
               border: "none",
               background: "transparent",
               cursor: "pointer",
@@ -831,7 +858,7 @@ function FlagDetailModal({
           borderTop: `1px solid ${t.line}`,
           background: t.surfaceAlt,
         }}>
-          <button onClick={onClose} style={{
+          <button onClick={requestClose} style={{
             border: `1px solid ${t.accent}`,
             background: t.accent,
             color: "#fff",
@@ -865,7 +892,10 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
 
   const [app, setApp] = useState<Application | null>(null);
   const [isAppLoading, setIsAppLoading] = useState(true);
-  const [queueApps, setQueueApps] = useState<Application[]>([]);
+  const { apps: queueApps } = useApplicationList({
+    statuses: ["READY_FOR_REVIEW"],
+    pollMs: 8000,
+  });
   const [flags, setFlags] = useState<Flag[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [activeFlagIdx, setActiveFlagIdx] = useState(0);
@@ -885,6 +915,8 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   const transcriptPaneRef = useRef<HTMLDivElement>(null);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const transcriptZoomRef = useRef(DEFAULT_TRANSCRIPT_ZOOM);
+  const transcriptPageRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const previousPageRef = useRef(1);
   const draftLoadedRef = useRef(false);
   const draftSaveTimerRef = useRef<number | null>(null);
 
@@ -960,6 +992,16 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     transcriptZoomRef.current = transcriptZoom;
   }, [transcriptZoom]);
 
+  useEffect(() => {
+    if (previousPageRef.current === currentPage) return;
+    previousPageRef.current = currentPage;
+    transcriptPageRefs.current[currentPage]?.scrollIntoView({
+      block: "start",
+      inline: "center",
+      behavior: "smooth",
+    });
+  }, [currentPage]);
+
   const applyTranscriptZoom = useCallback((nextZoom: number, pointerX?: number, pointerY?: number) => {
     const viewport = transcriptScrollRef.current;
     if (!viewport) return;
@@ -1002,6 +1044,10 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   const zoomTranscriptBy = useCallback((delta: number) => {
     applyTranscriptZoom(transcriptZoomRef.current + delta);
   }, [applyTranscriptZoom]);
+
+  const focusFlagEvidence = useCallback((flag: Flag) => {
+    setCurrentPage(Math.max(1, flag.sourceLocation.page || 1));
+  }, []);
 
   const toggleTranscriptFullscreen = useCallback(() => {
     const pane = transcriptPaneRef.current;
@@ -1077,25 +1123,6 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   }, [handleKeyDown]);
 
   useEffect(() => {
-    let cancelled = false;
-    const loadQueue = () => {
-      listApplications({ statuses: ["READY_FOR_REVIEW"] })
-        .then((items) => {
-          if (!cancelled) setQueueApps(items);
-        })
-        .catch(() => {
-          if (!cancelled) setQueueApps([]);
-        });
-    };
-    loadQueue();
-    const interval = window.setInterval(loadQueue, 8000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, []);
-
-  useEffect(() => {
     if (!id) return;
     let cancelled = false;
     setIsAppLoading(true);
@@ -1106,6 +1133,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     setDecisions({});
     draftLoadedRef.current = false;
     setCurrentPage(1);
+    previousPageRef.current = 1;
     transcriptZoomRef.current = DEFAULT_TRANSCRIPT_ZOOM;
     setTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM);
     setOverallDecision(null);
@@ -1139,6 +1167,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
       });
     return () => {
       cancelled = true;
+      transcriptPageRefs.current = {};
       if (draftSaveTimerRef.current !== null) {
         window.clearTimeout(draftSaveTimerRef.current);
         draftSaveTimerRef.current = null;
@@ -1226,12 +1255,21 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     const displayIndex = displayFlags.findIndex((item) => item.flag === flag);
     if (displayIndex >= 0) setActiveFlagIdx(displayIndex);
   };
-  const showQueueSidebar = queueOpen && !isTablet && !isPhone;
+
+  useEffect(() => {
+    const activeFlag = displayFlags[activeFlagIdx]?.flag;
+    if (!activeFlag || isAppLoading) return;
+    focusFlagEvidence(activeFlag);
+  }, [activeFlagIdx, displayFlags, focusFlagEvidence, isAppLoading]);
+  const canDockQueueSidebar = !isTablet && !isPhone;
+  const showQueueSidebar = queueOpen && canDockQueueSidebar;
   const reviewGridTemplateColumns = isPhone
     ? "1fr"
-    : showQueueSidebar
-      ? "220px minmax(0, 1fr) minmax(280px, 340px)"
+    : canDockQueueSidebar
+      ? `${showQueueSidebar ? "220px" : "0px"} minmax(0, 1fr) minmax(280px, 340px)`
       : "minmax(0, 1fr) minmax(280px, 360px)";
+  const transcriptGridColumn = isPhone ? 1 : canDockQueueSidebar ? 2 : 1;
+  const flagGridColumn = isPhone ? 1 : canDockQueueSidebar ? 3 : 2;
   const reviewGridTemplateRows = embedded
     ? isPhone
       ? "minmax(320px, 48vh) minmax(0, 1fr)"
@@ -1274,6 +1312,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
       display: "grid",
       gridTemplateColumns: reviewGridTemplateColumns,
       gridTemplateRows: reviewGridTemplateRows,
+      transition: "grid-template-columns 280ms cubic-bezier(0.22, 1, 0.36, 1)",
       overflow: "hidden",
     }}>
       {!embedded && <div style={{
@@ -1379,27 +1418,106 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
         </div>
       </div>}
 
+      {!showQueueSidebar && canDockQueueSidebar && (
+        <div
+          style={{
+            position: "absolute",
+            top: embedded ? 14 : 76,
+            left: 22,
+            zIndex: 20,
+            pointerEvents: "none",
+          }}
+        >
+          <button
+            onClick={() => setQueueOpen(true)}
+            className="msbn-hover-button"
+            aria-label="Show review queue"
+            title="Show review queue"
+            style={{
+              pointerEvents: "auto",
+              border: `1px solid ${t.line}`,
+              background: t.surface,
+              color: t.primary,
+              minWidth: 104,
+              height: 30,
+              borderRadius: 4,
+              cursor: "pointer",
+              fontSize: 10,
+              fontWeight: 800,
+              fontFamily: t.mono,
+              letterSpacing: 0.35,
+              textTransform: "uppercase",
+              padding: "0 10px",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              boxShadow: "0 6px 18px rgba(15,23,42,0.08)",
+            }}
+          >
+            <span style={{ fontSize: 12, lineHeight: 1 }}>+</span>
+            <span>Show queue</span>
+          </button>
+        </div>
+      )}
+
       {/* Queue sidebar */}
       <div style={{
         gridColumn: 1,
         gridRow: embedded ? 1 : 2,
-        borderRight: showQueueSidebar ? `1px solid ${t.line}` : "none",
+        width: showQueueSidebar ? 220 : 0,
+        minWidth: 0,
+        borderRight: showQueueSidebar ? `1px solid ${t.line}` : "1px solid transparent",
         background: `linear-gradient(180deg, ${t.surface} 0%, ${t.surfaceAlt} 100%)`,
         overflow: "hidden",
-        display: showQueueSidebar ? "flex" : "none",
+        display: canDockQueueSidebar ? "flex" : "none",
         flexDirection: "column",
-        padding: showQueueSidebar ? "18px 0" : 0,
+        padding: showQueueSidebar ? "18px 0" : "18px 0",
+        opacity: showQueueSidebar ? 1 : 0,
+        transform: showQueueSidebar ? "translateX(0)" : "translateX(-18px)",
+        pointerEvents: showQueueSidebar ? "auto" : "none",
+        visibility: showQueueSidebar ? "visible" : "hidden",
+        transition: [
+          "width 280ms cubic-bezier(0.22, 1, 0.36, 1)",
+          "opacity 180ms ease",
+          "transform 280ms cubic-bezier(0.22, 1, 0.36, 1)",
+          "border-color 180ms ease",
+        ].join(", "),
       }}>
         <div style={{ padding: "0 18px 10px", borderBottom: `1px solid ${t.line2}`, marginBottom: 8 }}>
-          <div style={{
-            fontSize: 10,
-            color: t.ink4,
-            fontFamily: t.mono,
-            letterSpacing: 0.8,
-            textTransform: "uppercase",
-            marginBottom: 4,
-          }}>
-            Review queue
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 4 }}>
+            <div style={{
+              fontSize: 10,
+              color: t.ink4,
+              fontFamily: t.mono,
+              letterSpacing: 0.8,
+              textTransform: "uppercase",
+            }}>
+              Review queue
+            </div>
+            <button
+              onClick={() => setQueueOpen(false)}
+              className="msbn-hover-button"
+              style={{
+                border: `1px solid ${t.line}`,
+                background: t.surface,
+                color: t.ink3,
+                minWidth: 54,
+                height: 24,
+                borderRadius: 4,
+                cursor: "pointer",
+                fontSize: 10,
+                fontWeight: 700,
+                fontFamily: t.mono,
+                letterSpacing: 0.3,
+                textTransform: "uppercase",
+                padding: "0 8px",
+              }}
+              title="Hide review queue"
+              aria-label="Hide review queue"
+            >
+              Hide
+            </button>
           </div>
           <div style={{ fontSize: 13, color: t.ink2, marginBottom: 10 }}>
             <span style={{ fontWeight: 600 }}>{reviewableQueueApps.length}</span> pending · sorted by {QUEUE_SORT_LABELS[queueSort]}
@@ -1473,7 +1591,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
 
       {/* PDF pane — TranscriptPageViewer */}
       <div id="transcript-preview-pane" ref={transcriptPaneRef} style={{
-        gridColumn: isPhone ? 1 : showQueueSidebar ? 2 : 1,
+        gridColumn: transcriptGridColumn,
         gridRow: embedded ? 1 : 2,
         background: t.surfaceAlt,
         overflow: "hidden",
@@ -1536,8 +1654,8 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
               <TranscriptDocumentViewer
                 appId={id!}
                 pages={pages}
-                currentPage={currentPage}
                 pdfScale={(isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom * TRANSCRIPT_RENDER_SCALE_FACTOR}
+                pageRefs={transcriptPageRefs}
               />
             )}
           </div>
@@ -1664,7 +1782,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
       </div>
 
       {/* Flag list */}
-      <div style={{ gridColumn: isPhone ? 1 : showQueueSidebar ? 3 : 2, gridRow: embedded ? (isPhone ? 2 : 1) : (isPhone ? 3 : 2), background: t.surfaceAlt, borderLeft: isPhone ? "none" : `1px solid ${t.line}`, borderTop: isPhone ? `1px solid ${t.line}` : "none", overflow: "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ gridColumn: flagGridColumn, gridRow: embedded ? (isPhone ? 2 : 1) : (isPhone ? 3 : 2), background: t.surfaceAlt, borderLeft: isPhone ? "none" : `1px solid ${t.line}`, borderTop: isPhone ? `1px solid ${t.line}` : "none", overflow: "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
         <DetailHeader
           compact
           backLabel="Review Queue"
@@ -1816,7 +1934,10 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
                     shaded={group.groupIndex % 2 === 1}
                     decision={decisions[flag.flagKey]?.decision}
                     notes={decisions[flag.flagKey]?.notes}
-                    onClick={() => setActiveFlagIdx(displayIndex)}
+                    onClick={() => {
+                      setActiveFlagIdx(displayIndex);
+                      focusFlagEvidence(flag);
+                    }}
                     onDecision={(d) => setDecisions((x) => ({ ...x, [flag.flagKey]: { ...x[flag.flagKey], decision: d, notes: x[flag.flagKey]?.notes ?? "" } }))}
                     onNotes={(n) => setDecisions((x) => ({ ...x, [flag.flagKey]: { ...x[flag.flagKey], decision: x[flag.flagKey]?.decision, notes: n } }))}
                     onOpenDetails={() => openFlagDetails(flag)}

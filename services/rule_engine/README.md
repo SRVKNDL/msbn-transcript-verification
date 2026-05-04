@@ -2,13 +2,21 @@
 
 Applies single-document validation rules against structured extraction output.
 
-**Responsibilities:**
-- Load extraction JSON and reference lookup tables from S3
-- Apply all PHYS (physical document) rules: seal quality, print technology, signatures
-- Apply all CONT (content) rules: GPA consistency, date logic, course names, language
-- Apply all PROG (program) rules: accreditation, diploma mill phrases, program duration
-- Write each generated flag as a FLAG item in DynamoDB with rule code, severity, rationale, and source location
+## Responsibilities
 
-**Rules are pure Python functions.** Thresholds are defined in `rules_config.yaml`, not hardcoded.
+- Load `aggregation.json` from S3
+- Apply deterministic transcript rules from `rules/`
+- Generate `FLAG` items with rule code, rationale, severity, and source location
+- Replace stale flags for the same application before writing new ones
 
-**Runtime:** Python 3.11
+## Rule Families
+
+- `PHYS`: physical document integrity checks
+- `CONT`: content consistency and transcript logic checks
+- `PROG`: program and curriculum validation checks
+
+## Notes
+
+- Rules are pure Python functions over the flattened aggregation document.
+- The handler returns `flag_count` to Step Functions and the serialized flags
+  for tests and debugging.

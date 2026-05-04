@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader } from "../components/Shell";
@@ -9,8 +9,8 @@ import {
   hasApplicationSummary,
   isApplicationReviewable,
 } from "../navigation";
-import { listApplications } from "../api";
 import type { Application } from "../types";
+import { useApplicationList } from "../useApplicationList";
 
 function timeAgo(hrs: number) {
   if (hrs < 24) return `${hrs}h ago`;
@@ -32,34 +32,15 @@ export function QueuePage() {
   const navigateFromQueue = (path: string) => {
     navigate(path, detailBackStateFor("queue"));
   };
-  const [apps, setApps] = useState<Application[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const { apps, error } = useApplicationList({
+    statuses: ["PROCESSING", "INTAKE_COMPLETE", "READY_FOR_REVIEW"],
+    pollMs: 5000,
+  });
   const [statusFilter, setStatusFilter] = useState<"all" | "ready" | "processing">("all");
   const [severityFilter, setSeverityFilter] = useState<"all" | "high" | "medium" | "low" | "clean">("all");
   const [sortBy, setSortBy] = useState<"submitted" | "severity" | "flags" | "applicant" | "institution">("severity");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      listApplications({ statuses: ["PROCESSING", "INTAKE_COMPLETE", "READY_FOR_REVIEW"] })
-        .then((items) => {
-          if (cancelled) return;
-          setApps(items);
-          setError(null);
-        })
-        .catch((err: Error) => {
-          if (!cancelled) setError(err.message);
-        });
-    };
-    load();
-    const interval = window.setInterval(load, 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, []);
 
   const queueApps = apps.filter(
     (a) => isProcessing(a) || isApplicationReviewable(a)

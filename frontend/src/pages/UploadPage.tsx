@@ -17,23 +17,154 @@ interface ApplicationDraft {
   applicationId: string;
 }
 
+function UploadNotification({
+  message,
+  onClose,
+}: {
+  message: string;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const [isClosing, setIsClosing] = useState(false);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      requestClose();
+    }, 4200);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  function requestClose() {
+    if (isClosing) return;
+    setIsClosing(true);
+    window.setTimeout(onClose, 150);
+  }
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      onClick={requestClose}
+      style={{
+        position: "fixed",
+        top: 20,
+        left: "50%",
+        marginLeft: "-1px",
+        zIndex: 60,
+        width: "min(500px, calc(100vw - 24px))",
+        pointerEvents: "auto",
+        animation: `${isClosing ? "uploadNoticeOut" : "uploadNoticeIn"} 150ms cubic-bezier(.22,1,.36,1) forwards`,
+      }}
+    >
+      <style>{`
+        @keyframes uploadNoticeIn {
+          from {
+            opacity: 0;
+            transform: translateX(-50%) translateY(-24px) scale(0.96);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0) scale(1);
+          }
+        }
+        @keyframes uploadNoticeOut {
+          from {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0) scale(1);
+          }
+          to {
+            opacity: 0;
+            transform: translateX(-50%) translateY(-30px) scale(0.94);
+          }
+        }
+      `}</style>
+      <div
+        style={{
+          background: "rgba(255,255,255,0.96)",
+          backdropFilter: "blur(14px)",
+          WebkitBackdropFilter: "blur(14px)",
+          color: t.ink,
+          border: `1px solid ${t.line}`,
+          boxShadow: "0 22px 52px rgba(15,23,42,0.18)",
+          borderRadius: 22,
+          padding: "14px 16px 14px 14px",
+          display: "grid",
+          gridTemplateColumns: "48px 1fr 28px",
+          gap: 12,
+          alignItems: "center",
+        }}
+      >
+        <div
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: 16,
+            background: `linear-gradient(180deg, ${t.ok} 0%, #1f7f7d 100%)`,
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 20,
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18)",
+          }}
+        >
+          ↑
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 800,
+              letterSpacing: 0.6,
+              textTransform: "uppercase",
+              color: t.ink4,
+              fontFamily: t.mono,
+              marginBottom: 3,
+            }}
+          >
+            Upload Complete
+          </div>
+          <div
+            style={{
+              fontSize: 14,
+              lineHeight: 1.45,
+              color: t.ink2,
+            }}
+          >
+            {message}
+          </div>
+        </div>
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            requestClose();
+          }}
+          aria-label="Dismiss upload notification"
+          style={{
+            border: "none",
+            background: "transparent",
+            color: t.ink4,
+            cursor: "pointer",
+            fontSize: 20,
+            lineHeight: 1,
+            padding: 0,
+          }}
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const emptyDraft: ApplicationDraft = {
   applicationId: "",
 };
 
 const applicationIdPattern = /^[A-Za-z0-9._-]+$/;
 
-function buildTemporaryApplicantName() {
-  const now = new Date();
-  const stamp = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-    String(now.getHours()).padStart(2, "0"),
-    String(now.getMinutes()).padStart(2, "0"),
-    String(now.getSeconds()).padStart(2, "0"),
-  ].join("");
-  return `User-${stamp}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
+function buildTemporaryApplicantName(applicationId: string) {
+  return `USER-${applicationId.trim()}`;
 }
 
 export function UploadPage() {
@@ -45,12 +176,6 @@ export function UploadPage() {
   const [draft, setDraft] = useState<ApplicationDraft>(emptyDraft);
   const [dragOver, setDragOver] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!toast) return;
-    const timeout = window.setTimeout(() => setToast(null), 4500);
-    return () => window.clearTimeout(timeout);
-  }, [toast]);
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + " KB";
@@ -94,6 +219,7 @@ export function UploadPage() {
         )
       );
       setToast(`${file.name} uploaded. Extraction has started.`);
+      return true;
     } catch (err) {
       setFiles((prev) =>
         prev.map((entry) =>
@@ -106,13 +232,14 @@ export function UploadPage() {
             : entry
         )
       );
+      return false;
     }
   };
 
   const startUploads = () => {
     const details = {
       ...draft,
-      applicantName: buildTemporaryApplicantName(),
+      applicantName: buildTemporaryApplicantName(draft.applicationId),
     };
     void Promise.all(
       files
@@ -121,7 +248,13 @@ export function UploadPage() {
           const file = selectedFilesRef.current[entry.id];
           return file ? uploadOne(file, entry.id, details) : Promise.resolve();
         })
-    );
+    ).then((results) => {
+      const succeeded = results.every(Boolean);
+      if (!succeeded) return;
+      selectedFilesRef.current = {};
+      setFiles([]);
+      setDraft(emptyDraft);
+    });
   };
 
   const applicationIdMissing = draft.applicationId.trim().length === 0;
@@ -130,32 +263,7 @@ export function UploadPage() {
 
   return (
     <>
-      {toast && (
-        <div
-          role="status"
-          style={{
-            position: "fixed",
-            right: 24,
-            bottom: 24,
-            zIndex: 40,
-            background: t.surface,
-            color: t.ink,
-            border: `1px solid ${t.line}`,
-            borderTop: `3px solid ${t.ok}`,
-            boxShadow: "0 16px 42px rgba(0,0,0,0.24)",
-            padding: "12px 16px",
-            borderRadius: 3,
-            maxWidth: 360,
-            fontSize: 13,
-            lineHeight: 1.45,
-          }}
-        >
-          <div style={{ fontWeight: 700, marginBottom: 2 }}>
-            Upload complete
-          </div>
-          <div style={{ color: t.ink3 }}>{toast}</div>
-        </div>
-      )}
+      {toast && <UploadNotification message={toast} onClose={() => setToast(null)} />}
       <PageHeader
         eyebrow="New intake"
         title="Upload transcript"

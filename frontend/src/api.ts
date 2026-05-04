@@ -1,4 +1,11 @@
-import type { Application, Flag, ExtractionData, AuditEvent, Decisions, OverallDecision } from "./types";
+import type {
+  Application,
+  Flag,
+  ExtractionData,
+  AuditEvent,
+  Decisions,
+  OverallDecision,
+} from "./types";
 import { getIdToken } from "./auth";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";

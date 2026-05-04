@@ -223,6 +223,7 @@ __marimo__/
 
 #personal docs
 FRONTEND_NAVIGATION_AUDIT.md
+dev-docs/
 tests/fixtures/aggregation.json
 tests/fixtures/bedrock-playground.json
 tests/playground.json

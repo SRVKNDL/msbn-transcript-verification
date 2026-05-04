@@ -1,13 +1,16 @@
 # CrossDocLambda
 
-Applies cross-document validation rules across all documents in a single application.
+Placeholder for future cross-document validation.
 
-**Responsibilities:**
-- Load extraction JSONs for every document in the application
-- Apply CROSS_001: Fuzzy name match across documents (SP-1 identity verification)
-- Apply CROSS_002: Institution consistency across transcript and diploma
-- Apply CROSS_003: Date consistency across documents
-- Write FLAG items to DynamoDB
+## Current State
 
-**Runs after:** All ExtractLambda invocations complete (parallel Map state)
-**Runtime:** Python 3.11
+- The handler is a stub.
+- It is not part of the active transcript-only workflow.
+- No cross-document rules are currently executed in production flow.
+
+## Intended Future Scope
+
+- Name consistency across document types
+- Institution consistency across transcript and supporting documents
+- Date consistency across documents
+- Cross-document flag persistence in DynamoDB

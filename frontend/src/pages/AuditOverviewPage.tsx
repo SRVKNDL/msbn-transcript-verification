@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../theme";
 import { PageHeader, Card } from "../components/Shell";
@@ -7,7 +7,7 @@ import {
   applicationReviewPath,
   detailBackStateFor,
 } from "../navigation";
-import { getAuditTrail, listApplications } from "../api";
+import { getAuditTrail } from "../api";
 import {
   auditStageForEvent,
   auditStageStyle,
@@ -15,6 +15,7 @@ import {
   humanizeAuditEvent,
 } from "../auditUi";
 import type { Application, AuditEvent } from "../types";
+import { useApplicationList } from "../useApplicationList";
 
 function SeverityDot({ severity }: { severity: string }) {
   const t = useT();
@@ -111,35 +112,30 @@ export function AuditOverviewPage() {
   const [severityFilter, setSeverityFilter] = useState<"all" | "high" | "medium" | "low">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "ready" | "reviewed" | "failed" | "processing">("all");
   const [query, setQuery] = useState("");
-  const [apps, setApps] = useState<Application[]>([]);
+  const { apps: loadedApps } = useApplicationList({
+    statuses: [
+      "PROCESSING",
+      "INTAKE_COMPLETE",
+      "READY_FOR_REVIEW",
+      "FAILED",
+      "REVIEWED",
+      "READY_FOR_LICENSING_REVIEW",
+      "RETURN_TO_APPLICANT",
+      "DEFERRED",
+      "DENIED",
+      "APPROVED",
+      "CLOSED",
+      "COMPLETED",
+    ],
+    limit: 200,
+    pollMs: 15000,
+  });
   const [audits, setAudits] = useState<Record<string, AuditEvent[]>>({});
   const [loadingAudits, setLoadingAudits] = useState<Record<string, boolean>>({});
   const [auditErrors, setAuditErrors] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    listApplications({
-      statuses: [
-        "PROCESSING",
-        "INTAKE_COMPLETE",
-        "READY_FOR_REVIEW",
-        "FAILED",
-        "REVIEWED",
-        "READY_FOR_LICENSING_REVIEW",
-        "RETURN_TO_APPLICANT",
-        "DEFERRED",
-        "DENIED",
-        "APPROVED",
-        "CLOSED",
-        "COMPLETED",
-      ],
-      limit: 200,
-    }).then((items) => {
-      const sorted = [...items].sort(
-        (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
-      );
-      setApps(sorted);
-    });
-  }, []);
+  const apps = [...loadedApps].sort(
+    (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+  );
 
   function hasLoadedAudit(applicationId: string) {
     return Object.prototype.hasOwnProperty.call(audits, applicationId);

@@ -1,63 +1,62 @@
 # MSBN Transcript Verification
 
-AI-assisted transcript review for the Mississippi State Board of Nursing proof
-of concept. The system ingests transcript PDFs, extracts structured facts with
-Amazon Bedrock (Nova Pro), evaluates deterministic fraud and eligibility
-rules, and queues the application for a human reviewer.
+AI-assisted transcript review workflow for the Mississippi Board of Nursing.
+The system ingests transcript PDFs, extracts structured evidence with Amazon
+Bedrock and Textract, applies deterministic validation rules, and routes each
+application into a reviewer dashboard with audit history.
 
-This project is advisory only. The software raises review flags; it does not
-make licensing decisions.
+This system is advisory. It raises review flags and records reviewer actions;
+it does not make licensing decisions automatically.
+
+## What The System Does
+
+- Accepts transcript PDF uploads through the dashboard.
+- Starts an event-driven AWS pipeline from S3 upload to reviewer queue.
+- Extracts transcript fields and supporting evidence per page.
+- Aggregates page-level extraction into one rule-engine document.
+- Applies deterministic `PHYS`, `CONT`, and `PROG` checks.
+- Stores application status, reviewer decisions, and audit events in DynamoDB.
+- Exposes queue, detail, review, upload, and audit views through a React app.
 
 ## Current Scope
 
-- Transcript-only processing for the POC.
-- Bedrock extracts facts from page images.
-- Python rules evaluate those facts against documented requirements.
-- DynamoDB stores application state, flags, decisions, and audit history.
-- React dashboard supports reviewer queue, case review, upload flow, and audit views.
+- Single-document transcript review is implemented.
+- Reviewer upload, queue, review, and audit flows are implemented.
+- Cross-document and population-level checks are present only as placeholders
+  for future phases.
 
-Multi-document checks for diplomas, CEA reports, affidavits, and cross-document
-identity matching are documented for a later phase.
+## Pipeline Overview
 
-## Architecture
-
-The deployed path is serverless-first, following the Mississippi AI Innovation
-Hub guidance:
-
-1. Staff upload a transcript PDF to S3 under `uploads/`.
-2. S3 invokes `IntakeLambda`, which creates the application metadata record and
-   starts the Step Functions workflow.
-3. `ExtractLambda` renders PDF pages to PNG, calls Bedrock Nova Pro per
-   page, and writes extraction JSON to S3.
-4. `AggregationLambda` flattens per-page extraction into `aggregation.json`.
-5. `RuleEngineLambda` runs deterministic PHYS, CONT, and PROG rules and writes
-   `FLAG` items to DynamoDB.
-6. `QueueForReviewLambda` marks the application `READY_FOR_REVIEW` and appends
-   an audit event.
-7. `DashboardApiLambda` exposes queue, detail, decision, and audit endpoints to
-   the reviewer dashboard through API Gateway and Cognito.
-
-See [design/architecture-plan.md](design/architecture-plan.md) for the full
-pipeline design and [design/data-model.md](design/data-model.md) for the
-DynamoDB table layout.
+1. A reviewer uploads a transcript PDF.
+2. The frontend requests a presigned upload URL from `DashboardApiLambda`.
+3. The PDF lands in S3 under `uploads/`.
+4. S3 triggers `IntakeLambda`, which writes `METADATA` and starts Step Functions.
+5. `ExtractLambda` runs Textract, renders transcript pages, and invokes Bedrock.
+6. `AggregationLambda` writes `processed/{applicationId}/aggregation.json`.
+7. `RuleEngineLambda` writes `FLAG` items to DynamoDB.
+8. `QueueForReviewLambda` updates the application to `READY_FOR_REVIEW` and
+   appends a system audit event.
+9. `DashboardApiLambda` serves the reviewer UI through API Gateway + Cognito.
 
 ## Tech Stack
 
 - Python 3.11
-- AWS CDK, Lambda, Step Functions, S3, DynamoDB, API Gateway, Cognito
-- Amazon Bedrock Nova Pro (`amazon.nova-pro-v1:0`)
-- React, TypeScript, Vite
+- AWS CDK
+- AWS Lambda, Step Functions, S3, DynamoDB, API Gateway, Cognito
+- Amazon Bedrock Nova Pro
+- Amazon Textract
+- React 19, TypeScript, Vite
 - pytest, moto, ruff, TypeScript compiler
 
 ## Repository Layout
 
 ```text
-design/      Requirements, architecture, extraction vocabulary, data model
-docs/        Source material and AI Innovation Hub guidance
-infra/       CDK app and AWS constructs
-services/    Lambda handlers and service-specific README files
+infra/       CDK app and stack definitions
+services/    Lambda services and service-level documentation
 frontend/    Reviewer dashboard
-tests/       Unit and integration tests
+tests/       Unit, service, infrastructure, and integration tests
+design/      Stable reference docs kept with the codebase
+scripts/     Helper scripts for deployment and account setup
 ```
 
 ## Local Setup
@@ -68,41 +67,21 @@ Prerequisites:
 - Node 20+
 - AWS CDK CLI: `npm install -g aws-cdk`
 
-Install project dependencies:
+Install dependencies:
 
 ```bash
 make install
 ```
 
-Run the backend test suite:
+Run the main checks:
 
 ```bash
 make test
-```
-
-Build the frontend:
-
-```bash
-cd frontend
-npm run build
-```
-
-Synthesize the CDK stacks without deploying:
-
-```bash
+make lint
 make synth
 ```
 
-## Development Commands
-
-```bash
-make test      # run pytest
-make synth     # synthesize CloudFormation
-make lint      # ruff + TypeScript checks
-make clean     # remove generated artifacts
-```
-
-Frontend-only commands:
+Frontend-only workflow:
 
 ```bash
 cd frontend
@@ -110,32 +89,17 @@ npm run dev
 npm run build
 ```
 
-## Data and Security Notes
+## Operational Notes
 
 - Use only synthetic, public, or properly anonymized transcript samples.
-- Do not commit credentials, real applicant PII, or sensitive government data.
-- Keep generated AWS resources in `us-east-1` unless the team approves a change.
-- The CDK uses serverless services, short log retention, on-demand DynamoDB, and
-  retained storage resources to match POC cost and safety constraints.
+- Do not commit credentials, applicant PII, or account-specific secrets.
+- The project is currently pinned to `us-east-1`.
+- Review [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md) before any deploy activity.
 
-## Deployment
+## Key Docs
 
-Deployment is intentionally separate from local development. Read
-[DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md) before running any CDK deploy command.
-
-At a minimum, confirm:
-
-- Bedrock access is enabled for the Nova models.
-- The AWS budget alerts are in place.
-- `make test` passes.
-- `make synth` completes cleanly.
-- The target account and region are correct.
-
-## Project References
-
-- [design/requirements-draft.md](design/requirements-draft.md) - provisional
-  rule requirements and MSBN validation notes
-- [design/extraction-vocabulary.md](design/extraction-vocabulary.md) - Bedrock
-  extraction fields and enum values
-- [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md) - deployment checklist and teardown
-- [infra/README.md](infra/README.md) - CDK-specific notes
+- [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md): deployment, verification, teardown
+- [infra/README.md](infra/README.md): infrastructure structure and stack layout
+- [frontend/DEPLOYMENT.md](frontend/DEPLOYMENT.md): frontend release process
+- [design/data-model.md](design/data-model.md): DynamoDB entity layout
+- [design/extraction-vocabulary.md](design/extraction-vocabulary.md): extraction fields

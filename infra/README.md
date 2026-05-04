@@ -1,48 +1,67 @@
-# infra
+# Infrastructure
 
-CDK app (Python) for the transcript verification pipeline.
-Synthesizes to a single CloudFormation stack: `MsbnTranscriptStack`.
+Python AWS CDK app for the MSBN transcript verification system.
 
-## Prerequisites
+## What It Provisions
 
-- Python 3.11
-- Node 20 (CDK CLI runs on Node)
-- AWS CDK CLI: `npm install -g aws-cdk`
-- AWS credentials configured
+- S3 bucket for raw uploads and processed artifacts
+- DynamoDB table for application metadata, flags, and audit events
+- Lambda functions for intake, extraction, aggregation, validation, queueing,
+  and dashboard API handling
+- Step Functions state machine for transcript processing
+- Cognito user pool and app client for reviewer authentication
+- API Gateway HTTP API for the dashboard backend
 
-## Synth
+## Stack Layout
 
-Generate the CloudFormation template without deploying:
+The app is split into four stacks:
 
-    cd infra
-    cdk synth
+- `MsbnStorageStack`
+- `MsbnAuthStack`
+- `MsbnComputeStack`
+- `MsbnApiStack`
 
-Or from the project root:
+Deployment order and verification steps are documented in the root
+[DEPLOY_RUNBOOK.md](../DEPLOY_RUNBOOK.md).
 
-    make synth
+## Local Commands
 
-Output goes to `cdk.out/`. Safe to run locally; no AWS calls are made.
+Synthesize from the `infra/` directory:
 
-## Deploy
+```bash
+cd infra
+cdk synth
+```
 
-First-time setup requires a bootstrap step:
+Or from the repository root:
 
-    cdk bootstrap
+```bash
+make synth
+```
 
-Then deploy:
+Bootstrap for a first deploy in a new account/region:
 
-    cdk deploy
+```bash
+cd infra
+cdk bootstrap
+```
 
-Do not deploy without checking the cost constraints in the root CLAUDE.md.
+## Directory Layout
 
-## Layout
+```text
+app.py                CDK app entry point
+cdk.json              CDK configuration
+requirements.txt      CDK dependencies
+stacks/
+  storage.py          S3 + DynamoDB
+  auth.py             Cognito resources
+  compute.py          Lambda functions and permissions
+  workflow.py         Step Functions workflow
+  api.py              API Gateway HTTP API
+```
 
-    app.py                       CDK app entry point
-    cdk.json                     CDK configuration
-    requirements.txt             Python deps (aws-cdk-lib, constructs)
-    stacks/
-      msbn_transcript_stack.py   Top-level stack; composes all constructs
-      storage.py                 S3 bucket + DynamoDB table
-      compute.py                 Lambda functions
-      api.py                     API Gateway + Cognito (stub)
-      workflow.py                Step Functions state machine (stub)
+## Notes
+
+- Target region is currently `us-east-1`.
+- Do not run deploy commands without using the deploy runbook.
+- `cdk.out/` is generated output and is ignored by Git.

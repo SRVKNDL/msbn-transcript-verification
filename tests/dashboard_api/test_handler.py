@@ -475,40 +475,8 @@ def test_get_application_happy_path(dynamo_table, lambda_context):
     assert body["flags"][0]["flagKey"].startswith("FLAG#")
 
 
-def test_get_application_includes_textract_highlight_target(
-    dynamo_table, lambda_context
-):
-    """Text-backed flag evidence should resolve to Textract geometry."""
-    s3 = boto3.client("s3", region_name="us-east-1")
-    s3.create_bucket(Bucket="msbn-transcripts-test")
-    _put_json(
-        "msbn-transcripts-test",
-        "processed/APP-D01H/textract_TRANSCRIPT.json",
-        {
-            "pages": [
-                {
-                    "page_number": 2,
-                    "lines": [
-                        {
-                            "text": "Overall GPA: 3.4",
-                            "geometry": {
-                                "BoundingBox": {
-                                    "Left": 0.11,
-                                    "Top": 0.22,
-                                    "Width": 0.33,
-                                    "Height": 0.04,
-                                }
-                            },
-                        }
-                    ],
-                    "tables": [],
-                    "forms": [],
-                    "layouts": [],
-                    "queries": [],
-                }
-            ]
-        },
-    )
+def test_get_application_omits_highlight_target(dynamo_table, lambda_context):
+    """Detail flags should return source metadata without Textract highlight payloads."""
     _seed_application(dynamo_table, "APP-D01H")
     _seed_document(dynamo_table, "APP-D01H")
     _seed_flag(dynamo_table, "APP-D01H", source_location={"page_number": 2, "text_spans": ["Overall GPA: 3.4"]})
@@ -516,101 +484,17 @@ def test_get_application_includes_textract_highlight_target(
     event = _make_event("GET /applications/{id}", path_params={"id": "APP-D01H"})
     body = _parse_response(handler(event, lambda_context))
 
-    highlight = body["flags"][0]["highlightTarget"]
-    assert highlight["type"] == "textract"
-    assert highlight["page"] == 2
-    assert highlight["matchTypes"] == ["line"]
-    assert highlight["rects"][0] == {
-        "left": 0.11,
-        "top": 0.22,
-        "width": 0.33,
-        "height": 0.04,
+    assert body["flags"][0]["sourceLocation"] == {
+        "page": 2,
+        "spans": ["Overall GPA: 3.4"],
     }
+    assert "highlightTarget" not in body["flags"][0]
 
 
-def test_get_application_leaves_visual_only_flag_without_highlight(
-    dynamo_table, lambda_context
-):
-    """Descriptive visual spans should not produce fake Textract highlights."""
+def test_get_application_falls_back_to_aggregation_course_source(dynamo_table, lambda_context):
+    """Course-based flags can recover source spans from aggregation without Textract reads."""
     s3 = boto3.client("s3", region_name="us-east-1")
     s3.create_bucket(Bucket="msbn-transcripts-test")
-    _put_json(
-        "msbn-transcripts-test",
-        "processed/APP-D01V/textract_TRANSCRIPT.json",
-        {
-            "pages": [
-                {
-                    "page_number": 1,
-                    "lines": [
-                        {
-                            "text": "Official Transcript",
-                            "geometry": {
-                                "BoundingBox": {
-                                    "Left": 0.2,
-                                    "Top": 0.1,
-                                    "Width": 0.4,
-                                    "Height": 0.05,
-                                }
-                            },
-                        }
-                    ],
-                    "tables": [],
-                    "forms": [],
-                    "layouts": [],
-                    "queries": [],
-                }
-            ]
-        },
-    )
-    _seed_application(dynamo_table, "APP-D01V")
-    _seed_document(dynamo_table, "APP-D01V")
-    _seed_flag(
-        dynamo_table,
-        "APP-D01V",
-        rule_code="PHYS_001",
-        source_location={"page_number": 1, "text_spans": ["upper-right corner"]},
-    )
-
-    event = _make_event("GET /applications/{id}", path_params={"id": "APP-D01V"})
-    body = _parse_response(handler(event, lambda_context))
-
-    assert body["flags"][0]["highlightTarget"] is None
-
-
-def test_get_application_falls_back_to_aggregation_course_source(
-    dynamo_table, lambda_context
-):
-    """Course-based flags can recover source spans from aggregation before matching Textract."""
-    s3 = boto3.client("s3", region_name="us-east-1")
-    s3.create_bucket(Bucket="msbn-transcripts-test")
-    _put_json(
-        "msbn-transcripts-test",
-        "processed/APP-D01A/textract_TRANSCRIPT.json",
-        {
-            "pages": [
-                {
-                    "page_number": 1,
-                    "lines": [
-                        {
-                            "text": "PNV1213 BODY STRUCTURE & FUNCTIO B 3.000 9.000",
-                            "geometry": {
-                                "BoundingBox": {
-                                    "Left": 0.09,
-                                    "Top": 0.31,
-                                    "Width": 0.61,
-                                    "Height": 0.03,
-                                }
-                            },
-                        }
-                    ],
-                    "tables": [],
-                    "forms": [],
-                    "layouts": [],
-                    "queries": [],
-                }
-            ]
-        },
-    )
     _put_json(
         "msbn-transcripts-test",
         "processed/APP-D01A/aggregation.json",
@@ -649,8 +533,7 @@ def test_get_application_falls_back_to_aggregation_course_source(
         "page": 1,
         "spans": ["PNV1213 BODY STRUCTURE & FUNCTIO B 3.000 9.000"],
     }
-    assert flag["highlightTarget"]["page"] == 1
-    assert flag["highlightTarget"]["matchTypes"] == ["line"]
+    assert "highlightTarget" not in flag
 
 
 def test_get_application_includes_transcript_url(dynamo_table, lambda_context):

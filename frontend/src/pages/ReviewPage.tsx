@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import type { WheelEvent } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useT } from "../theme";
@@ -20,10 +20,15 @@ import { getCurrentUser } from "../auth";
 import type { Application, Flag, Decisions, OverallDecision } from "../types";
 import { useApplicationList } from "../useApplicationList";
 
-const DEFAULT_TRANSCRIPT_ZOOM = 2;
+const DEFAULT_TRANSCRIPT_ZOOM = 1;
+const MIN_TRANSCRIPT_ZOOM = 0.75;
 const MAX_TRANSCRIPT_ZOOM = 10;
+const TRANSCRIPT_BASE_WIDTH = 560;
+const TRANSCRIPT_BASE_HEIGHT = 720;
 const TRANSCRIPT_RENDER_SCALE_FACTOR = 0.5;
 const SEVERITY_ORDER = { High: 0, Medium: 1, Low: 2 } as const;
+type TranscriptPageDimensions = { width: number; height: number };
+type TranscriptPagePreview = { url: string; dimensions: TranscriptPageDimensions };
 type QueueSort = "oldest" | "newest" | "flags" | "severity" | "applicant" | "institution";
 const QUEUE_SORT_LABELS: Record<QueueSort, string> = {
   oldest: "oldest first",
@@ -50,6 +55,46 @@ function appSeverityRank(severity: Application["highestSeverity"]) {
   if (severity === "Medium") return 1;
   if (severity === "Low") return 2;
   return 3;
+}
+
+function clampTranscriptZoom(zoom: number) {
+  return Math.min(MAX_TRANSCRIPT_ZOOM, Math.max(MIN_TRANSCRIPT_ZOOM, zoom));
+}
+
+function computeFitTranscriptZoom(
+  viewport: HTMLDivElement,
+  pageDimensions: TranscriptPageDimensions | null,
+) {
+  const styles = window.getComputedStyle(viewport);
+  const horizontalPadding = Number.parseFloat(styles.paddingLeft || "0") + Number.parseFloat(styles.paddingRight || "0");
+  const verticalPadding = Number.parseFloat(styles.paddingTop || "0") + Number.parseFloat(styles.paddingBottom || "0");
+  const availableWidth = Math.max(220, viewport.clientWidth - horizontalPadding);
+  const availableHeight = Math.max(220, viewport.clientHeight - verticalPadding);
+  const renderedPageWidth = (pageDimensions?.width ?? TRANSCRIPT_BASE_WIDTH) * TRANSCRIPT_RENDER_SCALE_FACTOR;
+  const renderedPageHeight = (pageDimensions?.height ?? TRANSCRIPT_BASE_HEIGHT) * TRANSCRIPT_RENDER_SCALE_FACTOR;
+  return clampTranscriptZoom(
+    Math.min(
+      availableWidth / renderedPageWidth,
+      availableHeight / renderedPageHeight
+    )
+  );
+}
+
+function loadTranscriptPagePreview(url: string): Promise<TranscriptPagePreview> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      resolve({
+        url,
+        dimensions: {
+          width: img.naturalWidth || TRANSCRIPT_BASE_WIDTH,
+          height: img.naturalHeight || TRANSCRIPT_BASE_HEIGHT,
+        },
+      });
+    };
+    img.onerror = () => reject(new Error("Transcript page image failed to load"));
+    img.src = url;
+  });
 }
 
 // --- Toast notification ---
@@ -329,19 +374,33 @@ function TranscriptPageViewer({
   page,
   pdfScale,
   pageRef,
+  onPageDimensions,
+  preloadedImage,
 }: {
   appId: string;
   page: number;
   pdfScale: number;
   pageRef?: (node: HTMLDivElement | null) => void;
+  onPageDimensions?: (page: number, dimensions: TranscriptPageDimensions) => void;
+  preloadedImage?: TranscriptPagePreview;
 }) {
   const t = useT();
-  const [imgUrl, setImgUrl] = useState<string | null>(null);
-  const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [imgUrl, setImgUrl] = useState<string | null>(preloadedImage?.url ?? null);
+  const [status, setStatus] = useState<"loading" | "loaded" | "error">(preloadedImage ? "loaded" : "loading");
+  const [pageDimensions, setPageDimensions] = useState<TranscriptPageDimensions | null>(preloadedImage?.dimensions ?? null);
 
   useEffect(() => {
+    if (preloadedImage) {
+      setImgUrl(preloadedImage.url);
+      setPageDimensions(preloadedImage.dimensions);
+      setStatus("loaded");
+      onPageDimensions?.(page, preloadedImage.dimensions);
+      return;
+    }
+
     setImgUrl(null);
     setStatus("loading");
+    setPageDimensions(null);
     let cancelled = false;
     getPageImage(appId, page)
       .then((data) => {
@@ -351,11 +410,14 @@ function TranscriptPageViewer({
       })
       .catch(() => { if (!cancelled) setStatus("error"); });
     return () => { cancelled = true; };
-  }, [appId, page]);
+  }, [appId, onPageDimensions, page, preloadedImage]);
+
+  const renderedWidth = Math.round((pageDimensions?.width ?? TRANSCRIPT_BASE_WIDTH) * pdfScale);
+  const renderedMinHeight = Math.round((pageDimensions?.height ?? TRANSCRIPT_BASE_HEIGHT) * pdfScale);
 
   if (status === "loading") return (
     <div ref={pageRef} data-transcript-page={page} style={{
-      width: Math.round(560 * pdfScale), minHeight: Math.round(720 * pdfScale),
+      width: renderedWidth, minHeight: renderedMinHeight,
       background: t.surface,
       border: `1px solid ${t.line}`, borderRadius: 2,
       boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
@@ -375,7 +437,7 @@ function TranscriptPageViewer({
 
   if (status === "loaded" && imgUrl) return (
     <div ref={pageRef} data-transcript-page={page} style={{
-      width: Math.round(560 * pdfScale), background: t.surface,
+      width: renderedWidth, background: t.surface,
       border: `1px solid ${t.line}`, borderRadius: 2,
       boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
       position: "relative", overflow: "hidden",
@@ -384,6 +446,19 @@ function TranscriptPageViewer({
         src={imgUrl}
         alt={`Transcript page ${page}`}
         style={{ width: "100%", display: "block" }}
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          const dimensions = {
+            width: img.naturalWidth || TRANSCRIPT_BASE_WIDTH,
+            height: img.naturalHeight || TRANSCRIPT_BASE_HEIGHT,
+          };
+          setPageDimensions((current) =>
+            current?.width === dimensions.width && current?.height === dimensions.height
+              ? current
+              : dimensions
+          );
+          onPageDimensions?.(page, dimensions);
+        }}
         onError={() => setStatus("error")}
       />
     </div>
@@ -391,7 +466,7 @@ function TranscriptPageViewer({
 
   return (
     <div ref={pageRef} data-transcript-page={page} style={{
-      width: Math.round(560 * pdfScale), minHeight: Math.round(720 * pdfScale),
+      width: renderedWidth, minHeight: renderedMinHeight,
       background: t.surface,
       border: `1px solid ${t.line}`,
       boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
@@ -415,11 +490,15 @@ function TranscriptDocumentViewer({
   pages,
   pdfScale,
   pageRefs,
+  onPageDimensions,
+  preloadedFirstPage,
 }: {
   appId: string;
   pages: number[];
   pdfScale: number;
   pageRefs: { current: Record<number, HTMLDivElement | null> };
+  onPageDimensions?: (page: number, dimensions: TranscriptPageDimensions) => void;
+  preloadedFirstPage?: TranscriptPagePreview | null;
 }) {
   return (
     <div style={{
@@ -436,6 +515,8 @@ function TranscriptDocumentViewer({
           page={page}
           pdfScale={pdfScale}
           pageRef={(node) => { pageRefs.current[page] = node; }}
+          onPageDimensions={onPageDimensions}
+          preloadedImage={page === 1 ? preloadedFirstPage ?? undefined : undefined}
         />
       ))}
     </div>
@@ -912,9 +993,15 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   const [queueSort, setQueueSort] = useState<QueueSort>("oldest");
   const [isTranscriptFullscreen, setIsTranscriptFullscreen] = useState(false);
   const [transcriptZoom, setTranscriptZoom] = useState(DEFAULT_TRANSCRIPT_ZOOM);
+  const [firstPageDimensions, setFirstPageDimensions] = useState<TranscriptPageDimensions | null>(null);
+  const [firstPagePreview, setFirstPagePreview] = useState<TranscriptPagePreview | null>(null);
+  const [isFirstPagePreviewLoading, setIsFirstPagePreviewLoading] = useState(false);
+  const [firstPagePreviewFailed, setFirstPagePreviewFailed] = useState(false);
+  const [isTranscriptFitReady, setIsTranscriptFitReady] = useState(false);
   const transcriptPaneRef = useRef<HTMLDivElement>(null);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const transcriptZoomRef = useRef(DEFAULT_TRANSCRIPT_ZOOM);
+  const transcriptZoomModeRef = useRef<"fit" | "manual">("fit");
   const transcriptPageRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const previousPageRef = useRef(1);
   const draftLoadedRef = useRef(false);
@@ -922,6 +1009,12 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
 
   const pageCount = Math.max(1, app?.pageCount || 1);
   const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
+  const isTranscriptPreparing =
+    isAppLoading
+    || !app
+    || isFirstPagePreviewLoading
+    || (!firstPagePreview && !firstPagePreviewFailed)
+    || (!!firstPagePreview && !firstPagePreviewFailed && !isTranscriptFitReady);
   const groupedFlags = useMemo(() => {
     const indexed = flags
       .map((flag, originalIndex) => ({ flag, originalIndex }))
@@ -1007,7 +1100,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     if (!viewport) return;
 
     const previousZoom = transcriptZoomRef.current;
-    const clampedZoom = Math.min(MAX_TRANSCRIPT_ZOOM, Math.max(0.75, nextZoom));
+    const clampedZoom = clampTranscriptZoom(nextZoom);
 
     if (Math.abs(clampedZoom - previousZoom) < 0.001) return;
 
@@ -1025,6 +1118,49 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     });
   }, []);
 
+  const syncFitTranscriptZoom = useCallback(() => {
+    const viewport = transcriptScrollRef.current;
+    if (!viewport) return;
+
+    const nextFitZoom = computeFitTranscriptZoom(viewport, firstPageDimensions);
+
+    if (transcriptZoomModeRef.current !== "fit") return;
+
+    transcriptZoomRef.current = nextFitZoom;
+    setTranscriptZoom((current) => (Math.abs(current - nextFitZoom) < 0.001 ? current : nextFitZoom));
+    setIsTranscriptFitReady(Boolean(firstPageDimensions));
+
+    window.requestAnimationFrame(() => {
+      viewport.scrollLeft = 0;
+      viewport.scrollTop = 0;
+    });
+  }, [firstPageDimensions]);
+
+  const prepareFitTranscriptZoom = useCallback((dimensions: TranscriptPageDimensions) => {
+    setFirstPageDimensions(dimensions);
+
+    const viewport = transcriptScrollRef.current;
+    if (!viewport || transcriptZoomModeRef.current !== "fit") {
+      setIsTranscriptFitReady(false);
+      return;
+    }
+
+    const nextFitZoom = computeFitTranscriptZoom(viewport, dimensions);
+    transcriptZoomRef.current = nextFitZoom;
+    setTranscriptZoom(nextFitZoom);
+    setIsTranscriptFitReady(true);
+
+    window.requestAnimationFrame(() => {
+      viewport.scrollLeft = 0;
+      viewport.scrollTop = 0;
+    });
+  }, []);
+
+  const resetTranscriptZoom = useCallback(() => {
+    transcriptZoomModeRef.current = "fit";
+    syncFitTranscriptZoom();
+  }, [syncFitTranscriptZoom]);
+
   const handleTranscriptWheel = useCallback((e: WheelEvent<HTMLDivElement>) => {
     if (!e.ctrlKey && !e.metaKey) return;
 
@@ -1033,6 +1169,7 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     const viewport = transcriptScrollRef.current;
     if (!viewport) return;
 
+    transcriptZoomModeRef.current = "manual";
     const rect = viewport.getBoundingClientRect();
     applyTranscriptZoom(
       transcriptZoomRef.current * Math.exp(-e.deltaY * 0.01),
@@ -1042,8 +1179,18 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
   }, [applyTranscriptZoom]);
 
   const zoomTranscriptBy = useCallback((delta: number) => {
+    transcriptZoomModeRef.current = "manual";
     applyTranscriptZoom(transcriptZoomRef.current + delta);
   }, [applyTranscriptZoom]);
+
+  const handleTranscriptPageDimensions = useCallback((page: number, dimensions: TranscriptPageDimensions) => {
+    if (page !== 1) return;
+    setFirstPageDimensions((current) =>
+      current?.width === dimensions.width && current?.height === dimensions.height
+        ? current
+        : dimensions
+    );
+  }, []);
 
   const focusFlagEvidence = useCallback((flag: Flag) => {
     setCurrentPage(Math.max(1, flag.sourceLocation.page || 1));
@@ -1122,22 +1269,63 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!id) return;
-    let cancelled = false;
     setIsAppLoading(true);
     setApp(null);
     setFlags([]);
     setError(null);
     setActiveFlagIdx(0);
     setDecisions({});
+    setFirstPageDimensions(null);
+    setFirstPagePreview(null);
+    setIsFirstPagePreviewLoading(true);
+    setFirstPagePreviewFailed(false);
+    setIsTranscriptFitReady(false);
     draftLoadedRef.current = false;
     setCurrentPage(1);
     previousPageRef.current = 1;
+    transcriptZoomModeRef.current = "fit";
     transcriptZoomRef.current = DEFAULT_TRANSCRIPT_ZOOM;
     setTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM);
     setOverallDecision(null);
     setSubmitModalOpen(false);
+    transcriptPageRefs.current = {};
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    setIsFirstPagePreviewLoading(true);
+    setFirstPagePreview(null);
+    setFirstPagePreviewFailed(false);
+
+    getPageImage(id, 1)
+      .then((data) => {
+        if (!data?.url) throw new Error("First transcript page URL is missing");
+        return loadTranscriptPagePreview(data.url);
+      })
+      .then((preview) => {
+        if (cancelled) return;
+        prepareFitTranscriptZoom(preview.dimensions);
+        setFirstPagePreview(preview);
+        setIsFirstPagePreviewLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFirstPagePreview(null);
+        setFirstPagePreviewFailed(true);
+        setIsFirstPagePreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, prepareFitTranscriptZoom]);
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
     getApplication(id)
       .then((data) => {
         if (cancelled) return;
@@ -1167,13 +1355,35 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
       });
     return () => {
       cancelled = true;
-      transcriptPageRefs.current = {};
       if (draftSaveTimerRef.current !== null) {
         window.clearTimeout(draftSaveTimerRef.current);
         draftSaveTimerRef.current = null;
       }
     };
   }, [id]);
+
+  useEffect(() => {
+    const viewport = transcriptScrollRef.current;
+    if (!viewport) return;
+
+    let frameId: number | null = window.requestAnimationFrame(syncFitTranscriptZoom);
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        if (frameId !== null) window.cancelAnimationFrame(frameId);
+      };
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(syncFitTranscriptZoom);
+    });
+    observer.observe(viewport);
+
+    return () => {
+      observer.disconnect();
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+    };
+  }, [syncFitTranscriptZoom]);
 
   useEffect(() => {
     if (!id || isAppLoading || !draftLoadedRef.current) return;
@@ -1587,6 +1797,9 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
         #transcript-scroll-viewport::-webkit-scrollbar-thumb:hover {
           background: ${t.ink3};
         }
+        @keyframes txSpin {
+          to { transform: rotate(360deg); }
+        }
       `}</style>
 
       {/* PDF pane — TranscriptPageViewer */}
@@ -1640,22 +1853,37 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
           height: isTranscriptFullscreen ? "100%" : "auto",
         }}>
           <div style={{ flexShrink: 0 }}>
-            {isAppLoading || !app ? (
+            {isTranscriptPreparing ? (
               <div style={{
-                width: Math.round(560 * ((isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom * TRANSCRIPT_RENDER_SCALE_FACTOR)),
-                minHeight: Math.round(720 * ((isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom * TRANSCRIPT_RENDER_SCALE_FACTOR)),
-                borderRadius: 2,
-                background: `linear-gradient(90deg, ${t.line2} 25%, ${t.line} 50%, ${t.line2} 75%)`,
-                backgroundSize: "200% 100%",
-                animation: "shimmer 1.5s infinite",
-                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-              }} />
+                width: "min(340px, calc(100vw - 96px))",
+                minHeight: 180,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 14,
+                color: t.ink4,
+                fontFamily: t.mono,
+                fontSize: 11,
+              }}>
+                <div style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: "50%",
+                  border: `3px solid ${t.line}`,
+                  borderTopColor: t.accent,
+                  animation: "txSpin 0.8s linear infinite",
+                }} />
+                Preparing transcript view
+              </div>
             ) : (
               <TranscriptDocumentViewer
                 appId={id!}
                 pages={pages}
-                pdfScale={(isTranscriptFullscreen ? 1.35 : 1) * transcriptZoom * TRANSCRIPT_RENDER_SCALE_FACTOR}
+                pdfScale={transcriptZoom * TRANSCRIPT_RENDER_SCALE_FACTOR}
                 pageRefs={transcriptPageRefs}
+                onPageDimensions={handleTranscriptPageDimensions}
+                preloadedFirstPage={firstPagePreview}
               />
             )}
           </div>
@@ -1673,13 +1901,13 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
             color: t.primary, fontFamily: "inherit", padding: 0,
             fontWeight: 800,
           }} title="Zoom out">&minus;</button>
-          <button onClick={() => applyTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM)} className="msbn-hover-button" style={{
+          <button onClick={resetTranscriptZoom} className="msbn-hover-button" style={{
             border: `1px solid ${t.line}`, background: t.surface,
             minWidth: 52, height: 30, fontSize: 10, cursor: "pointer",
             color: t.primary, fontFamily: "inherit", padding: "0 7px",
             borderRadius: 3,
             fontWeight: 800,
-          }} title="Reset zoom">
+          }} title="Fit page">
             {Math.round(transcriptZoom * 100)}%
           </button>
           <button onClick={() => zoomTranscriptBy(0.1)} className="msbn-icon-button" style={{
@@ -1737,11 +1965,11 @@ export function ReviewPage({ embedded = false }: { embedded?: boolean }) {
               width: 32, height: 30, fontSize: 16, cursor: "pointer", borderRadius: 3,
               color: t.primary, fontFamily: "inherit", padding: 0, fontWeight: 800,
             }} title="Zoom out">&minus;</button>
-            <button onClick={() => applyTranscriptZoom(DEFAULT_TRANSCRIPT_ZOOM)} className="msbn-hover-button" style={{
+            <button onClick={resetTranscriptZoom} className="msbn-hover-button" style={{
               border: `1px solid ${t.line}`, background: t.surface,
               width: 40, minHeight: 32, fontSize: 9, cursor: "pointer", borderRadius: 3,
               color: t.primary, fontFamily: "inherit", padding: "2px 0", fontWeight: 800,
-            }} title="Reset zoom">
+            }} title="Fit page">
               {Math.round(transcriptZoom * 100)}%
             </button>
             <button onClick={() => zoomTranscriptBy(0.1)} className="msbn-icon-button" style={{

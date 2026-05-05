@@ -849,14 +849,14 @@ def test_decision_updates_metadata_status(dynamo_table, lambda_context):
     event = _make_event(
         "POST /applications/{id}/decision",
         path_params={"id": "APP-X04"},
-        body=_decision_body(overall="RETURN_TO_APPLICANT"),
+        body=_decision_body(overall="DENIED"),
     )
     handler(event, lambda_context)
 
     meta = dynamo_table.get_item(
         Key={"PK": "APP#APP-X04", "SK": "METADATA"}
     )["Item"]
-    assert meta["status"] == "RETURN_TO_APPLICANT"
+    assert meta["status"] == "DENIED"
 
 
 def test_decision_writes_audit_records(dynamo_table, lambda_context):
@@ -977,12 +977,12 @@ def test_decision_unknown_rule_code(dynamo_table, lambda_context):
     assert "NONEXISTENT_001" in _parse_response(resp)["error"]
 
 
-def test_decision_invalid_overall_decision(dynamo_table, lambda_context):
-    """Invalid overallDecision value must return 400."""
+def test_decision_removed_overall_decision_rejected(dynamo_table, lambda_context):
+    """Removed overallDecision values must return 400."""
     _seed_application(dynamo_table, "APP-X13")
     _seed_flag(dynamo_table, "APP-X13", "CONT_005")
 
-    body = _decision_body(overall="INVALID_STATUS")
+    body = _decision_body(overall="RETURN_TO_APPLICANT")
     event = _make_event(
         "POST /applications/{id}/decision",
         path_params={"id": "APP-X13"},
@@ -1134,7 +1134,7 @@ def test_review_draft_save_and_get(dynamo_table, lambda_context):
             "FLAG#CONT_005#001": {"decision": "CONFIRM", "notes": ""},
             "FLAG#CONT_005#002": {"decision": "OVERRIDE", "notes": "Verified"},
         },
-        "overallDecision": "RETURN_TO_APPLICANT",
+        "overallDecision": "DENIED",
     }
 
     save = handler(
@@ -1156,7 +1156,7 @@ def test_review_draft_save_and_get(dynamo_table, lambda_context):
     )
     body = _parse_response(get)
     assert body["decisions"] == payload["decisions"]
-    assert body["overallDecision"] == "RETURN_TO_APPLICANT"
+    assert body["overallDecision"] == "DENIED"
     assert body["reviewer"] == _REVIEWER_EMAIL
 
 
@@ -1173,6 +1173,24 @@ def test_review_draft_invalid_decision_rejected(dynamo_table, lambda_context):
                     "FLAG#CONT_005#001": {"decision": "APPROVE", "notes": ""}
                 },
                 "overallDecision": None,
+            },
+        ),
+        lambda_context,
+    )
+    assert resp["statusCode"] == 400
+
+
+def test_review_draft_removed_overall_decision_rejected(dynamo_table, lambda_context):
+    """Draft saves reject removed overall decisions."""
+    _seed_application(dynamo_table, "APP-RD04")
+
+    resp = handler(
+        _make_event(
+            "POST /applications/{id}/review-draft",
+            path_params={"id": "APP-RD04"},
+            body={
+                "decisions": {},
+                "overallDecision": "DEFERRED",
             },
         ),
         lambda_context,

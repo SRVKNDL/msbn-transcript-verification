@@ -13,7 +13,7 @@ export interface AuditStageStyle {
 export function auditStageForEvent(event: AuditEvent): AuditStage {
   const text = `${event.event} ${event.detail}`.toLowerCase();
 
-  if (/\b(decision|reviewed|reviewer|confirmed|overridden|override|resolved|denied|returned)\b/.test(text)) {
+  if (/\b(decision|reviewed|reviewer|confirmed|overridden|override|resolved|denied|licensing)\b/.test(text)) {
     return "review";
   }
   if (/\b(flag|rule|safe practice|severity)\b/.test(text)) {

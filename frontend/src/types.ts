@@ -60,7 +60,5 @@ export type Decisions = Record<string, FlagDecision>;
 
 export type OverallDecision =
   | "READY_FOR_LICENSING_REVIEW"
-  | "RETURN_TO_APPLICANT"
   | "DENIED"
-  | "DEFERRED"
   | null;

@@ -196,12 +196,7 @@ const ACTIVE_STATUSES = new Set(["PROCESSING", "INTAKE_COMPLETE", "FAILED", "REA
 const REVIEW_OUTCOME_STATUSES = [
   "REVIEWED",
   "READY_FOR_LICENSING_REVIEW",
-  "RETURN_TO_APPLICANT",
-  "DEFERRED",
   "DENIED",
-  "APPROVED",
-  "CLOSED",
-  "COMPLETED",
 ];
 
 // Always fetch active statuses so stats cards are never affected by filters.

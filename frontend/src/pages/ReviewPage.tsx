@@ -177,8 +177,6 @@ function SubmitDecisionModal({
   const t = useT();
   const options: Array<{ value: Exclude<OverallDecision, null>; label: string; tone: string; bg: string }> = [
     { value: "READY_FOR_LICENSING_REVIEW", label: "Ready for licensing review", tone: t.ok, bg: t.okBg },
-    { value: "RETURN_TO_APPLICANT", label: "Return to applicant", tone: t.med, bg: t.medBg },
-    { value: "DEFERRED", label: "Deferred", tone: t.low, bg: t.lowBg },
     { value: "DENIED", label: "Denied", tone: t.high, bg: t.highBg },
   ];
 

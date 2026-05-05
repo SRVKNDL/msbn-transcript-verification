@@ -119,8 +119,6 @@ export function Shell({
       "READY_FOR_REVIEW",
       "REVIEWED",
       "READY_FOR_LICENSING_REVIEW",
-      "RETURN_TO_APPLICANT",
-      "DEFERRED",
       "DENIED",
     ],
     limit: 300,

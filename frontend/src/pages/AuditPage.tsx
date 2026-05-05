@@ -37,13 +37,13 @@ function formatStatusLabel(status: string) {
 
 function hasReviewOutcome(app: Application | null, events: AuditEvent[]) {
   const status = app?.status.toLowerCase() ?? "";
-  if (/\b(reviewed|approved|denied|returned|closed|completed|licensing)\b/.test(status)) {
+  if (/\b(reviewed|denied|licensing)\b/.test(status)) {
     return true;
   }
   return events.some((event) => {
     const text = `${event.event} ${event.detail}`.toLowerCase();
     return (
-      /\b(decision|reviewed|approved|denied|returned)\b/.test(text) ||
+      /\b(decision|reviewed|denied|licensing)\b/.test(text) ||
       (/\bsubmitted\b/.test(text) && /\b(review|decision)\b/.test(text))
     );
   });

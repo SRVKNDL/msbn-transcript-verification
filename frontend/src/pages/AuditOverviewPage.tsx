@@ -120,12 +120,7 @@ export function AuditOverviewPage() {
       "FAILED",
       "REVIEWED",
       "READY_FOR_LICENSING_REVIEW",
-      "RETURN_TO_APPLICANT",
-      "DEFERRED",
       "DENIED",
-      "APPROVED",
-      "CLOSED",
-      "COMPLETED",
     ],
     limit: 200,
     pollMs: 15000,
@@ -184,7 +179,7 @@ export function AuditOverviewPage() {
   const normalizedQuery = query.trim().toLowerCase();
   const filteredApps = apps.filter((app) => {
     if (statusFilter === "ready" && app.status !== "READY_FOR_REVIEW") return false;
-    if (statusFilter === "reviewed" && app.status !== "REVIEWED") return false;
+    if (statusFilter === "reviewed" && !["REVIEWED", "READY_FOR_LICENSING_REVIEW", "DENIED"].includes(app.status)) return false;
     if (statusFilter === "failed" && app.status !== "FAILED") return false;
     if (statusFilter === "processing" && app.status !== "PROCESSING" && app.status !== "INTAKE_COMPLETE") return false;
     if (severityFilter !== "all" && app.highestSeverity?.toLowerCase() !== severityFilter) return false;
@@ -200,7 +195,7 @@ export function AuditOverviewPage() {
 
   function filterEvents(events: AuditEvent[]) {
     if (eventFilter === "flags_only") return events.filter((e) => e.event === "FLAG_RAISED");
-    if (eventFilter === "review") return events.filter((e) => /review|decision|approved|denied|returned/i.test(`${e.event} ${e.detail}`));
+    if (eventFilter === "review") return events.filter((e) => /review|decision|denied|licensing/i.test(`${e.event} ${e.detail}`));
     if (eventFilter === "system") return events.filter((e) => e.actor === "system" || /status|processing|intake/i.test(e.event));
     return events;
   }

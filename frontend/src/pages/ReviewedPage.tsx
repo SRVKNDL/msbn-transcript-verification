@@ -1,14 +1,16 @@
 import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useT } from "../theme";
 import { useViewport } from "../useViewport";
 import { DetailHeader } from "../components/DetailHeader";
 import { SeverityChip } from "../components/SeverityChip";
 import { getApplication, getAuditTrail } from "../api";
 import type { Application, Flag, AuditEvent } from "../types";
+import { applicationAuditPath, detailBackStateFor } from "../navigation";
 
 export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const t = useT();
   const { isPhone, isTablet } = useViewport();
 
@@ -44,21 +46,17 @@ export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
 
   // Derive decision info from audit events or application status
   const decisionEvent = auditEvents.find(e => e.event === "DECISION_SUBMITTED" || e.event === "REVIEW_COMPLETE");
-  const overallDecision = app.status === "REVIEWED" || app.status === "READY_FOR_LICENSING_REVIEW"
-    ? app.status
-    : decisionEvent?.detail?.match(/disposition:\s*(\S+)/)?.[1] ?? app.status;
+  const decisionFromAudit = decisionEvent?.detail?.match(/disposition:\s*(\S+)/)?.[1];
+  const overallDecision = decisionFromAudit
+    ?? (app.status === "REVIEWED" ? "READY_FOR_LICENSING_REVIEW" : app.status);
 
   const decisionColor = {
     READY_FOR_LICENSING_REVIEW: t.ok,
-    RETURN_TO_APPLICANT: t.med,
-    DEFERRED: t.low,
     DENIED: t.high,
   }[overallDecision] ?? t.ink3;
 
   const decisionBg = {
     READY_FOR_LICENSING_REVIEW: t.okBg,
-    RETURN_TO_APPLICANT: t.medBg,
-    DEFERRED: t.lowBg,
     DENIED: t.highBg,
   }[overallDecision] ?? t.surfaceAlt;
 
@@ -118,6 +116,30 @@ export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
           <div style={{ fontSize: 13, fontWeight: 600, color: t.ink, fontFamily: t.serif, marginBottom: 4 }}>
             Flag Review Summary
           </div>
+
+          {id && (
+            <div style={{ display: "flex", justifyContent: "flex-start" }}>
+              <button
+                onClick={() => navigate(applicationAuditPath(id), detailBackStateFor("audit"))}
+                style={{
+                  border: `1px solid ${t.line}`,
+                  background: t.surfaceAlt,
+                  color: t.ink2,
+                  borderRadius: 6,
+                  padding: "10px 14px",
+                  cursor: "pointer",
+                  fontFamily: t.mono,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: 0.3,
+                  textTransform: "uppercase",
+                  boxShadow: "0 6px 16px rgba(15, 23, 42, 0.06)",
+                }}
+              >
+                Open Audit Log
+              </button>
+            </div>
+          )}
 
           {flags.length === 0 && (
             <div style={{
@@ -190,7 +212,7 @@ export function ReviewedPage({ embedded = false }: { embedded?: boolean }) {
                 ["Program Year", app.programYear],
                 ["Pages", String(app.pageCount)],
                 ["Country", app.country],
-                ["Status", "REVIEWED"],
+                ["Status", overallDecision.replaceAll("_", " ")],
               ].map(([label, val]) => (
                 <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                   <span style={{ fontSize: 11, color: t.ink4, fontFamily: t.mono }}>{label}</span>

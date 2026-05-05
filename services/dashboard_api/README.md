@@ -11,9 +11,7 @@ REST backend for the MSBN reviewer dashboard, fronted by API Gateway HTTP API.
 - Save and retrieve in-progress review drafts
 - Accept overall reviewer outcomes:
   - `READY_FOR_LICENSING_REVIEW`
-  - `RETURN_TO_APPLICANT`
   - `DENIED`
-  - `DEFERRED`
 - Write reviewer actions and system events to the audit trail
 - Generate presigned upload URLs for new transcript intake
 

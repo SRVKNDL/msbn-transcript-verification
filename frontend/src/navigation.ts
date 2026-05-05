@@ -46,12 +46,7 @@ export function applicationReviewedPath(app: Application | string) {
 const REVIEW_OUTCOME_STATUSES = new Set([
   "REVIEWED",
   "READY_FOR_LICENSING_REVIEW",
-  "RETURN_TO_APPLICANT",
-  "DEFERRED",
   "DENIED",
-  "APPROVED",
-  "CLOSED",
-  "COMPLETED",
 ]);
 
 export function hasApplicationSummary(app: Application) {

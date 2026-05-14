@@ -2,7 +2,7 @@
 
 <img src="frontend/public/assets/msbn-logo.png" alt="MSBN" width="110" />
 
-<h1>Transcript Verification</h1>
+<h1>VeriScript</h1>
 
 <p>
   <strong>AI-assisted nursing transcript review for the Mississippi State Board of Nursing.</strong>

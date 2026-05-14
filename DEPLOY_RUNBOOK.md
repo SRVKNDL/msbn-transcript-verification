@@ -120,11 +120,23 @@ outside of CDK.
    - `BucketName` (from the S3 bucket resource)
    - `TableName` (always `msbn-applications`)
 
-2. **Create test users** — Run:
+2. **Create reviewer accounts** — Create users directly in Cognito using the
+   `UserPoolId` from step 1. Repeat for each reviewer:
    ```bash
-   python scripts/create_test_users.py
+   aws cognito-idp admin-create-user \
+     --user-pool-id <UserPoolId> \
+     --username <reviewer-email> \
+     --user-attributes Name=email,Value=<reviewer-email> Name=email_verified,Value=true \
+     --message-action SUPPRESS
+
+   aws cognito-idp admin-set-user-password \
+     --user-pool-id <UserPoolId> \
+     --username <reviewer-email> \
+     --password <initial-password> \
+     --permanent
    ```
-   This creates three test accounts: `reviewer1`, `reviewer2`, `admin1`.
+   The dashboard signs in via `USER_PASSWORD_AUTH`, so the password must be set
+   as permanent (not temporary).
 
 3. **Upload a test transcript** — Pick one from
    `tests/fixtures/real_transcripts/` and upload it to S3:

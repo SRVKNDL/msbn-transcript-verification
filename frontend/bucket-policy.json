@@ -8,10 +8,10 @@
           "Service": "cloudfront.amazonaws.com"
         },
         "Action": "s3:GetObject",
-        "Resource": "arn:aws:s3:::msbn-dashboard-frontend-357621881714/*",
+        "Resource": "arn:aws:s3:::<frontend-hosting-bucket>/*",
         "Condition": {
           "StringEquals": {
-            "AWS:SourceArn": "arn:aws:cloudfront::357621881714:distribution/EWFC9ZR5VW20B"
+            "AWS:SourceArn": "arn:aws:cloudfront::<aws-account-id>:distribution/<cloudfront-distribution-id>"
           }
         }
       }

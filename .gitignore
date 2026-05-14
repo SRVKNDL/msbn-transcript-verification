@@ -64,9 +64,6 @@ db.sqlite3-journal
 # Flask stuff:
 instance/
 .webassets-cache
-CLAUDE.md
-docs/
-.codex
 
 # Scrapy stuff:
 .scrapy
@@ -221,9 +218,19 @@ marimo/_lsp/
 __marimo__/
 
 
-#personal docs
+# AI assistant artifacts and local-only docs
+CLAUDE.md
+.codex
+docs/
+
+# Generated PDF / briefing output
+output/
+
+# Local-only development notes
 FRONTEND_NAVIGATION_AUDIT.md
 dev-docs/
+
+# Local test playgrounds and large fixture files
 tests/fixtures/aggregation.json
 tests/fixtures/bedrock-playground.json
 tests/playground.json

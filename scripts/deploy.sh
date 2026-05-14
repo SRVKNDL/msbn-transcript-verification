@@ -7,8 +7,9 @@ FRONTEND_DIR="$ROOT_DIR/frontend"
 INFRA_VENV="$INFRA_DIR/.venv"
 JSII_CACHE="${JSII_RUNTIME_PACKAGE_CACHE:-/tmp/jsii-runtime-package-cache}"
 
-DEFAULT_FRONTEND_BUCKET="msbn-dashboard-frontend-357621881714"
-DEFAULT_CLOUDFRONT_DISTRIBUTION_ID="EWFC9ZR5VW20B"
+# Frontend hosting bucket and CloudFront distribution are account-specific
+# and managed outside CDK. Supply them via --frontend-bucket/--distribution-id
+# or the FRONTEND_BUCKET / CLOUDFRONT_DISTRIBUTION_ID environment variables.
 
 REGION="${AWS_REGION:-us-east-1}"
 PROFILE="${AWS_PROFILE:-}"
@@ -22,8 +23,8 @@ BACKEND_REQUESTED=0
 FRONTEND_ONLY=0
 WAIT_FOR_INVALIDATION="${WAIT_FOR_INVALIDATION:-1}"
 
-FRONTEND_BUCKET="${FRONTEND_BUCKET:-$DEFAULT_FRONTEND_BUCKET}"
-CLOUDFRONT_DISTRIBUTION_ID="${CLOUDFRONT_DISTRIBUTION_ID:-${DISTRIBUTION_ID:-$DEFAULT_CLOUDFRONT_DISTRIBUTION_ID}}"
+FRONTEND_BUCKET="${FRONTEND_BUCKET:-}"
+CLOUDFRONT_DISTRIBUTION_ID="${CLOUDFRONT_DISTRIBUTION_ID:-${DISTRIBUTION_ID:-}}"
 API_BASE="${VITE_API_BASE:-}"
 COGNITO_CLIENT_ID="${VITE_COGNITO_CLIENT_ID:-}"
 COGNITO_REGION="${VITE_COGNITO_REGION:-$REGION}"
@@ -40,8 +41,8 @@ Usage:
 
 Examples:
   scripts/deploy.sh all \
-    --frontend-bucket msbn-dashboard-frontend-357621881714 \
-    --distribution-id EWFC9ZR5VW20B
+    --frontend-bucket <frontend-hosting-bucket> \
+    --distribution-id <cloudfront-distribution-id>
 
   scripts/deploy.sh api --no-tests
 
@@ -52,10 +53,10 @@ Examples:
 Options:
   --frontend                  Deploy frontend after requested backend stacks.
   --frontend-only             Build/upload frontend only.
-  --frontend-bucket NAME      S3 bucket that hosts frontend assets.
-                              Default: msbn-dashboard-frontend-357621881714.
-  --distribution-id ID        CloudFront distribution to invalidate.
-                              Default: EWFC9ZR5VW20B.
+  --frontend-bucket NAME      S3 bucket that hosts frontend assets (required
+                              for frontend deploys; or set FRONTEND_BUCKET).
+  --distribution-id ID        CloudFront distribution to invalidate (or set
+                              CLOUDFRONT_DISTRIBUTION_ID).
   --api-base URL              API Gateway URL for VITE_API_BASE.
   --cognito-client-id ID      Cognito app client ID for VITE_COGNITO_CLIENT_ID.
   --cognito-region REGION     Cognito region; default is AWS region.

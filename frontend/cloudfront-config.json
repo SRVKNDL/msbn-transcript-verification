@@ -8,8 +8,8 @@
       "Items": [
         {
           "Id": "s3-msbn-dashboard-frontend",
-          "DomainName": "msbn-dashboard-frontend-357621881714.s3.us-east-1.amazonaws.com",
-          "OriginAccessControlId": "E11XHVY91JWC6H",
+          "DomainName": "<frontend-hosting-bucket>.s3.us-east-1.amazonaws.com",
+          "OriginAccessControlId": "<origin-access-control-id>",
           "S3OriginConfig": {
             "OriginAccessIdentity": ""
           }

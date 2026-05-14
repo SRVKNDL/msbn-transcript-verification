@@ -245,7 +245,7 @@ def build_extraction_prompt(textract_context: dict | None = None) -> tuple[str, 
 
 
 _TEXTRACT_STRUCTURING_SYSTEM_PROMPT = """\
-You are a transcript data structuring assistant for the Mississippi State Board
+You are a transcript data structuring processor for the Mississippi State Board
 of Nursing (MSBN). Your task is to interpret Amazon Textract output only.
 
 Do NOT use page-image visual reasoning. Do NOT infer values from general

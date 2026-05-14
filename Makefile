@@ -3,7 +3,7 @@
 # Prerequisites:
 #   Python 3.11+, Node 20, AWS CDK CLI (npm install -g aws-cdk)
 #
-# Do NOT run `deploy` without team review. See CLAUDE.md budget constraints.
+# Do NOT run `deploy` without team review.
 
 # Resolve the Python interpreter: prefer python3.11 if available, fall back to python3.
 PYTHON := $(shell command -v python3.11 2>/dev/null || command -v python3)

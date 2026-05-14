@@ -12,7 +12,7 @@ What's mocked / what's real:
 - Step Functions: moto (Intake uses it only for ``start_execution``; we do not
   run the actual state machine).
 - Bedrock: unittest.mock — ``extract_handler._bedrock`` is replaced with a
-  MagicMock returning a canned Claude response so Extract writes a realistic
+  MagicMock returning a canned model response so Extract writes a realistic
   per-page JSON to S3.
 - ``convert_from_path`` is patched to return synthetic images so the test
   does not depend on poppler or any fixture PDF.

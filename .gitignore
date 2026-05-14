@@ -199,6 +199,7 @@ node_modules/
 frontend/dist/
 *.tsbuildinfo
 output/
+tests/fixtures/real_transcripts/
 
 # macOS
 .DS_Store

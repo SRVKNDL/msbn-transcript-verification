@@ -33,21 +33,30 @@
 
 ```mermaid
 flowchart LR
-    A([PDF Upload<br/>to S3])
-    B[Intake]
-    C[Extract<br/><sub>Textract + Nova Pro</sub>]
-    D[Aggregate]
-    E[Rule Engine<br/><sub>PHYS / CONT / PROG</sub>]
-    F[Queue for Review]
-    G([Reviewer Dashboard])
+    S3[("S3<br/><sub>uploads/</sub>")]:::storage
+    I["Intake"]:::svc
+    E["Extract<br/><sub>Textract · Nova Pro</sub>"]:::ai
+    A["Aggregate"]:::svc
+    R["Rule Engine<br/><sub>PHYS · CONT · PROG</sub>"]:::ai
+    Q["Queue for Review"]:::svc
+    UI(["Reviewer<br/>Dashboard"]):::ui
+    DB[("DynamoDB<br/><sub>single-table</sub>")]:::storage
 
-    A --> B --> C --> D --> E --> F --> G
+    S3 ==> I ==> E ==> A ==> R ==> Q ==> UI
+    I -.->|metadata| DB
+    R -.->|flags| DB
+    Q -.->|status| DB
+    UI <-.->|decisions| DB
 
-    classDef ai fill:#fff5e6,stroke:#d9a441,color:#1f1b16;
-    class C,E ai;
+    classDef ai fill:#fff4e0,stroke:#d97706,color:#78350f,stroke-width:2px;
+    classDef storage fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a,stroke-width:2px;
+    classDef svc fill:#f1f5f9,stroke:#475569,color:#0f172a,stroke-width:2px;
+    classDef ui fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px;
+    linkStyle 0,1,2,3,4,5 stroke:#475569,stroke-width:2px;
+    linkStyle 6,7,8,9 stroke:#94a3b8,stroke-width:1.5px,stroke-dasharray:4 3;
 ```
 
-Every step is a Lambda. Orchestration is AWS Step Functions; state lives in a single-table DynamoDB.
+Every step is a Lambda. Orchestration is AWS Step Functions; state lives in a single-table DynamoDB with full audit history. Solid edges trace the pipeline; dashed edges show persistence writes.
 
 ---
 
@@ -69,6 +78,20 @@ Every step is a Lambda. Orchestration is AWS Step Functions; state lives in a si
     </td>
   </tr>
 </table>
+
+---
+
+## Reviewer Dashboard
+
+Every flag, status change, and reviewer action is recorded as an immutable audit
+event. The per-application compliance trail below renders that history as a
+chronological timeline — the same data backs export and reviewer hand-off.
+
+<p align="center">
+  <img src="docs/screenshots/audit-log.png" alt="Audit log timeline for an application, showing intake, processing, raised flags, and pending reviewer decision" width="900" />
+  <br/>
+  <sub><em>SP-9 compliance trail — intake, processing, PHYS / PROG flags, and pending reviewer decision in one view.</em></sub>
+</p>
 
 ---
 
